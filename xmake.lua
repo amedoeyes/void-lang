@@ -1,0 +1,25 @@
+set_project("void_lang")
+set_version("1.0.0")
+set_languages("cxx23")
+set_toolchains("clang")
+set_runtimes("c++_shared")
+
+add_rules("mode.debug", "mode.release", "mode.releasedbg", "mode.check", "mode.profile")
+add_rules("plugin.compile_commands.autoupdate", { lsp = "clangd", outputdir = "build" })
+
+package("lexer", function()
+	add_urls("https://github.com/amedoeyes/lexer.git")
+	add_versions("2.0.0", "2.0.0")
+	on_install(function(package)
+		import("package.tools.xmake").install(package)
+	end)
+end)
+
+add_requires("lexer")
+
+target("voidc", function()
+	set_kind("binary")
+	add_files("src/**.cpp")
+	add_packages("lexer")
+	set_policy("build.c++.modules", true)
+end)

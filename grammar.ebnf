@@ -1,0 +1,52 @@
+top_level = { decl_stmt } ;
+
+
+statement = ( decl_stmt | return_stmt ), ";" ;
+
+decl_stmt =  function_decl_stmt | lambda_decl_stmt | variable_decl_stmt ;
+
+return_stmt = "return", expression ;
+
+lambda_decl_stmt = "let", identifier, ":", type, "=", "(", [ identifier, { ",", identifier } ], ")", "=>", expression ;
+
+function_decl_stmt = "let", identifier, ":", type, "=", "(", [ identifier, { ",", identifier } ], ")", "{", { statement }, "}" ;
+
+variable_decl_stmt = "let", identifier, ":", type, "=", expression ;
+
+
+expression = logical_expr ;
+
+logical_expr = bit_expr, { ( "||" | "&&" ), bit_expr } ;
+
+bit_expr = add_expr, { ( "|" | "&" | "^" ), add_expr } ;
+
+add_expr = mul_expr, { ( "+" | "-" ), mul_expr } ;
+
+mul_expr = primary, { ( "*" | "/" ), primary } ;
+
+function_call_expr = identifier, "(", [ expression , { ",", expression } ], ")" ;
+
+primary_expr = function_call_expr | identifier | float | integer | "(", expression, ")" ;
+
+
+type = builtin_type | identifier | function_type ;
+
+function_type = "(", [ type, { ",", type } ], ")", "->", type
+
+builtin_type = "i8" | "i16" | "i32" | "i64" | "f32" | "f64" | "void" ;
+
+
+identifier = letter, { letter | digit | "_" } ;
+
+letter = lower_letter | upper_letter ;
+
+lower_letter = "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" | "l" | "m" | "n" | "o" | "p" | "q" | "r" | "s" | "t" | "u" | "v" | "w" | "x" | "y" | "z" ;
+
+upper_letter = "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" ;
+
+
+float = integer, '.', integer ;
+
+integer	= digit, { digit } ;
+
+digit = "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" ;

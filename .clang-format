@@ -1,0 +1,155 @@
+BasedOnStyle: LLVM
+Language: Cpp
+Standard: Latest
+
+ColumnLimit: 120
+LineEnding: LF
+UseTab: AlignWithSpaces
+TabWidth: 2
+IndentWidth: 2
+
+# Align
+AlignAfterOpenBracket: Align
+AlignArrayOfStructures: None
+AlignConsecutiveAssignments: None
+AlignConsecutiveBitFields: Consecutive
+AlignConsecutiveDeclarations: None
+AlignConsecutiveMacros: None
+AlignConsecutiveShortCaseStatements:
+  Enabled: false
+  AcrossEmptyLines: false
+  AcrossComments: false
+  AlignCaseColons: false
+AlignEscapedNewlines: Right
+AlignOperands: AlignAfterOperator
+AlignTrailingComments: Leave
+DerivePointerAlignment: false
+PointerAlignment: Left
+QualifierAlignment: Left
+ReferenceAlignment: Left
+
+# Line Break
+AllowAllArgumentsOnNextLine: true
+AllowAllParametersOfDeclarationOnNextLine: true
+AllowBreakBeforeNoexceptSpecifier: Never
+AllowShortBlocksOnASingleLine: Empty
+AllowShortCaseLabelsOnASingleLine: true
+AllowShortCompoundRequirementOnASingleLine: true
+AllowShortEnumsOnASingleLine: true
+AllowShortFunctionsOnASingleLine: Empty
+AllowShortIfStatementsOnASingleLine: AllIfsAndElse
+AllowShortLambdasOnASingleLine: All
+AllowShortLoopsOnASingleLine: true
+AlwaysBreakBeforeMultilineStrings: false
+BinPackArguments: false
+BinPackParameters: false
+BreakAdjacentStringLiterals: false
+BreakAfterAttributes: Always
+BreakAfterReturnType: Automatic
+BreakBeforeBinaryOperators: All
+BreakBeforeBraces: Attach
+BreakBeforeConceptDeclarations: Always
+BreakBeforeInlineASMColon: OnlyMultiline
+BreakBeforeTernaryOperators: true
+BreakConstructorInitializers: BeforeColon
+BreakFunctionDefinitionParameters: false
+BreakInheritanceList: BeforeColon
+BreakStringLiterals: true
+BreakTemplateDeclarations: Yes
+CompactNamespaces: false
+PackConstructorInitializers: CurrentLine
+RequiresClausePosition: OwnLine
+# AllowShortNamespacesOnASingleLine: true
+# BreakBinaryOperations: OnePerLine
+
+# Indentation
+AccessModifierOffset: -2
+BracedInitializerIndentWidth: 2
+ConstructorInitializerIndentWidth: 2
+ContinuationIndentWidth: 2
+PPIndentWidth: 2
+
+IndentAccessModifiers: false
+IndentCaseBlocks: false
+IndentCaseLabels: false
+IndentExternBlock: NoIndent
+IndentGotoLabels: false
+IndentPPDirectives: None
+IndentRequiresClause: true
+IndentWrappedFunctionNames: true
+LambdaBodyIndentation: Signature
+NamespaceIndentation: None
+RequiresExpressionIndentation: Keyword
+# IndentExportBlock: false
+
+# Insert
+FixNamespaceComments: true
+InsertBraces: false
+InsertNewlineAtEOF: true
+InsertTrailingCommas: Wrapped
+IntegerLiteralSeparator:
+  Binary: 0
+  Decimal: 3
+  DecimalMinDigits: 4
+  Hex: 0
+  HexMinDigits: 4
+
+# Remove
+RemoveParentheses: Leave
+RemoveSemicolon: true
+# RemoveEmptyLinesInUnwrappedLines: true
+
+# Spacing
+BitFieldColonSpacing: Both
+Cpp11BracedListStyle: true
+SeparateDefinitionBlocks: Always
+SpaceAfterCStyleCast: false
+SpaceAfterLogicalNot: false
+SpaceAfterTemplateKeyword: false
+SpaceAroundPointerQualifiers: Default
+SpaceBeforeAssignmentOperators: true
+SpaceBeforeCaseColon: false
+SpaceBeforeCpp11BracedList: false
+SpaceBeforeCtorInitializerColon: true
+SpaceBeforeInheritanceColon: true
+SpaceBeforeParens: ControlStatements
+SpaceBeforeRangeBasedForLoopColon: true
+SpaceBeforeSquareBrackets: false
+SpaceInEmptyBlock: false
+SpacesBeforeTrailingComments: 2
+SpacesInAngles: Never
+SpacesInConditionalStatement: false
+SpacesInContainerLiterals: false
+SpacesInLineCommentPrefix:
+  Minimum: 1
+  Maximum: -1
+SpacesInParens: Never
+SpacesInSquareBrackets: false
+
+# Empty Lines
+EmptyLineAfterAccessModifier: Never
+EmptyLineBeforeAccessModifier: Always
+KeepEmptyLines:
+  AtEndOfFile: false
+  AtStartOfBlock: false
+  AtStartOfFile: false
+MaxEmptyLinesToKeep: 1
+# KeepFormFeed: false
+# WrapNamespaceBodyWithEmptyLines: Never
+
+# Include
+IncludeBlocks: Regroup
+MainIncludeChar: Quote
+SortIncludes: CaseInsensitive
+
+# Misc
+ShortNamespaceLines: 0
+SkipMacroDefinitionBody: false
+SortUsingDeclarations: Lexicographic
+# ReflowComments: Never
+
+# Panalties
+PenaltyBreakAssignment: 1000
+PenaltyBreakOpenParenthesis: 1000
+PenaltyReturnTypeOnItsOwnLine: 1000
+# PenaltyBreakBeforeMemberAccess: 1000
