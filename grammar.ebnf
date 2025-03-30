@@ -7,9 +7,9 @@ decl_stmt =  function_decl_stmt | lambda_decl_stmt | variable_decl_stmt ;
 
 return_stmt = "return", expression ;
 
-lambda_decl_stmt = "let", identifier, ":", type, "=", "(", [ identifier, { ",", identifier } ], ")", "=>", expression ;
+lambda_decl_stmt = "let", identifier, ":", function_type, "=", "(", [ identifier, { ",", identifier } ], ")", "=>", expression ;
 
-function_decl_stmt = "let", identifier, ":", type, "=", "(", [ identifier, { ",", identifier } ], ")", "{", { statement }, "}" ;
+function_decl_stmt = "let", identifier, ":", function_type, "=", "(", [ identifier, { ",", identifier } ], ")", "{", { statement }, "}" ;
 
 variable_decl_stmt = "let", identifier, ":", type, "=", expression ;
 
