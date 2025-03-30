@@ -3,13 +3,9 @@ top_level = { decl_stmt } ;
 
 statement = ( decl_stmt | return_stmt ), ";" ;
 
-decl_stmt =  function_decl_stmt | lambda_decl_stmt | variable_decl_stmt ;
+decl_stmt =  variable_decl_stmt ;
 
 return_stmt = "return", expression ;
-
-lambda_decl_stmt = "let", identifier, ":", function_type, "=", "(", [ identifier, { ",", identifier } ], ")", "=>", expression ;
-
-function_decl_stmt = "let", identifier, ":", function_type, "=", "(", [ identifier, { ",", identifier } ], ")", "{", { statement }, "}" ;
 
 variable_decl_stmt = "let", identifier, ":", type, "=", expression ;
 
@@ -22,16 +18,22 @@ bit_expr = add_expr, { ( "|" | "&" | "^" ), add_expr } ;
 
 add_expr = mul_expr, { ( "+" | "-" ), mul_expr } ;
 
-mul_expr = primary, { ( "*" | "/" ), primary } ;
+mul_expr = primary_expr, { ( "*" | "/" ), primary_expr } ;
+
+block_expr = "{", { statement } ,"}" ;
+
+function_expr = ( identifier, { ",", identifier } | "void" ), "->", expression ;
 
 function_call_expr = identifier, "(", [ expression , { ",", expression } ], ")" ;
 
-primary_expr = function_call_expr | identifier | float | integer | "(", expression, ")" ;
+primary_expr = block_expr | function_expr | function_call_expr | identifier | number | "(", expression, ")" ;
 
 
-type = builtin_type | identifier | function_type ;
+type = builtin_type | identifier_type | function_type ;
 
-function_type = "(", [ type, { ",", type } ], ")", "->", type
+identifier_type = identifier ;
+
+function_type = ( type, { ",", type } | "void" ), "->", type ;
 
 builtin_type = "i8" | "i16" | "i32" | "i64" | "f32" | "f64" | "void" ;
 
@@ -44,6 +46,7 @@ lower_letter = "a" | "b" | "c" | "d" | "e" | "f" | "g" | "h" | "i" | "j" | "k" |
 
 upper_letter = "A" | "B" | "C" | "D" | "E" | "F" | "G" | "H" | "I" | "J" | "K" | "L" | "M" | "N" | "O" | "P" | "Q" | "R" | "S" | "T" | "U" | "V" | "W" | "X" | "Y" | "Z" ;
 
+number = integer | float ;
 
 float = integer, '.', integer ;
 
