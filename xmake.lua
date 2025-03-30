@@ -9,7 +9,7 @@ add_rules("plugin.compile_commands.autoupdate", { lsp = "clangd", outputdir = "b
 
 package("lexer", function()
 	add_urls("https://github.com/amedoeyes/lexer.git")
-	add_versions("2.0.0", "2.0.0")
+	add_versions("2.1.0", "2.1.0")
 	on_install(function(package)
 		import("package.tools.xmake").install(package)
 	end)
