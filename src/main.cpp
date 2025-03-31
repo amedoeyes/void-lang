@@ -152,8 +152,13 @@ struct function_expr {
 	recursive_wrapper<struct expression> expression;
 };
 
-struct expression : std::variant<literal, identifier, function_expr> {
-	using std::variant<literal, identifier, function_expr>::variant;
+struct function_call_expr {
+	identifier callee;
+	std::vector<recursive_wrapper<struct expression>> arguments;
+};
+
+struct expression : std::variant<literal, identifier, function_expr, function_call_expr> {
+	using std::variant<literal, identifier, function_expr, function_call_expr>::variant;
 };
 
 struct variable_declaration {
@@ -239,6 +244,13 @@ void print_expression(const expression& expr, std::int32_t indent) {
 								 std::print("Function expression:\n");
 								 for (const auto& param : expr.paramaters) print_identifier(param, indent + 2);
 								 print_expression(expr.expression.get(), indent + 2);
+							 },
+							 [&](const function_call_expr& expr) {
+								 std::print("Function call expression:\n");
+								 print_identifier(expr.callee, indent + 2);
+								 print_indent(indent + 2);
+								 std::print("Arguments:\n");
+								 for (const auto& arg : expr.arguments) print_expression(arg.get(), indent + 4);
 							 },
 						 },
 	           expr);
@@ -548,6 +560,19 @@ private:
 		case token_type::identifier: {
 			const auto id = parse_identifier();
 			if (!id) return std::unexpected{id.error()};
+
+			if (match_and_next(token_type::lparen)) {
+				auto expr = function_call_expr{.callee = *id};
+
+				while (!match_and_next(token_type::rparen) || match(token_type::eof)) {
+					const auto new_expr = parse_expression();
+					if (!new_expr) return std::unexpected{new_expr.error()};
+					expr.arguments.emplace_back(*new_expr);
+				}
+
+				return expr;
+			}
+
 			return *id;
 		}
 
@@ -689,12 +714,21 @@ auto parse(std::span<const lexer::token<token_type>> tokens, std::string_view bu
 auto main() -> int {
 	const auto* buffer = R"(
 // this is a comment
+
 let x: i32 = 1;
 let y: i32 = 2;
+
 // let add: (i32, i32) -> i32 = (a, b) -> a + b;
+
+// let add = (a, b) -> a + b;
+
 let id: (i32) -> i32 = (x) -> x;
+
 let life: () -> i32 = () -> 42;
+
 let nest: () -> i32 = () -> () -> () -> 42;
+
+let test = id(42);
 )";
 
 	const auto tokens = lex(buffer);
