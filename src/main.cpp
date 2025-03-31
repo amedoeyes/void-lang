@@ -77,7 +77,6 @@ enum class token_type : std::uint8_t {
 
 	lit_integer,
 	lit_float,
-	lit_string,
 
 	unknown,
 	eof,
@@ -109,7 +108,6 @@ auto token_name(token_type token) -> std::string {
 
 	case lit_integer: return "lit_integer";
 	case lit_float: return "lit_float";
-	case lit_string: return "lit_string";
 
 	case unknown: return "unknown";
 	case eof: return "eof";
@@ -287,12 +285,14 @@ public:
 		while (!match(token_type::eof)) {
 			switch (token().type) {
 				using enum token_type;
+
 			case kw_let: {
-				auto decl = parse_declaration();
+				const auto decl = parse_variable_decl();
 				if (!decl) return error(decl.error());
 				root.declarations.emplace_back(*decl);
 				break;
 			}
+
 			default: return error("expected declaration");
 			}
 		}
@@ -375,77 +375,131 @@ private:
 		return std::unexpected{std::format("expected {} but got '{}'", expected, token().lexeme)};
 	}
 
-	auto parse_declaration() -> std::expected<declaration, std::string> {
+	auto parse_identifier() -> std::expected<identifier, std::string> {
+		if (!match(token_type::identifier)) return expected_error("identifier");
+		auto id = identifier{std::string{token().lexeme}};
 		next();
-		if (!match(token_type::identifier)) return std::unexpected{"expected identifier after let"};
-		const auto name = std::string{token().lexeme};
+		return id;
+	}
 
-		next();
-		if (!match(token_type::colon)) return std::unexpected{"expected colon after identifier"};
+	auto parse_integer_lit() -> std::expected<integer_literal, std::string> {
+		try {
+			auto int_lit = integer_literal{std::stoll(std::string{token().lexeme})};
+			next();
+			return int_lit;
+		} catch (const std::exception& e) {
+			return std::unexpected{"invalid integer format"};
+		}
+	}
 
-		next();
-		const auto type = parse_type();
-		if (!type) return std::unexpected{type.error()};
+	auto parse_float_lit() -> std::expected<float_literal, std::string> {
+		try {
+			auto float_lit = float_literal{std::stod(std::string{token().lexeme})};
+			next();
+			return float_lit;
+		} catch (const std::exception& e) {
+			return std::unexpected{"invalid float format"};
+		}
+	}
 
-		if (!match(token_type::assignment)) return expected_error("'='");
+	auto parse_literal() -> std::expected<literal, std::string> {
+		switch (token().type) {
+			using enum token_type;
+
+		case lit_integer: {
+			const auto int_lit = parse_integer_lit();
+			if (!int_lit) return std::unexpected{int_lit.error()};
+			return *int_lit;
+		}
+
+		case lit_float: {
+			const auto float_lit = parse_float_lit();
+			if (!float_lit) return std::unexpected{float_lit.error()};
+			return *float_lit;
+		}
+
+		default: return expected_error("literal");
+		}
+	}
+
+	auto parse_variable_decl() -> std::expected<declaration, std::string> {
 		next();
+
+		auto var = variable_declaration{};
+
+		const auto id = parse_identifier();
+		if (!id) return std::unexpected{id.error()};
+		var.name = *id;
+
+		if (match_and_next(token_type::colon)) {
+			const auto type = parse_type();
+			if (!type) return std::unexpected{type.error()};
+			var.type = *type;
+		}
+
+		if (!match_and_next(token_type::assignment)) return expected_error("'='");
 
 		const auto expr = parse_expression();
 		if (!expr) return std::unexpected{expr.error()};
+		var.initializer = *expr;
 
-		if (!match(token_type::semicolon)) return expected_error("';'");
-		next();
+		if (!match_and_next(token_type::semicolon)) return expected_error("';'");
 
-		return variable_declaration{
-			.name{name},
-			.type{*type},
-			.initializer{*expr},
-		};
+		return var;
 	}
 
 	auto parse_type() -> std::expected<type, std::string> {
 		switch (token().type) {
 			using enum token_type;
+
 		case bt_i8: {
 			auto type = builtin_type{builtin_type::kind::i8};
 			next();
 			return type;
 		}
+
 		case bt_i16: {
 			auto type = builtin_type{builtin_type::kind::i16};
 			next();
 			return type;
 		}
+
 		case bt_i32: {
 			auto type = builtin_type{builtin_type::kind::i32};
 			next();
 			return type;
 		}
+
 		case bt_i64: {
 			auto type = builtin_type{builtin_type::kind::i64};
 			next();
 			return type;
 		}
+
 		case bt_f32: {
 			auto type = builtin_type{builtin_type::kind::f32};
 			next();
 			return type;
 		}
+
 		case bt_f64: {
 			auto type = builtin_type{builtin_type::kind::f64};
 			next();
 			return type;
 		}
+
 		case bt_void: {
 			auto type = builtin_type{builtin_type::kind::void_};
 			next();
 			return type;
 		}
+
 		case identifier: {
 			auto type = identifier_type{std::string{token().lexeme}};
 			next();
 			return type;
 		}
+
 		case lparen: {
 			next();
 
@@ -477,27 +531,26 @@ private:
 				return type;
 			}
 		};
+
 		default: return std::unexpected{std::format("expected a type but got '{}'", token().lexeme)};
 		}
 	}
 
 	auto parse_expression() -> std::expected<expression, std::string> {
 		switch (token().type) {
-		case token_type::lit_integer: {
-			auto expr = integer_literal{std::stoll(std::string{token().lexeme})};
-			next();
-			return expr;
-		}
+		case token_type::lit_integer:
 		case token_type::lit_float: {
-			auto expr = float_literal{std::stod(std::string{token().lexeme})};
-			next();
-			return expr;
+			const auto lit = parse_literal();
+			if (!lit) return std::unexpected{lit.error()};
+			return *lit;
 		}
+
 		case token_type::identifier: {
-			auto expr = identifier{std::string{token().lexeme}};
-			next();
-			return expr;
+			const auto id = parse_identifier();
+			if (!id) return std::unexpected{id.error()};
+			return *id;
 		}
+
 		case token_type::lparen: {
 			next();
 
@@ -532,6 +585,7 @@ private:
 				}
 			}
 		}
+
 		default: return std::unexpected{std::format("expected an expression got '{}'", token().lexeme)};
 		}
 	}
