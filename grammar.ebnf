@@ -25,7 +25,7 @@ block_expr = "{", { statement } ,"}" ;
 function_expr = "(", [ paramater_list ], ")", "->", expression ;
 paramater_list = identifier, { ",", identifier } ;
 
-function_call_expr = identifier, "(", [ argument_list ], ")", { "(", [ argument_list ], ")"} ;
+function_call_expr = expression, "(", [ argument_list ], ")", { "(", [ argument_list ], ")"} ;
 argument_list = expression, { ",", expression } ;
 
 primary_expr = block_expr | function_expr | function_call_expr | identifier | number | "(", expression, ")" ;

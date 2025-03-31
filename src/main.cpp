@@ -7,6 +7,8 @@ struct recursive_wrapper {
 
 	explicit recursive_wrapper(const T& value) noexcept : ptr{std::make_unique<T>(value)} {}
 
+	explicit recursive_wrapper(T&& value) noexcept : ptr{std::make_unique<T>(std::move(value))} {}
+
 	recursive_wrapper(const recursive_wrapper& other) noexcept : ptr{std::make_unique<T>(*other.ptr)} {}
 
 	recursive_wrapper(recursive_wrapper&& other) noexcept = default;
@@ -153,7 +155,7 @@ struct function_expr {
 };
 
 struct function_call_expr {
-	identifier callee;
+	recursive_wrapper<struct expression> callee;
 	std::vector<recursive_wrapper<struct expression>> arguments;
 };
 
@@ -257,7 +259,7 @@ void print_expression(const expression& expr, std::int32_t indent) {
 								 print_indent(indent);
 								 std::println("Function call expression:");
 
-								 print_identifier(fun_call.callee, indent + 2);
+								 print_expression(fun_call.callee.get(), indent + 2);
 
 								 if (!fun_call.arguments.empty()) {
 									 print_indent(indent + 2);
@@ -581,19 +583,21 @@ private:
 			const auto id = parse_identifier();
 			if (!id) return std::unexpected{id.error()};
 
-			if (match_and_next(token_type::lparen)) {
-				auto expr = function_call_expr{.callee = *id};
+			auto expr = expression{*id};
 
-				while (!match_and_next(token_type::rparen) || match(token_type::eof)) {
-					const auto new_expr = parse_expression();
-					if (!new_expr) return std::unexpected{new_expr.error()};
-					expr.arguments.emplace_back(*new_expr);
+			while (match_and_next(token_type::lparen)) {
+				function_call_expr fun_call{.callee = recursive_wrapper{std::move(expr)}};
+
+				while (!match_and_next(token_type::rparen) && !match(token_type::eof)) {
+					const auto arg = parse_expression();
+					if (!arg) return std::unexpected{arg.error()};
+					fun_call.arguments.emplace_back(*arg);
 				}
 
-				return expr;
+				expr = std::move(fun_call);
 			}
 
-			return *id;
+			return expr;
 		}
 
 		case token_type::lparen: {
@@ -743,12 +747,15 @@ let y: i32 = 2;
 // let add = (a, b) -> a + b;
 
 let id: (i32) -> i32 = (x) -> x;
+let id = (x) -> x;
 
 let life: () -> i32 = () -> 42;
+let test = id(42);
 
 let nest: () -> i32 = () -> () -> () -> 42;
-
-let test = id(42);
+let test = nest();
+let test = nest()();
+let test = nest()()();
 )";
 
 	const auto tokens = lex(buffer);
