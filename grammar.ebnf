@@ -22,9 +22,11 @@ mul_expr = primary_expr, { ( "*" | "/" ), primary_expr } ;
 
 block_expr = "{", { statement } ,"}" ;
 
-function_expr = "(", [ identifier, { ",", identifier } ], ")", "->", expression ;
+function_expr = "(", [ paramater_list ], ")", "->", expression ;
+paramater_list = identifier, { ",", identifier } ;
 
-function_call_expr = identifier, "(", [ expression , { ",", expression } ], ")" ;
+function_call_expr = identifier, "(", [ argument_list ], ")", { "(", [ argument_list ], ")"} ;
+argument_list = expression, { ",", expression } ;
 
 primary_expr = block_expr | function_expr | function_call_expr | identifier | number | "(", expression, ")" ;
 
@@ -33,7 +35,8 @@ type = builtin_type | identifier_type | function_type ;
 
 identifier_type = identifier ;
 
-function_type = "(", [ type, { ",", type } ], ")", "->", type ;
+function_type = "(", [ paramater_type_list ], ")", "->", type ;
+paramater_type_list = type, { ",", type } ;
 
 builtin_type = "i8" | "i16" | "i32" | "i64" | "f32" | "f64" | "void" ;
 
