@@ -540,11 +540,17 @@ private:
 auto lex(std::string_view buffer) -> std::expected<std::vector<lexer::token<token_type>>, std::string> {
 	auto lexer = lexer::lexer<token_type>{buffer};
 
-	lexer.define(lexer::definitions::skip_whitespace<token_type>);
-	lexer.define([](const auto& ctx) { return ctx.match("//"); },
+	lexer.define([](const auto& ctx) { return ctx.match(std::isspace) || ctx.match("//"); },
 	             [](auto& ctx) -> lexer::token_result<token_type> {
-								 while (!ctx.match('\n') && !ctx.match(lexer::end_of_file)) ctx.next();
-								 ctx.next();
+								 while (true) {
+									 if (ctx.match(std::isspace)) {
+										 while (ctx.match(std::isspace)) ctx.next();
+									 } else if (ctx.match("//")) {
+										 while (!ctx.match('\n') && !ctx.match(lexer::end_of_file)) ctx.next();
+									 } else {
+										 break;
+									 }
+								 }
 								 return std::nullopt;
 							 });
 
