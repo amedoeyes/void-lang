@@ -16,9 +16,9 @@ AlignConsecutiveBitFields: Consecutive
 AlignConsecutiveDeclarations: None
 AlignConsecutiveMacros: None
 AlignConsecutiveShortCaseStatements:
-  Enabled: false
-  AcrossEmptyLines: false
-  AcrossComments: false
+  Enabled: true
+  AcrossEmptyLines: true
+  AcrossComments: true
   AlignCaseColons: false
 AlignEscapedNewlines: Right
 AlignOperands: AlignAfterOperator
@@ -71,7 +71,7 @@ PPIndentWidth: 2
 
 IndentAccessModifiers: false
 IndentCaseBlocks: false
-IndentCaseLabels: false
+IndentCaseLabels: true
 IndentExternBlock: NoIndent
 IndentGotoLabels: false
 IndentPPDirectives: None
