@@ -121,7 +121,7 @@ struct builtin_type {
 };
 
 struct function_type {
-	std::vector<recursive_wrapper<struct type>> params;
+	std::vector<recursive_wrapper<struct type>> parameters;
 	recursive_wrapper<struct type> return_type;
 };
 
@@ -148,7 +148,7 @@ struct identifier {
 };
 
 struct function_expr {
-	std::vector<identifier> paramaters;
+	std::vector<identifier> parameters;
 	recursive_wrapper<struct expression> expression;
 };
 
@@ -163,7 +163,7 @@ struct expression : std::variant<literal, identifier, function_expr, function_ca
 
 struct variable_declaration {
 	identifier name;
-	type type;
+	std::optional<type> type;
 	expression initializer;
 };
 
@@ -182,26 +182,24 @@ void print_indent(std::int32_t indent) {
 	std::print("{}", std::string(indent, ' '));
 }
 
-void print_expression(const expression& expr, std::int32_t indent);
-
 void print_literal(const literal& lit, std::int32_t indent) {
 	print_indent(indent);
 	std::visit(overloads{
-							 [&](const integer_literal& i) { std::print("Integer literal: {}\n", i.value); },
-							 [&](const float_literal& f) { std::print("Float literal: {}\n", f.value); },
+							 [&](const integer_literal& i) { std::println("Integer literal: {}", i.value); },
+							 [&](const float_literal& f) { std::println("Float literal: {}", f.value); },
 						 },
 	           lit);
 }
 
 void print_identifier(const identifier& id, std::int32_t indent) {
 	print_indent(indent);
-	std::print("Identifier: {}\n", id.name);
+	std::println("Identifier: {}", id.name);
 }
 
 void print_type(const type& type, std::int32_t indent) {
-	print_indent(indent);
 	std::visit(overloads{
 							 [&](const builtin_type& bt) {
+								 print_indent(indent);
 								 std::print("Builtin type: ");
 								 switch (bt.kind) {
 									 using enum builtin_type::kind;
@@ -216,40 +214,60 @@ void print_type(const type& type, std::int32_t indent) {
 								 std::println("");
 							 },
 							 [&](const function_type& ft) {
-								 std::print("Function type:\n");
+								 print_indent(indent);
+								 std::println("Function type:");
+
+								 if (!ft.parameters.empty()) {
+									 print_indent(indent + 2);
+									 std::println("Params:");
+									 for (const auto& param : ft.parameters) print_type(param.get(), indent + 4);
+								 }
+
 								 print_indent(indent + 2);
-								 std::print("Params:\n");
-								 for (const auto& p : ft.params) print_type(p.get(), indent + 4);
-								 print_indent(indent + 2);
-								 std::print("Return:\n");
+								 std::println("Return:");
 								 print_type(ft.return_type.get(), indent + 4);
 							 },
-							 [&](const identifier_type& it) { std::print("Identifier type: {}\n", it.name); },
+							 [&](const identifier_type& it) { std::println("Identifier type: {}", it.name); },
 						 },
 	           type);
 }
 
 void print_expression(const expression& expr, std::int32_t indent) {
-	print_indent(indent);
 	std::visit(overloads{
-							 [&](const literal& lit) {
-								 std::print("Literal:\n");
-								 print_literal(lit, indent + 2);
-							 },
-							 [&](const identifier& id) {
-								 std::print("Identifier:\n");
-								 print_identifier(id, indent + 2);
-							 },
-							 [&](const function_expr& expr) {
-								 std::print("Function expression:\n");
-								 for (const auto& param : expr.paramaters) print_identifier(param, indent + 2);
-								 print_expression(expr.expression.get(), indent + 2);
-							 },
-							 [&](const function_call_expr& expr) {
-								 std::print("Function call expression:\n");
-								 print_identifier(expr.callee, indent + 2);
+							 [&](const literal& lit) { print_literal(lit, indent); },
+
+							 [&](const identifier& id) { print_identifier(id, indent); },
+
+							 [&](const function_expr& fun) {
+								 print_indent(indent);
+								 std::println("Function expression:");
+
+								 if (!fun.parameters.empty()) {
+									 print_indent(indent + 2);
+									 std::println("Params:");
+									 for (const auto& param : fun.parameters) print_identifier(param, indent + 4);
+								 }
+
 								 print_indent(indent + 2);
-								 std::print("Arguments:\n");
+								 std::println("Expression:");
+								 print_expression(fun.expression.get(), indent + 4);
+							 },
+
+							 [&](const function_call_expr& fun_call) {
+								 print_indent(indent);
+								 std::println("Function call expression:");
+
+								 print_identifier(fun_call.callee, indent + 2);
+
+								 if (!fun_call.arguments.empty()) {
+									 print_indent(indent + 2);
+									 std::println("Arguments:");
+									 for (const auto& arg : fun_call.arguments) print_expression(arg.get(), indent + 4);
+								 }
+							 },
+
+								 print_indent(indent + 2);
+								 std::println("Arguments:");
 								 for (const auto& arg : expr.arguments) print_expression(arg.get(), indent + 4);
 							 },
 						 },
@@ -258,23 +276,25 @@ void print_expression(const expression& expr, std::int32_t indent) {
 
 void print_variable_declaration(const variable_declaration& var, std::int32_t indent = 0) {
 	print_indent(indent);
-	std::print("Variable declaration:\n");
+	std::println("Variable declaration:");
 
 	print_indent(indent + 2);
-	std::print("Name:\n");
+	std::println("Name:");
 	print_identifier(var.name, indent + 4);
 
-	print_indent(indent + 2);
-	std::print("Type:\n");
-	print_type(var.type, indent + 4);
+	if (var.type) {
+		print_indent(indent + 2);
+		std::println("Type:");
+		print_type(*var.type, indent + 4);
+	}
 
 	print_indent(indent + 2);
-	std::print("Initializer:\n");
+	std::println("Initializer:");
 	print_expression(var.initializer, indent + 4);
 }
 
 void print_top_level(const top_level& root) {
-	std::print("Top level:\n");
+	std::println("Top level:");
 
 	for (const auto& decl : root.declarations) {
 		std::visit(
@@ -530,7 +550,7 @@ private:
 			while (!match(token_type::eof)) {
 				const auto param_type = parse_type();
 				if (!param_type) return std::unexpected{param_type.error()};
-				type.params.emplace_back(*param_type);
+				type.parameters.emplace_back(*param_type);
 
 				if (match_and_next(token_type::comma)) continue;
 				if (!match_and_next(token_type::rparen)) return expected_error("')'");
@@ -595,7 +615,7 @@ private:
 
 				while (!match(token_type::eof)) {
 					if (!match(token_type::identifier)) return expected_error("identifier");
-					expr.paramaters.emplace_back(std::string{token().lexeme});
+					expr.parameters.emplace_back(std::string{token().lexeme});
 					next();
 
 					if (match_and_next(token_type::comma)) continue;
