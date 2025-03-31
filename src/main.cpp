@@ -1,10 +1,67 @@
 import std;
 import lexer;
 
+template<typename T>
+struct recursive_wrapper {
+	recursive_wrapper() noexcept = default;
+
+	explicit recursive_wrapper(const T& value) noexcept : ptr{std::make_unique<T>(value)} {}
+
+	recursive_wrapper(const recursive_wrapper& other) noexcept : ptr{std::make_unique<T>(*other.ptr)} {}
+
+	recursive_wrapper(recursive_wrapper&& other) noexcept = default;
+
+	auto operator=(const recursive_wrapper& other) noexcept -> recursive_wrapper& {
+		if (this != &other) ptr = std::make_unique<T>(*other.ptr);
+		return *this;
+	}
+
+	auto operator=(recursive_wrapper&& other) noexcept -> recursive_wrapper& = default;
+
+	~recursive_wrapper() = default;
+
+	[[nodiscard]]
+	auto get() noexcept -> T& {
+		return *ptr;
+	}
+
+	[[nodiscard]]
+	auto get() const noexcept -> const T& {
+		return *ptr;
+	}
+
+	[[nodiscard]]
+	auto operator->() noexcept -> T* {
+		return ptr.get();
+	}
+
+	[[nodiscard]]
+	auto operator->() const noexcept -> const T* {
+		return ptr.get();
+	}
+
+	[[nodiscard]]
+	explicit operator T&() noexcept {
+		return *ptr;
+	}
+
+	[[nodiscard]]
+	explicit operator const T&() const noexcept {
+		return *ptr;
+	}
+
+private:
+	std::unique_ptr<T> ptr;
+};
+
 enum class token_type : std::uint8_t {
 	assignment,
 	semicolon,
 	colon,
+	lparen,
+	rparen,
+	comma,
+	arrow,
 
 	identifier,
 
@@ -33,6 +90,10 @@ auto token_name(token_type token) -> std::string {
 	case assignment: return "assignment";
 	case semicolon: return "semicolon";
 	case colon: return "colon";
+	case lparen: return "lparen";
+	case rparen: return "rparen";
+	case comma: return "comma";
+	case arrow: return "arrow";
 
 	case identifier: return "identifier";
 
@@ -61,11 +122,18 @@ struct builtin_type {
 	enum class kind : std::int8_t { i8, i16, i32, i64, f32, f64, void_ } kind;
 };
 
+struct function_type {
+	std::vector<recursive_wrapper<struct type>> params;
+	recursive_wrapper<struct type> return_type;
+};
+
 struct identifier_type {
 	std::string name;
 };
 
-using type = std::variant<builtin_type, identifier_type>;
+struct type : std::variant<builtin_type, identifier_type, function_type> {
+	using std::variant<builtin_type, identifier_type, function_type>::variant;
+};
 
 struct integer_literal {
 	std::int64_t value;
@@ -81,7 +149,14 @@ struct identifier {
 	std::string name;
 };
 
-using expression = std::variant<literal, identifier>;
+struct function_expr {
+	std::vector<identifier> paramaters;
+	recursive_wrapper<struct expression> expression;
+};
+
+struct expression : std::variant<literal, identifier, function_expr> {
+	using std::variant<literal, identifier, function_expr>::variant;
+};
 
 struct variable_declaration {
 	identifier name;
@@ -137,6 +212,15 @@ void print_type(const type& type, std::int32_t indent) {
 								 };
 								 std::println("");
 							 },
+							 [&](const function_type& ft) {
+								 std::print("Function type:\n");
+								 print_indent(indent + 2);
+								 std::print("Params:\n");
+								 for (const auto& p : ft.params) print_type(p.get(), indent + 4);
+								 print_indent(indent + 2);
+								 std::print("Return:\n");
+								 print_type(ft.return_type.get(), indent + 4);
+							 },
 							 [&](const identifier_type& it) { std::print("Identifier type: {}\n", it.name); },
 						 },
 	           type);
@@ -152,6 +236,11 @@ void print_expression(const expression& expr, std::int32_t indent) {
 							 [&](const identifier& id) {
 								 std::print("Identifier:\n");
 								 print_identifier(id, indent + 2);
+							 },
+							 [&](const function_expr& expr) {
+								 std::print("Function expression:\n");
+								 for (const auto& param : expr.paramaters) print_identifier(param, indent + 2);
+								 print_expression(expr.expression.get(), indent + 2);
 							 },
 						 },
 	           expr);
@@ -226,6 +315,11 @@ private:
 	}
 
 	[[nodiscard]]
+	auto peek(std::size_t n = 1) const -> lexer::token<token_type> {
+		return curr_ + n < tokens_.size() ? tokens_[curr_ + n] : tokens_[tokens_.size() - 1];
+	}
+
+	[[nodiscard]]
 	auto match(token_type type) const -> bool {
 		return token().type == type;
 	}
@@ -233,6 +327,28 @@ private:
 	[[nodiscard]]
 	auto match(std::string_view sv) const -> bool {
 		return token().lexeme == sv;
+	}
+
+	template<typename... TokenTypes>
+		requires(std::same_as<TokenTypes, token_type> && ...)
+	[[nodiscard]]
+	auto match(TokenTypes... types) const -> bool {
+		auto offset = 0uz;
+		const auto check = [&](token_type type) -> bool {
+			const auto tok = offset == 0 ? token() : peek(offset);
+			++offset;
+			return tok.type == type;
+		};
+		return (check(types) && ...);
+	}
+
+	[[nodiscard]]
+	auto match_and_next(token_type type) -> bool {
+		if (match(type)) {
+			next();
+			return true;
+		}
+		return false;
 	}
 
 	[[nodiscard]]
@@ -254,6 +370,11 @@ private:
 		return std::unexpected{msg};
 	}
 
+	[[nodiscard]]
+	auto expected_error(std::string_view expected) const -> std::unexpected<std::string> {
+		return std::unexpected{std::format("expected {} but got '{}'", expected, token().lexeme)};
+	}
+
 	auto parse_declaration() -> std::expected<declaration, std::string> {
 		next();
 		if (!match(token_type::identifier)) return std::unexpected{"expected identifier after let"};
@@ -266,13 +387,13 @@ private:
 		const auto type = parse_type();
 		if (!type) return std::unexpected{type.error()};
 
-		if (!match(token_type::assignment)) return std::unexpected{std::format("expected '=' got '{}'", token().lexeme)};
+		if (!match(token_type::assignment)) return expected_error("'='");
 		next();
 
 		const auto expr = parse_expression();
 		if (!expr) return std::unexpected{expr.error()};
 
-		if (!match(token_type::semicolon)) return std::unexpected{std::format("expected ';' got '{}'", token().lexeme)};
+		if (!match(token_type::semicolon)) return expected_error("';'");
 		next();
 
 		return variable_declaration{
@@ -283,37 +404,136 @@ private:
 	}
 
 	auto parse_type() -> std::expected<type, std::string> {
-		auto t = type{};
-
 		switch (token().type) {
 			using enum token_type;
-		case bt_i8: t = builtin_type{builtin_type::kind::i8}; break;
-		case bt_i16: t = builtin_type{builtin_type::kind::i16}; break;
-		case bt_i32: t = builtin_type{builtin_type::kind::i32}; break;
-		case bt_i64: t = builtin_type{builtin_type::kind::i64}; break;
-		case bt_f32: t = builtin_type{builtin_type::kind::f32}; break;
-		case bt_f64: t = builtin_type{builtin_type::kind::f64}; break;
-		case bt_void: t = builtin_type{builtin_type::kind::void_}; break;
-		case identifier: t = identifier_type{std::string{token().lexeme}}; break;
-		default: return std::unexpected{std::format("expected a type got '{}'", token().lexeme)};
+		case bt_i8: {
+			auto type = builtin_type{builtin_type::kind::i8};
+			next();
+			return type;
 		}
+		case bt_i16: {
+			auto type = builtin_type{builtin_type::kind::i16};
+			next();
+			return type;
+		}
+		case bt_i32: {
+			auto type = builtin_type{builtin_type::kind::i32};
+			next();
+			return type;
+		}
+		case bt_i64: {
+			auto type = builtin_type{builtin_type::kind::i64};
+			next();
+			return type;
+		}
+		case bt_f32: {
+			auto type = builtin_type{builtin_type::kind::f32};
+			next();
+			return type;
+		}
+		case bt_f64: {
+			auto type = builtin_type{builtin_type::kind::f64};
+			next();
+			return type;
+		}
+		case bt_void: {
+			auto type = builtin_type{builtin_type::kind::void_};
+			next();
+			return type;
+		}
+		case identifier: {
+			auto type = identifier_type{std::string{token().lexeme}};
+			next();
+			return type;
+		}
+		case lparen: {
+			next();
 
-		next();
-		return t;
+			auto type = function_type{};
+
+			if (match_and_next(token_type::rparen)) {
+				if (!match_and_next(token_type::arrow)) return expected_error("'->'");
+
+				const auto return_type = parse_type();
+				if (!return_type) return std::unexpected{return_type.error()};
+
+				type.return_type = recursive_wrapper{*return_type};
+				return type;
+			}
+
+			while (!match(token_type::eof)) {
+				const auto param_type = parse_type();
+				if (!param_type) return std::unexpected{param_type.error()};
+				type.params.emplace_back(*param_type);
+
+				if (match_and_next(token_type::comma)) continue;
+				if (!match_and_next(token_type::rparen)) return expected_error("')'");
+				if (!match_and_next(token_type::arrow)) return expected_error("'->'");
+
+				const auto return_type = parse_type();
+				if (!return_type) return std::unexpected{return_type.error()};
+				type.return_type = recursive_wrapper{*return_type};
+
+				return type;
+			}
+		};
+		default: return std::unexpected{std::format("expected a type but got '{}'", token().lexeme)};
+		}
 	}
 
 	auto parse_expression() -> std::expected<expression, std::string> {
-		auto expr = expression{};
-
 		switch (token().type) {
-		case token_type::lit_integer: expr = integer_literal{std::stoll(std::string{token().lexeme})}; break;
-		case token_type::lit_float: expr = float_literal{std::stod(std::string{token().lexeme})}; break;
-		case token_type::identifier: expr = identifier{std::string{token().lexeme}}; break;
+		case token_type::lit_integer: {
+			auto expr = integer_literal{std::stoll(std::string{token().lexeme})};
+			next();
+			return expr;
+		}
+		case token_type::lit_float: {
+			auto expr = float_literal{std::stod(std::string{token().lexeme})};
+			next();
+			return expr;
+		}
+		case token_type::identifier: {
+			auto expr = identifier{std::string{token().lexeme}};
+			next();
+			return expr;
+		}
+		case token_type::lparen: {
+			next();
+
+			if (match(token_type::rparen) || match(token_type::identifier, token_type::rparen)
+			    || match(token_type::identifier, token_type::comma)) {
+				auto expr = function_expr{};
+
+				if (match_and_next(token_type::rparen)) {
+					if (!match_and_next(token_type::arrow)) return expected_error("'->'");
+
+					const auto new_expr = parse_expression();
+					if (!new_expr) return std::unexpected{new_expr.error()};
+					expr.expression = recursive_wrapper{*new_expr};
+
+					return expr;
+				}
+
+				while (!match(token_type::eof)) {
+					if (!match(token_type::identifier)) return expected_error("identifier");
+					expr.paramaters.emplace_back(std::string{token().lexeme});
+					next();
+
+					if (match_and_next(token_type::comma)) continue;
+					if (!match_and_next(token_type::rparen)) return expected_error("')'");
+					if (!match_and_next(token_type::arrow)) return expected_error("'->'");
+
+					const auto new_expr = parse_expression();
+					if (!new_expr) return std::unexpected{new_expr.error()};
+					expr.expression = recursive_wrapper{*new_expr};
+
+					return expr;
+				}
+			}
+		}
 		default: return std::unexpected{std::format("expected an expression got '{}'", token().lexeme)};
 		}
-
-		next();
-		return expr;
 	}
 };
 
@@ -331,6 +551,10 @@ auto lex(std::string_view buffer) -> std::expected<std::vector<lexer::token<toke
 	lexer.define(lexer::definitions::single_char<token_type::assignment, '='>);
 	lexer.define(lexer::definitions::single_char<token_type::semicolon, ';'>);
 	lexer.define(lexer::definitions::single_char<token_type::colon, ':'>);
+	lexer.define(lexer::definitions::single_char<token_type::lparen, '('>);
+	lexer.define(lexer::definitions::single_char<token_type::rparen, ')'>);
+	lexer.define(lexer::definitions::single_char<token_type::comma, ','>);
+	lexer.define(lexer::definitions::multi_char<token_type::arrow, '-', '>'>);
 
 	lexer.define(lexer::definitions::multi_char<token_type::kw_let, 'l', 'e', 't'>);
 
@@ -389,7 +613,7 @@ auto lex(std::string_view buffer) -> std::expected<std::vector<lexer::token<toke
 
 			return std::unexpected{msg};
 		}
-		// std::println("{}:{}:{}: '{}'", token_name(token->type), token->start_line, token->start_column, token->lexeme);
+		std::println("{}:{}:{}: '{}'", token_name(token->type), token->start_line, token->start_column, token->lexeme);
 		tokens.emplace_back(*token);
 		if (token->type == token_type::eof) break;
 	}
@@ -407,7 +631,10 @@ auto main() -> int {
 // this is a comment
 let x: i32 = 1;
 let y: i32 = 2;
-// let add: (i32, i32) -> i32 = (a, b) => a + b;
+// let add: (i32, i32) -> i32 = (a, b) -> a + b;
+let id: (i32) -> i32 = (x) -> x;
+let life: () -> i32 = () -> 42;
+let nest: () -> i32 = () -> () -> () -> 42;
 )";
 
 	const auto tokens = lex(buffer);
