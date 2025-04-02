@@ -7,6 +7,8 @@ set_runtimes("c++_shared")
 add_rules("mode.debug", "mode.release", "mode.releasedbg", "mode.check", "mode.profile")
 add_rules("plugin.compile_commands.autoupdate", { lsp = "clangd", outputdir = "build" })
 
+set_policy("build.c++.modules", true)
+
 package("lexer", function()
 	add_urls("https://github.com/amedoeyes/lexer.git")
 	add_versions("2.1.0", "2.1.0")
@@ -17,9 +19,8 @@ end)
 
 add_requires("lexer")
 
-target("voidc", function()
+target("void", function()
 	set_kind("binary")
-	add_files("src/**.cpp")
+	add_files("src/**.cpp", "src/**.cppm")
 	add_packages("lexer")
-	set_policy("build.c++.modules", true)
 end)
