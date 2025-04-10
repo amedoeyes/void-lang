@@ -1,40 +1,65 @@
+import cli;
 import std;
 import voidlang;
 
-auto main() -> int {
-	const auto* buffer = R"(
-// this is a comment
+auto main(int argc, char** argv) -> int {
+	auto root_command = cli::command{"void"};
+	root_command.add_option("help", {.description = "display this help and exit", .name = "help", .short_name = 'h'});
+	root_command.set_action([](const cli::command& cmd) -> std::optional<std::int32_t> {
+		if (cmd.got_option("help") || !cmd.got_command()) {
+			cmd.print_help();
+			return 0;
+		}
+		return std::nullopt;
+	});
 
-let x: i32 = 1;
-let y: i32 = 2;
+	auto& ast_command = root_command.add_command("ast");
+	ast_command.set_usage("file");
+	ast_command.set_description("dump AST");
+	ast_command.add_option("help", {.description = "display this help and exit", .name = "help", .short_name = 'h'});
+	ast_command.set_action([](const cli::command& cmd) -> std::optional<std::int32_t> {
+		if (cmd.got_option("help")) {
+			cmd.print_help();
+			return 0;
+		}
+		const auto args = cmd.arguments();
+		if (args.empty()) {
+			std::println("void: ast command expects a file");
+			return 1;
+		}
+		if (args.size() > 1) {
+			std::println(std::cerr, "void: ast command expects only one file");
+			return 1;
+		}
+		const auto arg = args[0];
 
-let add: (i32, i32) -> i32 = (a, b) -> a + b;
-let maff = 1 + 2 * 3 / 4 & 2 | 2 && 7 ^ 4 || 1;
+		auto file = std::ifstream{std::string{arg}};
+		if (!file) {
+			std::println(std::cerr, "void: {}: No such file or directory", arg);
+			return 1;
+		}
+		const auto buffer = (std::stringstream{} << file.rdbuf()).str();
 
-let add = (a, b) -> a + b;
+		const auto tokens = voidlang::lex(buffer);
+		if (!tokens) {
+			std::println(std::cerr, "{}", tokens.error());
+		}
 
-let id: (i32) -> i32 = (x) -> x;
-let id = (x) -> x;
+		const auto ast = voidlang::parse(*tokens, buffer);
+		if (!ast) {
+			std::println(std::cerr, "{}", ast.error());
+			return 1;
+		}
 
-let life: () -> i32 = () -> 42;
-let test = id(42);
+		voidlang::print_ast(*ast);
 
-let nest: () -> i32 = () -> () -> () -> 42;
-let test = nest();
-let test = nest()();
-let test = nest()()();
-)";
+		return 0;
+	});
 
-	const auto tokens = voidlang::lex(buffer);
-	if (!tokens) {
-		std::println(std::cerr, "{}", tokens.error());
-	}
-
-	const auto ast = voidlang::parse(*tokens, buffer);
-	if (!ast) {
-		std::println(std::cerr, "{}", ast.error());
+	const auto result = root_command.execute(argc, argv);
+	if (!result) {
+		std::println(std::cerr, "void: {}", result.error());
 		return 1;
 	}
-
-	voidlang::print_ast(*ast);
+	return *result;
 }
