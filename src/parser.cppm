@@ -16,9 +16,7 @@ public:
 
 		while (!match(token_type::eof)) {
 			switch (curr().type) {
-				using enum token_type;
-
-				case kw_let: {
+				case token_type::kw_let: {
 					const auto decl = parse_variable_decl();
 					if (!decl) return error(decl.error());
 					root.declarations.emplace_back(*decl);
@@ -119,7 +117,7 @@ private:
 			auto int_lit = integer_literal{std::stoll(std::string{curr().lexeme})};
 			next();
 			return int_lit;
-		} catch (const std::exception& e) {
+		} catch (const std::exception&) {
 			return std::unexpected{"invalid integer format"};
 		}
 	}
@@ -129,7 +127,7 @@ private:
 			auto float_lit = float_literal{std::stod(std::string{curr().lexeme})};
 			next();
 			return float_lit;
-		} catch (const std::exception& e) {
+		} catch (const std::exception&) {
 			return std::unexpected{"invalid float format"};
 		}
 	}
@@ -228,7 +226,7 @@ private:
 
 					return type;
 				}
-			};
+			}
 
 			default: return std::unexpected{std::format("expected a type but got '{}'", curr().lexeme)};
 		}
@@ -393,6 +391,10 @@ private:
 						return expr;
 					}
 				}
+
+				const auto expr = parse_expression();
+				if (!match_and_next(token_type::rparen)) return expected_error("')'");
+				return expr;
 			}
 
 			default: return std::unexpected{std::format("expected an expression got '{}'", curr().lexeme)};
