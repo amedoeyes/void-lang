@@ -6,7 +6,7 @@ import voidlang.utility;
 
 export namespace voidlang {
 
-using value = std::variant<std::int64_t, double>;
+using value = std::variant<literal, function_expr>;
 
 class environment {
 public:
@@ -31,106 +31,119 @@ public:
 	std::unordered_map<std::string, value> variables_;
 };
 
-class evaluator {
-public:
+auto eval_expr(const expression& expr, environment& env) -> value;
 
-private:
-};
+template<typename Op>
+auto eval_bin_op(const binary_operation& op, environment& env, Op operation) -> value {
+	return std::visit(visitor{
+						  [operation](const literal& lhs_lit, const literal& rhs_lit) -> value {
+							  return std::visit(visitor{
+													[operation](const integer_literal& lhs,
+		                                                        const integer_literal& rhs) -> value {
+														return integer_literal{operation(lhs.value, rhs.value)};
+													},
+													[operation](const float_literal& lhs,
+		                                                        const float_literal& rhs) -> value {
+														return float_literal{operation(lhs.value, rhs.value)};
+													},
+													[](auto&&, auto&&) -> value { return integer_literal{0}; },
+												},
+		                                        lhs_lit,
+		                                        rhs_lit);
+						  },
+						  [](const auto&, const auto&) -> value { return integer_literal{0}; },
+					  },
+	                  eval_expr(op.lhs.get(), env),
+	                  eval_expr(op.rhs.get(), env));
+}
+
+auto eval_bin_add(const binary_operation& op, environment& env) -> value {
+	return eval_bin_op(op, env, [](auto a, auto b) { return a + b; });
+}
+
+auto eval_bin_sub(const binary_operation& op, environment& env) -> value {
+	return eval_bin_op(op, env, [](auto a, auto b) { return a - b; });
+}
+
+auto eval_bin_mult(const binary_operation& op, environment& env) -> value {
+	return eval_bin_op(op, env, [](auto a, auto b) { return a * b; });
+}
+
+auto eval_bin_div(const binary_operation& op, environment& env) -> value {
+	return eval_bin_op(op, env, [](auto a, auto b) { return a / b; });
+}
 
 auto eval_expr(const expression& expr, environment& env) -> value {
 	return visit(
 		expr,
-		[&](const literal& lit) -> value {
-			return visit(
-				lit,
-				[&](const integer_literal& i) -> value { return i.value; },
-				[&](const float_literal& f) -> value { return f.value; });
-		},
+		[&](const literal& lit) -> value { return lit; },
 
 		[&](const identifier& id) -> value { return *env.lookup(id.name); },
 
-		[&](const function_expr& fun) -> value { return 0; },
+		[&](const function_expr& fun) -> value { return fun; },
 
-		[&](const function_call_expr& fun_call) -> value { return 0; },
+		[&](const function_call_expr& fun_call) -> value {
+			auto var = env.lookup(fun_call.callee.name);
+			if (!var) return integer_literal{0};
+			return std::visit(visitor{
+								  [&](const literal&) -> value { return integer_literal{0}; },
+								  [&](const function_expr& fun) -> value {
+									  auto new_env = environment{env};
+									  for (auto i = 0uz; i < fun_call.arguments.size(); ++i) {
+										  new_env.define(fun.parameters[i].name,
+				                                         eval_expr(fun_call.arguments[i].get(), env));
+									  }
+									  return eval_expr(fun.expression.get(), new_env);
+								  },
+							  },
+		                      *var);
+		},
 
 		[&](const binary_operation& op) -> value {
 			switch (op.kind) {
 				using enum binary_operation::kind;
-				case add:
-					return std::visit(
-						[]<typename T, typename U>(const T& lhs, const U& rhs) -> value {
-							if constexpr (std::is_same_v<T, std::int64_t> && std::is_same_v<U, std::int64_t>) {
-								return lhs + rhs;
-							}
-							if constexpr (std::is_same_v<T, double> && std::is_same_v<U, double>) {
-								return lhs + rhs;
-							}
-							return 0;
-						},
-						eval_expr(op.lhs.get(), env),
-						eval_expr(op.rhs.get(), env));
-
-				case sub:
-					return std::visit(
-						[]<typename T, typename U>(const T& lhs, const U& rhs) -> value {
-							if constexpr (std::is_same_v<T, std::int64_t> && std::is_same_v<U, std::int64_t>) {
-								return lhs - rhs;
-							}
-							if constexpr (std::is_same_v<T, double> && std::is_same_v<U, double>) {
-								return lhs - rhs;
-							}
-							return 0;
-						},
-						eval_expr(op.lhs.get(), env),
-						eval_expr(op.rhs.get(), env));
-
-				case mult:
-					return std::visit(
-						[]<typename T, typename U>(const T& lhs, const U& rhs) -> value {
-							if constexpr (std::is_same_v<T, std::int64_t> && std::is_same_v<U, std::int64_t>) {
-								return lhs * rhs;
-							}
-							if constexpr (std::is_same_v<T, double> && std::is_same_v<U, double>) {
-								return lhs * rhs;
-							}
-							return 0;
-						},
-						eval_expr(op.lhs.get(), env),
-						eval_expr(op.rhs.get(), env));
-
-				case div:
-					return std::visit(
-						[]<typename T, typename U>(const T& lhs, const U& rhs) -> value {
-							if constexpr (std::is_same_v<T, std::int64_t> && std::is_same_v<U, std::int64_t>) {
-								return lhs / rhs;
-							}
-							if constexpr (std::is_same_v<T, double> && std::is_same_v<U, double>) {
-								return lhs / rhs;
-							}
-							return 0;
-						},
-						eval_expr(op.lhs.get(), env),
-						eval_expr(op.rhs.get(), env));
-
-				case logical_and: return 0;
-				case logical_or:  return 0;
-				case bitwise_and: return 0;
-				case bitwise_or:  return 0;
-				case bitwise_xor: return 0;
+				case add:         return eval_bin_add(op, env);
+				case sub:         return eval_bin_sub(op, env);
+				case mult:        return eval_bin_mult(op, env);
+				case div:         return eval_bin_div(op, env);
+				case logical_and: return integer_literal{0};
+				case logical_or:  return integer_literal{0};
+				case bitwise_and: return integer_literal{0};
+				case bitwise_or:  return integer_literal{0};
+				case bitwise_xor: return integer_literal{0};
 			}
 		});
+}
+
+auto print(const value& value) -> void {
+	std::visit(visitor{
+				   [&](const literal& lit) { std::visit([](auto&& v) { std::println("{}", v.value); }, lit); },
+				   [&](const function_expr& fun) {
+					   auto out = std::string{"("};
+					   for (auto i = 0uz; i < fun.parameters.size(); ++i) {
+						   out += fun.parameters[i].name;
+						   if (i != fun.parameters.size() - 1) {
+							   out += ", ";
+						   }
+					   }
+					   out += ") -> idk";
+					   std::println("{}", out);
+				   },
+			   },
+	           value);
 }
 
 auto eval(const top_level& root) -> void {
 	auto env = environment{};
 
 	for (const auto& decl : root.declarations) {
-		visit(decl, [&](const variable_declaration& var) { env.define(var.name.name, eval_expr(var.initializer, env)); });
+		visit(decl,
+		      [&](const variable_declaration& var) { env.define(var.name.name, eval_expr(var.initializer, env)); });
 	}
 
-	for (const auto& [k, v] : env.variables_) {
-		std::print("{}: ", k);
-		visit(v, [&](auto&& v) { std::println("{}", v); });
+	for (const auto& [name, value] : env.variables_) {
+		std::print("{}: ", name);
+		print(value);
 	}
 }
 

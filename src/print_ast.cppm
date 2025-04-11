@@ -7,7 +7,7 @@ import voidlang.utility;
 namespace voidlang {
 
 void print_indent(std::int32_t indent) {
-	std::print("{}", std::string(indent, ' '));
+	std::print("{}", std::string(static_cast<std::size_t>(indent), ' '));
 }
 
 void print_literal(const literal& lit, std::int32_t indent) {
@@ -38,7 +38,7 @@ void print_type(const type& type, std::int32_t indent) {
 				case f32:   std::print("f32"); break;
 				case f64:   std::print("f64"); break;
 				case void_: std::print("void"); break;
-			};
+			}
 			std::println("");
 		},
 		[&](const function_type& ft) {
@@ -84,7 +84,7 @@ void print_expression(const expression& expr, std::int32_t indent) {
 			print_indent(indent);
 			std::println("Function call expression:");
 
-			print_expression(fun_call.callee.get(), indent + 2);
+			print_expression(fun_call.callee, indent + 2);
 
 			if (!fun_call.arguments.empty()) {
 				print_indent(indent + 2);
@@ -110,7 +110,7 @@ void print_expression(const expression& expr, std::int32_t indent) {
 				case bitwise_and: std::print("bitwise_and"); break;
 				case bitwise_or:  std::print("bitwise_or"); break;
 				case bitwise_xor: std::print("bitwise_xor"); break;
-			};
+			}
 			std::println("");
 
 			print_indent(indent + 2);

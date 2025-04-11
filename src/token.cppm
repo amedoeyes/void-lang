@@ -82,8 +82,6 @@ auto token_name(token_type token) -> std::string {
 
 		case unknown:     return "unknown";
 		case eof:         return "eof";
-
-		default:          std::unreachable();
 	}
 }
 

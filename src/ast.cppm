@@ -30,7 +30,9 @@ struct float_literal {
 	double value;
 };
 
-using literal = std::variant<integer_literal, float_literal>;
+struct literal : std::variant<integer_literal, float_literal> {
+	using std::variant<integer_literal, float_literal>::variant;
+};
 
 struct identifier {
 	std::string name;
@@ -42,7 +44,7 @@ struct function_expr {
 };
 
 struct function_call_expr {
-	recursive_wrapper<struct expression> callee;
+	identifier callee;
 	std::vector<recursive_wrapper<struct expression>> arguments;
 };
 

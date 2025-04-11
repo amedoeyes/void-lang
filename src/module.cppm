@@ -1,5 +1,6 @@
 export module voidlang;
 
+export import voidlang.eval;
 export import voidlang.lexer;
 export import voidlang.parser;
 export import voidlang.print_ast;
