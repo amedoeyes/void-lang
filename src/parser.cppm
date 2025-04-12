@@ -396,8 +396,25 @@ private:
 					}
 				}
 
-				const auto expr = parse_expression();
+				auto expr = parse_expression();
 				if (!match_and_next(token_type::rparen)) return expected_error("')'");
+
+				while (match_and_next(token_type::lparen)) {
+					auto fun_call = function_call_expr{.callee = recursive_wrapper{std::move(*expr)}};
+
+					while (!match_and_next(token_type::rparen) && !match(token_type::eof)) {
+						const auto arg = parse_expression();
+						if (!arg) return std::unexpected{arg.error()};
+						fun_call.arguments.emplace_back(*arg);
+
+						if (!match(token_type::rparen) && !match_and_next(token_type::comma)) {
+							return expected_error("','");
+						}
+					}
+
+					expr = std::move(fun_call);
+				}
+
 				return expr;
 			}
 

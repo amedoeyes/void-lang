@@ -76,11 +76,9 @@ auto eval_bin_div(const binary_operation& op, environment& env) -> value {
 auto eval_fun_call(const function_call_expr& fun_call, environment& env) -> value {
 	return std::visit(visitor{
 						  [&](const identifier& id) -> value {
-							  std::println("id");
 							  auto var = env.lookup(id.name);
 							  if (!var) return integer_literal{0};
 							  return std::visit(visitor{
-													[&](const literal&) -> value { return integer_literal{0}; },
 													[&](const function_expr& fun) -> value {
 														auto new_env = environment{env};
 														for (auto i = 0uz; i < fun_call.arguments.size(); ++i) {
@@ -89,20 +87,33 @@ auto eval_fun_call(const function_call_expr& fun_call, environment& env) -> valu
 														}
 														return eval_expr(fun.expression.get(), new_env);
 													},
+													[](const auto&) -> value { return integer_literal{0}; },
 												},
 		                                        *var);
 						  },
-						  [&](const function_call_expr& nest_call) -> value {
-							  std::println("call");
-							  auto fun = std::get<function_expr>(eval_fun_call(nest_call, env));
-
+						  [&](const function_expr& fun) -> value {
 							  auto new_env = environment{env};
 							  for (auto i = 0uz; i < fun_call.arguments.size(); ++i) {
 								  new_env.define(fun.parameters[i].name, eval_expr(fun_call.arguments[i].get(), env));
 							  }
 							  return eval_expr(fun.expression.get(), new_env);
 						  },
-						  [&](auto&&) -> value { return integer_literal{0}; },
+						  [&](const function_call_expr& nest_call) -> value {
+							  const auto val = eval_fun_call(nest_call, env);
+							  return std::visit(visitor{
+													[&](const function_expr& fun) -> value {
+														auto new_env = environment{env};
+														for (auto i = 0uz; i < fun_call.arguments.size(); ++i) {
+															new_env.define(fun.parameters[i].name,
+				                                                           eval_expr(fun_call.arguments[i].get(), env));
+														}
+														return eval_expr(fun.expression.get(), new_env);
+													},
+													[](const auto&) -> value { return integer_literal{0}; },
+												},
+		                                        val);
+						  },
+						  [&](const auto&) -> value { return integer_literal{0}; },
 					  },
 	                  fun_call.callee.get());
 }
