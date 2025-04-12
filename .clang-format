@@ -5,8 +5,8 @@ Standard: Latest
 ColumnLimit: 120
 LineEnding: LF
 UseTab: AlignWithSpaces
-TabWidth: 2
-IndentWidth: 2
+TabWidth: 4
+IndentWidth: 4
 
 # Align
 AlignAfterOpenBracket: Align
@@ -63,11 +63,11 @@ RequiresClausePosition: OwnLine
 # BreakBinaryOperations: OnePerLine
 
 # Indentation
-AccessModifierOffset: -2
-BracedInitializerIndentWidth: 2
-ConstructorInitializerIndentWidth: 2
-ContinuationIndentWidth: 2
-PPIndentWidth: 2
+AccessModifierOffset: -4
+BracedInitializerIndentWidth: 4
+ConstructorInitializerIndentWidth: 4
+ContinuationIndentWidth: 4
+PPIndentWidth: 4
 
 IndentAccessModifiers: false
 IndentCaseBlocks: false
