@@ -6,7 +6,15 @@ import voidlang.utility;
 
 export namespace voidlang {
 
-using value = std::variant<literal, function_expr>;
+struct function;
+
+struct function {
+	std::vector<identifier> parameters;
+	expression expression;
+	std::shared_ptr<class environment> environment;
+};
+
+using value = std::variant<literal, function>;
 
 class environment {
 public:
@@ -19,7 +27,7 @@ public:
 	}
 
 	[[nodiscard]]
-	auto lookup(std::string_view name) const noexcept -> std::optional<value> {
+	auto lookup(std::string_view name) const noexcept -> std::optional<std::reference_wrapper<const value>> {
 		auto it = variables_.find(std::string{name});
 		if (it != variables_.end()) return it->second;
 		if (parent_) return (*parent_)->lookup(name);
@@ -73,18 +81,27 @@ auto eval_bin_div(const binary_operation& op, environment& env) -> value {
 	return eval_bin_op(op, env, [](auto a, auto b) { return a / b; });
 }
 
-auto eval_fun_call(const function_call_expr& fun_call, const function_expr& fun, environment& env) -> value {
-	if (fun_call.arguments.size() != fun.parameters.size()) return integer_literal{0};
+auto eval_fun_call(const function_call_expr& call, const function_expr& fun, environment& env) -> value {
+	if (call.arguments.size() != fun.parameters.size()) return integer_literal{0};
 	auto new_env = environment{env};
-	for (auto i = 0uz; i < fun_call.arguments.size(); ++i) {
-		new_env.define(fun.parameters[i].name, eval_expr(fun_call.arguments[i].get(), env));
+	for (auto i = 0uz; i < call.arguments.size(); ++i) {
+		new_env.define(fun.parameters[i].name, eval_expr(call.arguments[i].get(), env));
 	}
 	return eval_expr(fun.expression.get(), new_env);
 }
 
+auto eval_fun_call(const function_call_expr& call, const function& fun, environment& env) -> value {
+	if (call.arguments.size() != fun.parameters.size()) return integer_literal{0};
+	auto new_env = environment{*fun.environment};
+	for (auto i = 0uz; i < call.arguments.size(); ++i) {
+		new_env.define(fun.parameters[i].name, eval_expr(call.arguments[i].get(), env));
+	}
+	return eval_expr(fun.expression, new_env);
+}
+
 auto eval_fun_call(const value& callee, const function_call_expr& call, environment& env) -> value {
 	return std::visit(visitor{
-						  [&](const function_expr& fun) -> value { return eval_fun_call(call, fun, env); },
+						  [&](const function& fun) -> value { return eval_fun_call(call, fun, env); },
 						  [](const auto&) -> value { return integer_literal{0}; },
 					  },
 	                  callee);
@@ -114,7 +131,13 @@ auto eval_expr(const expression& expr, environment& env) -> value {
 
 		[&](const identifier& id) -> value { return *env.lookup(id.name); },
 
-		[&](const function_expr& fun) -> value { return fun; },
+		[&](const function_expr& fun) -> value {
+			return function{
+				.parameters = fun.parameters,
+				.expression = fun.expression.get(),
+				.environment = std::make_shared<environment>(env),
+			};
+		},
 
 		[&](const function_call_expr& fun_call) -> value { return eval_fun_call(fun_call, env); },
 
@@ -137,7 +160,7 @@ auto eval_expr(const expression& expr, environment& env) -> value {
 auto print(const value& value) -> void {
 	std::visit(visitor{
 				   [&](const literal& lit) { std::visit([](auto&& v) { std::println("{}", v.value); }, lit); },
-				   [&](const function_expr& fun) {
+				   [&](const function& fun) {
 					   auto out = std::string{"("};
 					   for (auto i = 0uz; i < fun.parameters.size(); ++i) {
 						   out += fun.parameters[i].name;
