@@ -20,22 +20,56 @@ class environment {
 public:
 	environment() = default;
 
-	explicit environment(recursive_wrapper<environment> parent) : parent_{parent} {}
+	explicit environment(std::reference_wrapper<environment> parent) : parent_{parent} {}
 
 	auto define(const std::string& name, const value& value) noexcept -> void {
 		variables_[name] = value;
+	}
+
+	auto assign(const std::string& name, const value& val) -> bool {
+		auto it = variables_.find(name);
+		if (it != variables_.end()) {
+			it->second = val;
+			return true;
+		}
+		if (parent_) return (*parent_).get().assign(name, val);
+		return false;
 	}
 
 	[[nodiscard]]
 	auto lookup(std::string_view name) const noexcept -> std::optional<std::reference_wrapper<const value>> {
 		auto it = variables_.find(std::string{name});
 		if (it != variables_.end()) return it->second;
-		if (parent_) return (*parent_)->lookup(name);
+		if (parent_) return (*parent_).get().lookup(name);
 		return std::nullopt;
 	}
 
-public:
-	std::optional<recursive_wrapper<environment>> parent_;
+	void print_chain(int depth = 0) const {
+		std::string indent(depth * 2, ' ');
+		std::println("{}Scope {}:", indent, depth);
+		for (const auto& [name, value] : variables_) {
+			std::print("  {}{}: ", indent, name);
+			std::visit(visitor{
+						   [&](const literal& lit) { std::visit([](auto&& v) { std::println("{}", v.value); }, lit); },
+						   [&](const function& fun) {
+							   auto out = std::string{"("};
+							   for (auto i = 0uz; i < fun.parameters.size(); ++i) {
+								   out += fun.parameters[i].name;
+								   if (i != fun.parameters.size() - 1) {
+									   out += ", ";
+								   }
+							   }
+							   out += ") -> idk";
+							   std::println("{}", out);
+						   },
+					   },
+			           value);
+		}
+		if (parent_) (*parent_).get().print_chain(depth + 1);
+	}
+
+private:
+	std::optional<std::reference_wrapper<environment>> parent_;
 	std::unordered_map<std::string, value> variables_;
 };
 
@@ -92,7 +126,7 @@ auto eval_fun_call(const function_call_expr& call, const function_expr& fun, env
 
 auto eval_fun_call(const function_call_expr& call, const function& fun, environment& env) -> value {
 	if (call.arguments.size() != fun.parameters.size()) return integer_literal{0};
-	auto new_env = environment{*fun.environment};
+	auto new_env = environment{std::reference_wrapper{*fun.environment}};
 	for (auto i = 0uz; i < call.arguments.size(); ++i) {
 		new_env.define(fun.parameters[i].name, eval_expr(call.arguments[i].get(), env));
 	}
@@ -135,7 +169,7 @@ auto eval_expr(const expression& expr, environment& env) -> value {
 			return function{
 				.parameters = fun.parameters,
 				.expression = fun.expression.get(),
-				.environment = std::make_shared<environment>(env),
+				.environment = std::make_shared<environment>(environment{std::reference_wrapper{env}}),
 			};
 		},
 
@@ -157,36 +191,19 @@ auto eval_expr(const expression& expr, environment& env) -> value {
 		});
 }
 
-auto print(const value& value) -> void {
-	std::visit(visitor{
-				   [&](const literal& lit) { std::visit([](auto&& v) { std::println("{}", v.value); }, lit); },
-				   [&](const function& fun) {
-					   auto out = std::string{"("};
-					   for (auto i = 0uz; i < fun.parameters.size(); ++i) {
-						   out += fun.parameters[i].name;
-						   if (i != fun.parameters.size() - 1) {
-							   out += ", ";
-						   }
-					   }
-					   out += ") -> idk";
-					   std::println("{}", out);
-				   },
-			   },
-	           value);
-}
-
 auto eval(const top_level& root) -> void {
 	auto env = environment{};
 
 	for (const auto& decl : root.declarations) {
-		visit(decl,
-		      [&](const variable_declaration& var) { env.define(var.name.name, eval_expr(var.initializer, env)); });
+		visit(decl, [&](const variable_declaration& var) { env.define(var.name.name, integer_literal{-1}); });
 	}
 
-	for (const auto& [name, value] : env.variables_) {
-		std::print("{}: ", name);
-		print(value);
+	for (const auto& decl : root.declarations) {
+		visit(decl,
+		      [&](const variable_declaration& var) { env.assign(var.name.name, eval_expr(var.initializer, env)); });
 	}
+
+	env.print_chain();
 }
 
 }  // namespace voidlang
