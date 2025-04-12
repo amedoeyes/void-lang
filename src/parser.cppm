@@ -331,29 +331,35 @@ private:
 	auto parse_primary_expr() -> std::expected<expression, std::string> {
 		switch (curr().type) {
 			case token_type::lit_integer:
-			case token_type::lit_float:   return parse_literal();
+			case token_type::lit_float:   {
+				const auto lit = parse_literal();
+				if (!lit) return std::unexpected{lit.error()};
+				return *lit;
+			}
 
-			case token_type::identifier:  {
-				auto id = parse_identifier();
+			case token_type::identifier: {
+				const auto id = parse_identifier();
+				if (!id) return std::unexpected{id.error()};
 
-				if (match_and_next(token_type::lparen)) {
-					if (!id) return std::unexpected{id.error()};
-					auto fun_call = function_call_expr{.callee = std::move(*id)};
+				auto expr = expression{*id};
 
-					while (!match(token_type::eof)) {
+				while (match_and_next(token_type::lparen)) {
+					auto fun_call = function_call_expr{.callee = recursive_wrapper{std::move(expr)}};
+
+					while (!match_and_next(token_type::rparen) && !match(token_type::eof)) {
 						const auto arg = parse_expression();
 						if (!arg) return std::unexpected{arg.error()};
 						fun_call.arguments.emplace_back(*arg);
 
-						if (match_and_next(token_type::rparen)) break;
-
-						if (!match_and_next(token_type::comma)) return expected_error("comma");
+						if (!match(token_type::rparen) && !match_and_next(token_type::comma)) {
+							return expected_error("','");
+						}
 					}
 
-					return fun_call;
+					expr = std::move(fun_call);
 				}
 
-				return id;
+				return expr;
 			}
 
 			case token_type::lparen: {

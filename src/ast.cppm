@@ -44,7 +44,7 @@ struct function_expr {
 };
 
 struct function_call_expr {
-	identifier callee;
+	recursive_wrapper<struct expression> callee;
 	std::vector<recursive_wrapper<struct expression>> arguments;
 };
 

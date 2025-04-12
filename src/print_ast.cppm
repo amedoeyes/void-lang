@@ -84,7 +84,7 @@ void print_expression(const expression& expr, std::int32_t indent) {
 			print_indent(indent);
 			std::println("Function call expression:");
 
-			print_expression(fun_call.callee, indent + 2);
+			print_expression(fun_call.callee.get(), indent + 2);
 
 			if (!fun_call.arguments.empty()) {
 				print_indent(indent + 2);
