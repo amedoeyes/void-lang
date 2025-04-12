@@ -73,47 +73,36 @@ auto eval_bin_div(const binary_operation& op, environment& env) -> value {
 	return eval_bin_op(op, env, [](auto a, auto b) { return a / b; });
 }
 
+auto eval_fun_call(const function_call_expr& fun_call, const function_expr& fun, environment& env) -> value {
+	if (fun_call.arguments.size() != fun.parameters.size()) return integer_literal{0};
+	auto new_env = environment{env};
+	for (auto i = 0uz; i < fun_call.arguments.size(); ++i) {
+		new_env.define(fun.parameters[i].name, eval_expr(fun_call.arguments[i].get(), env));
+	}
+	return eval_expr(fun.expression.get(), new_env);
+}
+
+auto eval_fun_call(const value& callee, const function_call_expr& call, environment& env) -> value {
+	return std::visit(visitor{
+						  [&](const function_expr& fun) -> value { return eval_fun_call(call, fun, env); },
+						  [](const auto&) -> value { return integer_literal{0}; },
+					  },
+	                  callee);
+}
+
 auto eval_fun_call(const function_call_expr& fun_call, environment& env) -> value {
 	return std::visit(visitor{
+						  [&](const function_expr& fun) -> value { return eval_fun_call(fun_call, fun, env); },
 						  [&](const identifier& id) -> value {
-							  auto var = env.lookup(id.name);
-							  if (!var) return integer_literal{0};
-							  return std::visit(visitor{
-													[&](const function_expr& fun) -> value {
-														auto new_env = environment{env};
-														for (auto i = 0uz; i < fun_call.arguments.size(); ++i) {
-															new_env.define(fun.parameters[i].name,
-				                                                           eval_expr(fun_call.arguments[i].get(), env));
-														}
-														return eval_expr(fun.expression.get(), new_env);
-													},
-													[](const auto&) -> value { return integer_literal{0}; },
-												},
-		                                        *var);
-						  },
-						  [&](const function_expr& fun) -> value {
-							  auto new_env = environment{env};
-							  for (auto i = 0uz; i < fun_call.arguments.size(); ++i) {
-								  new_env.define(fun.parameters[i].name, eval_expr(fun_call.arguments[i].get(), env));
-							  }
-							  return eval_expr(fun.expression.get(), new_env);
+							  auto val = env.lookup(id.name);
+							  if (!val) return integer_literal{0};
+							  return eval_fun_call(*val, fun_call, env);
 						  },
 						  [&](const function_call_expr& nest_call) -> value {
 							  const auto val = eval_fun_call(nest_call, env);
-							  return std::visit(visitor{
-													[&](const function_expr& fun) -> value {
-														auto new_env = environment{env};
-														for (auto i = 0uz; i < fun_call.arguments.size(); ++i) {
-															new_env.define(fun.parameters[i].name,
-				                                                           eval_expr(fun_call.arguments[i].get(), env));
-														}
-														return eval_expr(fun.expression.get(), new_env);
-													},
-													[](const auto&) -> value { return integer_literal{0}; },
-												},
-		                                        val);
+							  return eval_fun_call(val, fun_call, env);
 						  },
-						  [&](const auto&) -> value { return integer_literal{0}; },
+						  [](const auto&) -> value { return integer_literal{0}; },
 					  },
 	                  fun_call.callee.get());
 }
