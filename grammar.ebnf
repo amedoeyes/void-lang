@@ -10,15 +10,33 @@ return_stmt = "return", expression ;
 variable_decl_stmt = "let", identifier, ":", type, "=", expression ;
 
 
-expression = logical_expr ;
+expression = ternary_expr ;
 
-logical_expr = bit_expr, { ( "||" | "&&" ), bit_expr } ;
+ternary_expr = logical_or_expr, [ "?", expression, ":", ternary_expr ] ;
 
-bit_expr = add_expr, { ( "|" | "&" | "^" ), add_expr } ;
+logical_or_expr = logical_and_expr, { "||", logical_and_expr } ;
+
+logical_and_expr = equality_expr, { "&&", equality_expr } ;
+
+equality_expr = relational_expr, { ("==" | "!="), relational_expr } ;
+
+relational_expr = bitwise_or_expr, { ("<" | ">" | "<=" | ">="), bitwise_or_expr } ;
+
+bitwise_or_expr = bitwise_xor_expr, { "|", bitwise_xor_expr } ;
+
+bitwise_xor_expr = bitwise_and_expr, { "^", bitwise_and_expr } ;
+
+bitwise_and_expr = shift_expr, { "&", shift_expr } ;
+
+shift_expr = add_expr, { ("<<" | ">>"), add_expr } ;
 
 add_expr = mul_expr, { ( "+" | "-" ), mul_expr } ;
 
 mul_expr = primary_expr, { ( "*" | "/" ), primary_expr } ;
+
+unary_expr = ( "!" | "-" | "~" ) unary_expr | primary_expr ;
+
+primary_expr = block_expr | function_expr | function_call_expr | identifier | number | "(", expression, ")" ;
 
 block_expr = "{", { statement } ,"}" ;
 
@@ -28,8 +46,6 @@ paramater_list = identifier, { ",", identifier } ;
 function_call_expr = expression, "(", [ argument_list ], ")", { "(", [ argument_list ], ")"} ;
 argument_list = expression, { ",", expression } ;
 
-primary_expr = block_expr | function_expr | function_call_expr | identifier | number | "(", expression, ")" ;
-
 
 type = builtin_type | identifier_type | function_type ;
 
@@ -38,7 +54,7 @@ identifier_type = identifier ;
 function_type = "(", [ paramater_type_list ], ")", "->", type ;
 paramater_type_list = type, { ",", type } ;
 
-builtin_type = "i8" | "i16" | "i32" | "i64" | "f32" | "f64" | "void" ;
+builtin_type = "bool" | "i8" | "i16" | "i32" | "i64" | "f32" | "f64" | "void" ;
 
 
 identifier = letter, { letter | digit | "_" } ;
