@@ -1,0 +1,29 @@
+// let x = 1;
+// let y = 2;
+// let z = x + y;
+// let maff = (((z * y) / 2) - 5 + 10) * y;
+
+// let two_pass = add(31, 11);
+
+// let add = (a, b) -> a + b;
+// let sub = (a, b) -> a - b;
+// let mult = (a, b) -> a * b;
+// let div = (a, b) -> a / b;
+// let added = add(31, 11);
+// let maff = add(sub(4, 2), div(10, 2));
+
+// let f = () -> (a, b) -> a + b;
+// let fun = f()(31, 11);
+// let funny = ((x) -> x)(42);
+// let funnier = (() -> (a, b) -> a + b)()(31, 11);
+
+// let g = (a, b) -> () -> a + b;
+// let gun = g(31, 11);
+// let gunny = gun();
+// let gunnier = ((a, b) -> () -> a + b)(31, 11)();
+
+// let fact = (n) -> n == 0 ? 1 : n * fact(n - 1);
+// let fact_res = fact(10);
+
+// let fib = (n, a, b) -> n == 0 ? a : fib(n - 1, b, a + b);
+// let fib_res = fib(10, 0, 1);
