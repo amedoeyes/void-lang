@@ -188,6 +188,19 @@ auto eval_expr(const expression& expr, environment& env) -> value {
 				case bitwise_or:  return integer_literal{0};
 				case bitwise_xor: return integer_literal{0};
 			}
+		},
+		[&](const ternary_operation& op) -> value {
+			auto cond = std::visit(visitor{
+									   [&](const literal& lit) -> bool {
+										   return std::visit([](auto&& v) { return static_cast<int>(v.value) == 1; },
+			                                                 lit);
+									   },
+									   [&](const function&) -> bool { return false; },
+								   },
+		                           eval_expr(op.condition.get(), env));
+
+			if (cond) return eval_expr(op.true_branch.get(), env);
+			return eval_expr(op.false_branch.get(), env);
 		});
 }
 
@@ -195,12 +208,21 @@ auto eval(const top_level& root) -> void {
 	auto env = environment{};
 
 	for (const auto& decl : root.declarations) {
-		visit(decl, [&](const variable_declaration& var) { env.define(var.name.name, integer_literal{-1}); });
+		visit(decl, [&](const variable_declaration& var) {
+			visit(
+				var.initializer,
+				[&](const function_expr&) { env.define(var.name.name, eval_expr(var.initializer, env)); },
+				[&](const auto&) {});
+		});
 	}
 
 	for (const auto& decl : root.declarations) {
-		visit(decl,
-		      [&](const variable_declaration& var) { env.assign(var.name.name, eval_expr(var.initializer, env)); });
+		visit(decl, [&](const variable_declaration& var) {
+			visit(
+				var.initializer,
+				[&](const function_expr&) {},
+				[&](const auto&) { env.define(var.name.name, eval_expr(var.initializer, env)); });
+		});
 	}
 
 	env.print_chain();

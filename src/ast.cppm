@@ -48,6 +48,12 @@ struct function_call_expr {
 	std::vector<recursive_wrapper<struct expression>> arguments;
 };
 
+struct ternary_operation {
+	recursive_wrapper<struct expression> condition;
+	recursive_wrapper<struct expression> true_branch;
+	recursive_wrapper<struct expression> false_branch;
+};
+
 struct binary_operation {
 	enum class kind : std::int8_t {
 		add,
@@ -66,8 +72,10 @@ struct binary_operation {
 	recursive_wrapper<struct expression> rhs;
 };
 
-struct expression : std::variant<literal, identifier, function_expr, function_call_expr, binary_operation> {
-	using std::variant<literal, identifier, function_expr, function_call_expr, binary_operation>::variant;
+struct expression
+	: std::variant<literal, identifier, function_expr, function_call_expr, binary_operation, ternary_operation> {
+	using std::variant<literal, identifier, function_expr, function_call_expr, binary_operation, ternary_operation>::
+		variant;
 };
 
 struct variable_declaration {

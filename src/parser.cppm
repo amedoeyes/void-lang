@@ -233,7 +233,30 @@ private:
 	}
 
 	auto parse_expression() -> std::expected<expression, std::string> {
-		return parse_logical_expr();
+		return parse_ternary_expr();
+	}
+
+	auto parse_ternary_expr() -> std::expected<expression, std::string> {
+		auto cond = parse_logical_expr();
+		if (!cond) return cond;
+
+		if (match_and_next(token_type::question_mark)) {
+			auto true_branch = parse_expression();
+			if (!true_branch) return true_branch;
+
+			if (!match_and_next(token_type::colon)) return expected_error("':'");
+
+			auto false_branch = parse_ternary_expr();
+			if (!false_branch) return false_branch;
+
+			return ternary_operation{
+				.condition = recursive_wrapper{*cond},
+				.true_branch = recursive_wrapper{*true_branch},
+				.false_branch = recursive_wrapper{*false_branch},
+			};
+		}
+
+		return *cond;
 	}
 
 	auto parse_logical_expr() -> std::expected<expression, std::string> {

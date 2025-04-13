@@ -120,6 +120,23 @@ void print_expression(const expression& expr, std::int32_t indent) {
 			print_indent(indent + 2);
 			std::println("Right:");
 			print_expression(op.rhs.get(), indent + 4);
+		},
+
+		[&](const ternary_operation& op) {
+			print_indent(indent);
+			std::println("Ternary operation:");
+
+			print_indent(indent + 2);
+			std::println("Condition:");
+			print_expression(op.condition.get(), indent + 4);
+
+			print_indent(indent + 2);
+			std::println("True branch:");
+			print_expression(op.true_branch.get(), indent + 4);
+
+			print_indent(indent + 2);
+			std::println("False branch:");
+			print_expression(op.false_branch.get(), indent + 4);
 		});
 }
 

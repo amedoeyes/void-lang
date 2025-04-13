@@ -19,6 +19,7 @@ enum class token_type : std::uint8_t {
 	lparen,
 	pipe,
 	plus,
+	question_mark,
 	rparen,
 	semicolon,
 	slash,
