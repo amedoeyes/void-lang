@@ -260,12 +260,34 @@ private:
 	}
 
 	auto parse_logical_expr() -> std::expected<expression, std::string> {
-		auto lhs = parse_bit_expr();
+		auto lhs = parse_equality_expr();
 		if (!lhs) return lhs;
 
 		while (match(token_type::logical_and) || match(token_type::logical_or)) {
 			const auto kind = match(token_type::logical_and) ? binary_operation::kind::logical_and
 			                                                 : binary_operation::kind::logical_or;
+			next();
+
+			auto rhs = parse_equality_expr();
+			if (!rhs) return rhs;
+
+			lhs = binary_operation{
+				.kind = kind,
+				.lhs{std::move(*lhs)},
+				.rhs{std::move(*rhs)},
+			};
+		}
+
+		return *lhs;
+	}
+
+	auto parse_equality_expr() -> std::expected<expression, std::string> {
+		auto lhs = parse_bit_expr();
+		if (!lhs) return lhs;
+
+		while (match(token_type::equal_equal) || match(token_type::bang_equal)) {
+			const auto kind = match(token_type::equal_equal) ? binary_operation::kind::equal_equal
+			                                                 : binary_operation::kind::bang_equal;
 			next();
 
 			auto rhs = parse_bit_expr();

@@ -107,6 +107,8 @@ void print_expression(const expression& expr, std::int32_t indent) {
 				case div:         std::print("div"); break;
 				case logical_and: std::print("logical_and"); break;
 				case logical_or:  std::print("logical_or"); break;
+				case equal_equal: std::print("equal_equal"); break;
+				case bang_equal:  std::print("bang_equal"); break;
 				case bitwise_and: std::print("bitwise_and"); break;
 				case bitwise_or:  std::print("bitwise_or"); break;
 				case bitwise_xor: std::print("bitwise_xor"); break;

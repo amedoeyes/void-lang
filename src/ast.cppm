@@ -64,6 +64,9 @@ struct binary_operation {
 		logical_and,
 		logical_or,
 
+		equal_equal,
+		bang_equal,
+
 		bitwise_and,
 		bitwise_or,
 		bitwise_xor

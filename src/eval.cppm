@@ -86,7 +86,8 @@ auto eval_bin_op(const binary_operation& op, environment& env, Op operation) -> 
 													},
 													[operation](const float_literal& lhs,
 		                                                        const float_literal& rhs) -> value {
-														return float_literal{operation(lhs.value, rhs.value)};
+														return float_literal{
+															static_cast<double>(operation(lhs.value, rhs.value))};
 													},
 													[](auto&&, auto&&) -> value { return integer_literal{0}; },
 												},
@@ -113,6 +114,14 @@ auto eval_bin_mult(const binary_operation& op, environment& env) -> value {
 
 auto eval_bin_div(const binary_operation& op, environment& env) -> value {
 	return eval_bin_op(op, env, [](auto a, auto b) { return a / b; });
+}
+
+auto eval_bin_equal_equal(const binary_operation& op, environment& env) -> value {
+	return eval_bin_op(op, env, [](auto a, auto b) { return a == b; });
+}
+
+auto eval_bin_bang_equal(const binary_operation& op, environment& env) -> value {
+	return eval_bin_op(op, env, [](auto a, auto b) { return a != b; });
 }
 
 auto eval_fun_call(const function_call_expr& call, const function_expr& fun, environment& env) -> value {
@@ -184,6 +193,8 @@ auto eval_expr(const expression& expr, environment& env) -> value {
 				case div:         return eval_bin_div(op, env);
 				case logical_and: return integer_literal{0};
 				case logical_or:  return integer_literal{0};
+				case equal_equal: return eval_bin_equal_equal(op, env);
+				case bang_equal:  return eval_bin_bang_equal(op, env);
 				case bitwise_and: return integer_literal{0};
 				case bitwise_or:  return integer_literal{0};
 				case bitwise_xor: return integer_literal{0};

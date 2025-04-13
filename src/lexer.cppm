@@ -24,6 +24,8 @@ auto lex(std::string_view buffer) -> std::expected<std::vector<token>, std::stri
 				 });
 
 	lexer.define(lexer::definitions::multi_char<token_type::arrow, '-', '>'>);
+	lexer.define(lexer::definitions::multi_char<token_type::bang_equal, '!', '='>);
+	lexer.define(lexer::definitions::multi_char<token_type::equal_equal, '=', '='>);
 	lexer.define(lexer::definitions::multi_char<token_type::logical_and, '&', '&'>);
 	lexer.define(lexer::definitions::multi_char<token_type::logical_or, '|', '|'>);
 
