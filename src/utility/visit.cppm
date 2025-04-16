@@ -11,8 +11,8 @@ struct visitor : Ts... {
 
 template<typename Variant, typename... Funcs>
 	requires requires(Variant&& variant, Funcs&&... funcs) {
-						 std::visit(visitor{std::forward<Funcs>(funcs)...}, std::forward<Variant>(variant));
-					 }
+				 std::visit(visitor{std::forward<Funcs>(funcs)...}, std::forward<Variant>(variant));
+			 }
 auto visit(Variant&& variant, Funcs&&... funcs) {
 	return std::visit(visitor{std::forward<Funcs>(funcs)...}, std::forward<Variant>(variant));
 }

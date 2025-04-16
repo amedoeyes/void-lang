@@ -1,9 +1,10 @@
-export module voidlang.parser;
+export module voidlang:parser;
 
 import std;
-import voidlang.ast;
-import voidlang.token;
 import voidlang.utility;
+
+import :ast;
+import :token;
 
 namespace voidlang {
 

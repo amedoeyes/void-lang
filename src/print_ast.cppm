@@ -1,8 +1,8 @@
-export module voidlang.print_ast;
+export module voidlang:print_ast;
 
 import std;
-import voidlang.ast;
 import voidlang.utility;
+import :ast;
 
 namespace voidlang {
 

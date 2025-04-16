@@ -1,4 +1,4 @@
-export module voidlang.token;
+export module voidlang:token;
 
 import std;
 import lexer;

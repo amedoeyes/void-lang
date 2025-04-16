@@ -2,12 +2,11 @@ module;
 
 #include <cassert>
 
-export module voidlang.eval;
+export module voidlang:eval;
 
 import std;
-import voidlang.ast;
-import voidlang.symbol;
 import voidlang.utility;
+import :ast;
 
 namespace voidlang {
 

@@ -1,8 +1,8 @@
-export module voidlang.lexer;
+export module voidlang:lexer;
 
 import lexer;
 import std;
-import voidlang.token;
+import :token;
 
 export namespace voidlang {
 

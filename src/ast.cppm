@@ -1,4 +1,4 @@
-export module voidlang.ast;
+export module voidlang:ast;
 
 import std;
 import voidlang.utility;

@@ -2,10 +2,11 @@ module;
 
 #include <cassert>
 
-export module voidlang.symbol;
+export module voidlang.utility:symbol_table;
 
 import std;
-import voidlang.utility;
+
+import :observer_ptr;
 
 export namespace voidlang {
 
