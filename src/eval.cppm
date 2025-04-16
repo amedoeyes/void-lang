@@ -1,242 +1,273 @@
+module;
+
+#include <cassert>
+
 export module voidlang.eval;
 
 import std;
 import voidlang.ast;
+import voidlang.symbol;
 import voidlang.utility;
 
-export namespace voidlang {
-
-struct function;
+namespace voidlang {
 
 struct function {
 	std::vector<identifier> parameters;
 	expression expression;
-	std::shared_ptr<class environment> environment;
+	symbol_table<struct value> symbol_table;
 };
 
-using value = std::variant<literal, function>;
-
-class environment {
-public:
-	environment() = default;
-
-	explicit environment(std::reference_wrapper<environment> parent) : parent_{parent} {}
-
-	auto define(const std::string& name, const value& value) noexcept -> void {
-		variables_[name] = value;
-	}
-
-	auto assign(const std::string& name, const value& val) -> bool {
-		auto it = variables_.find(name);
-		if (it != variables_.end()) {
-			it->second = val;
-			return true;
-		}
-		if (parent_) return (*parent_).get().assign(name, val);
-		return false;
-	}
-
-	[[nodiscard]]
-	auto lookup(std::string_view name) const noexcept -> std::optional<std::reference_wrapper<const value>> {
-		auto it = variables_.find(std::string{name});
-		if (it != variables_.end()) return it->second;
-		if (parent_) return (*parent_).get().lookup(name);
-		return std::nullopt;
-	}
-
-	void print_chain(int depth = 0) const {
-		std::string indent(depth * 2, ' ');
-		std::println("{}Scope {}:", indent, depth);
-		for (const auto& [name, value] : variables_) {
-			std::print("  {}{}: ", indent, name);
-			std::visit(visitor{
-						   [&](const literal& lit) { std::visit([](auto&& v) { std::println("{}", v.value); }, lit); },
-						   [&](const function& fun) {
-							   auto out = std::string{"("};
-							   for (auto i = 0uz; i < fun.parameters.size(); ++i) {
-								   out += fun.parameters[i].name;
-								   if (i != fun.parameters.size() - 1) {
-									   out += ", ";
-								   }
-							   }
-							   out += ") -> idk";
-							   std::println("{}", out);
-						   },
-					   },
-			           value);
-		}
-		if (parent_) (*parent_).get().print_chain(depth + 1);
-	}
-
-private:
-	std::optional<std::reference_wrapper<environment>> parent_;
-	std::unordered_map<std::string, value> variables_;
+struct value : std::variant<bool, std::int64_t, double, function> {
+	using variant::variant;
 };
 
-auto eval_expr(const expression& expr, environment& env) -> value;
+auto eval_expr(symbol_table<value>& st, const expression& expr) noexcept -> value;
+
+auto eval_fun_call(symbol_table<value>& st, const function_call_expr& call) noexcept -> value {
+	return std::visit(visitor{
+						  [&](const function& fun) -> value {
+							  auto new_env = fun.symbol_table;
+							  new_env.set_parent(observer_ptr{&st});
+							  for (const auto i : std::views::iota(0uz, call.arguments.size())) {
+								  new_env.define(fun.parameters[i].name, eval_expr(st, call.arguments[i].get()));
+							  }
+							  return eval_expr(new_env, fun.expression);
+						  },
+						  [](const auto&) -> value { std::unreachable(); },
+					  },
+	                  eval_expr(st, call.callee.get()));
+}
+
+auto eval_id(symbol_table<value>& st, const identifier& id) noexcept -> value {
+	return st.lookup(id.name).value().get();
+}
+
+auto eval_lit(const literal& lit) noexcept -> value {
+	return std::visit(visitor{[](auto&& l) -> value { return l.value; }}, lit);
+}
+
+auto eval_fun(symbol_table<value>& st, const function_expr& fun) noexcept -> value {
+	return function{
+		.parameters = fun.parameters,
+		.expression = fun.expression.get(),
+		.symbol_table = st.capture(),
+	};
+}
 
 template<typename Op>
-auto eval_bin_op(const binary_operation& op, environment& env, Op operation) -> value {
+auto eval_bin_op(symbol_table<value>& st, const binary_operation& op, Op operation) noexcept -> value {
 	return std::visit(visitor{
-						  [operation](const literal& lhs_lit, const literal& rhs_lit) -> value {
-							  return std::visit(visitor{
-													[operation](const integer_literal& lhs,
-		                                                        const integer_literal& rhs) -> value {
-														return integer_literal{operation(lhs.value, rhs.value)};
-													},
-													[operation](const float_literal& lhs,
-		                                                        const float_literal& rhs) -> value {
-														return float_literal{
-															static_cast<double>(operation(lhs.value, rhs.value))};
-													},
-													[](auto&&, auto&&) -> value { return integer_literal{0}; },
-												},
-		                                        lhs_lit,
-		                                        rhs_lit);
-						  },
-						  [](const auto&, const auto&) -> value { return integer_literal{0}; },
+						  [operation](std::int64_t lhs, std::int64_t rhs) -> value { return operation(lhs, rhs); },
+						  [operation](double lhs, double rhs) -> value { return operation(lhs, rhs); },
+						  [](const auto&, const auto&) -> value { std::unreachable(); },
 					  },
-	                  eval_expr(op.lhs.get(), env),
-	                  eval_expr(op.rhs.get(), env));
+	                  eval_expr(st, op.lhs.get()),
+	                  eval_expr(st, op.rhs.get()));
 }
 
-auto eval_bin_add(const binary_operation& op, environment& env) -> value {
-	return eval_bin_op(op, env, [](auto a, auto b) { return a + b; });
+auto eval_bin_add(symbol_table<value>& st, const binary_operation& op) noexcept -> value {
+	return std::visit(visitor{
+						  [](std::int64_t lhs, std::int64_t rhs) -> value { return lhs + rhs; },
+						  [](double lhs, double rhs) -> value { return lhs + rhs; },
+						  [](const auto&, const auto&) -> value { std::unreachable(); },
+					  },
+	                  eval_expr(st, op.lhs.get()),
+	                  eval_expr(st, op.rhs.get()));
 }
 
-auto eval_bin_sub(const binary_operation& op, environment& env) -> value {
-	return eval_bin_op(op, env, [](auto a, auto b) { return a - b; });
+auto eval_bin_sub(symbol_table<value>& st, const binary_operation& op) noexcept -> value {
+	return std::visit(visitor{
+						  [](std::int64_t lhs, std::int64_t rhs) -> value { return lhs - rhs; },
+						  [](double lhs, double rhs) -> value { return lhs - rhs; },
+						  [](const auto&, const auto&) -> value { std::unreachable(); },
+					  },
+	                  eval_expr(st, op.lhs.get()),
+	                  eval_expr(st, op.rhs.get()));
 }
 
-auto eval_bin_mult(const binary_operation& op, environment& env) -> value {
-	return eval_bin_op(op, env, [](auto a, auto b) { return a * b; });
+auto eval_bin_mul(symbol_table<value>& st, const binary_operation& op) noexcept -> value {
+	return std::visit(visitor{
+						  [](std::int64_t lhs, std::int64_t rhs) -> value { return lhs * rhs; },
+						  [](double lhs, double rhs) -> value { return lhs * rhs; },
+						  [](const auto&, const auto&) -> value { std::unreachable(); },
+					  },
+	                  eval_expr(st, op.lhs.get()),
+	                  eval_expr(st, op.rhs.get()));
 }
 
-auto eval_bin_div(const binary_operation& op, environment& env) -> value {
-	return eval_bin_op(op, env, [](auto a, auto b) { return a / b; });
+auto eval_bin_div(symbol_table<value>& st, const binary_operation& op) noexcept -> value {
+	return std::visit(visitor{
+						  [](std::int64_t lhs, std::int64_t rhs) -> value { return lhs / rhs; },
+						  [](double lhs, double rhs) -> value { return lhs / rhs; },
+						  [](const auto&, const auto&) -> value { std::unreachable(); },
+					  },
+	                  eval_expr(st, op.lhs.get()),
+	                  eval_expr(st, op.rhs.get()));
 }
 
-auto eval_bin_equal_equal(const binary_operation& op, environment& env) -> value {
-	return eval_bin_op(op, env, [](auto a, auto b) { return a == b; });
+auto eval_bin_land(symbol_table<value>& st, const binary_operation& op) noexcept -> value {
+	return std::visit(visitor{
+						  [](bool lhs, bool rhs) -> value { return lhs && rhs; },
+						  [](const auto&, const auto&) -> value { std::unreachable(); },
+					  },
+	                  eval_expr(st, op.lhs.get()),
+	                  eval_expr(st, op.rhs.get()));
 }
 
-auto eval_bin_bang_equal(const binary_operation& op, environment& env) -> value {
-	return eval_bin_op(op, env, [](auto a, auto b) { return a != b; });
+auto eval_bin_lor(symbol_table<value>& st, const binary_operation& op) noexcept -> value {
+	return std::visit(visitor{
+						  [](bool lhs, bool rhs) -> value { return lhs || rhs; },
+						  [](const auto&, const auto&) -> value { std::unreachable(); },
+					  },
+	                  eval_expr(st, op.lhs.get()),
+	                  eval_expr(st, op.rhs.get()));
 }
 
-auto eval_fun_call(const function_call_expr& call, const function_expr& fun, environment& env) -> value {
-	if (call.arguments.size() != fun.parameters.size()) return integer_literal{0};
-	auto new_env = environment{env};
-	for (auto i = 0uz; i < call.arguments.size(); ++i) {
-		new_env.define(fun.parameters[i].name, eval_expr(call.arguments[i].get(), env));
+auto eval_bin_eq(symbol_table<value>& st, const binary_operation& op) noexcept -> value {
+	return std::visit(visitor{
+						  [](bool lhs, bool rhs) -> value { return lhs == rhs; },
+						  [](std::int64_t lhs, std::int64_t rhs) -> value { return lhs == rhs; },
+						  [](double lhs, double rhs) -> value { return lhs == rhs; },
+						  [](const auto&, const auto&) -> value { std::unreachable(); },
+					  },
+	                  eval_expr(st, op.lhs.get()),
+	                  eval_expr(st, op.rhs.get()));
+}
+
+auto eval_bin_neq(symbol_table<value>& st, const binary_operation& op) noexcept -> value {
+	return std::visit(visitor{
+						  [](bool lhs, bool rhs) -> value { return lhs != rhs; },
+						  [](std::int64_t lhs, std::int64_t rhs) -> value { return lhs != rhs; },
+						  [](double lhs, double rhs) -> value { return lhs != rhs; },
+						  [](const auto&, const auto&) -> value { std::unreachable(); },
+					  },
+	                  eval_expr(st, op.lhs.get()),
+	                  eval_expr(st, op.rhs.get()));
+}
+
+auto eval_bin_band(symbol_table<value>& st, const binary_operation& op) noexcept -> value {
+	return std::visit(visitor{
+						  [](bool lhs, bool rhs) -> value { return lhs & rhs; },
+						  [](std::int64_t lhs, std::int64_t rhs) -> value { return lhs & rhs; },
+						  [](const auto&, const auto&) -> value { std::unreachable(); },
+					  },
+	                  eval_expr(st, op.lhs.get()),
+	                  eval_expr(st, op.rhs.get()));
+}
+
+auto eval_bin_bor(symbol_table<value>& st, const binary_operation& op) noexcept -> value {
+	return std::visit(visitor{
+						  [](bool lhs, bool rhs) -> value { return lhs | rhs; },
+						  [](std::int64_t lhs, std::int64_t rhs) -> value { return lhs | rhs; },
+						  [](const auto&, const auto&) -> value { std::unreachable(); },
+					  },
+	                  eval_expr(st, op.lhs.get()),
+	                  eval_expr(st, op.rhs.get()));
+}
+
+auto eval_bin_bxor(symbol_table<value>& st, const binary_operation& op) noexcept -> value {
+	return std::visit(visitor{
+						  [](bool lhs, bool rhs) -> value { return lhs ^ rhs; },
+						  [](std::int64_t lhs, std::int64_t rhs) -> value { return lhs ^ rhs; },
+						  [](const auto&, const auto&) -> value { std::unreachable(); },
+					  },
+	                  eval_expr(st, op.lhs.get()),
+	                  eval_expr(st, op.rhs.get()));
+}
+
+auto eval_bin(symbol_table<value>& st, const binary_operation& op) noexcept -> value {
+	switch (op.kind) {
+		using enum binary_operation::kind;
+		case add:         return eval_bin_add(st, op);
+		case sub:         return eval_bin_sub(st, op);
+		case mult:        return eval_bin_mul(st, op);
+		case div:         return eval_bin_div(st, op);
+		case logical_and: return eval_bin_land(st, op);
+		case logical_or:  return eval_bin_lor(st, op);
+		case equal_equal: return eval_bin_eq(st, op);
+		case bang_equal:  return eval_bin_neq(st, op);
+		case bitwise_and: return eval_bin_band(st, op);
+		case bitwise_or:  return eval_bin_bor(st, op);
+		case bitwise_xor: return eval_bin_bxor(st, op);
 	}
-	return eval_expr(fun.expression.get(), new_env);
 }
 
-auto eval_fun_call(const function_call_expr& call, const function& fun, environment& env) -> value {
-	if (call.arguments.size() != fun.parameters.size()) return integer_literal{0};
-	auto new_env = environment{std::reference_wrapper{*fun.environment}};
-	for (auto i = 0uz; i < call.arguments.size(); ++i) {
-		new_env.define(fun.parameters[i].name, eval_expr(call.arguments[i].get(), env));
-	}
-	return eval_expr(fun.expression, new_env);
+auto eval_ter(symbol_table<value>& st, const ternary_operation& op) noexcept -> value {
+	auto cond = std::visit(visitor{
+							   [&](bool b) -> bool { return b; },
+							   [&](const auto&) -> bool { std::unreachable(); },
+						   },
+	                       eval_expr(st, op.condition.get()));
+	if (cond) return eval_expr(st, op.true_branch.get());
+	return eval_expr(st, op.false_branch.get());
 }
 
-auto eval_fun_call(const value& callee, const function_call_expr& call, environment& env) -> value {
+auto eval_expr(symbol_table<value>& st, const expression& expr) noexcept -> value {
 	return std::visit(visitor{
-						  [&](const function& fun) -> value { return eval_fun_call(call, fun, env); },
-						  [](const auto&) -> value { return integer_literal{0}; },
+						  [&](const literal& lit) { return eval_lit(lit); },
+						  [&](const identifier& id) { return eval_id(st, id); },
+						  [&](const function_expr& fun) { return eval_fun(st, fun); },
+						  [&](const function_call_expr& call) { return eval_fun_call(st, call); },
+						  [&](const binary_operation& op) { return eval_bin(st, op); },
+						  [&](const ternary_operation& op) { return eval_ter(st, op); },
 					  },
-	                  callee);
+	                  expr);
 }
 
-auto eval_fun_call(const function_call_expr& fun_call, environment& env) -> value {
-	return std::visit(visitor{
-						  [&](const function_expr& fun) -> value { return eval_fun_call(fun_call, fun, env); },
-						  [&](const identifier& id) -> value {
-							  auto val = env.lookup(id.name);
-							  if (!val) return integer_literal{0};
-							  return eval_fun_call(*val, fun_call, env);
-						  },
-						  [&](const function_call_expr& nest_call) -> value {
-							  const auto val = eval_fun_call(nest_call, env);
-							  return eval_fun_call(val, fun_call, env);
-						  },
-						  [](const auto&) -> value { return integer_literal{0}; },
-					  },
-	                  fun_call.callee.get());
-}
+}  // namespace voidlang
 
-auto eval_expr(const expression& expr, environment& env) -> value {
-	return visit(
-		expr,
-		[&](const literal& lit) -> value { return lit; },
+export namespace voidlang {
 
-		[&](const identifier& id) -> value { return *env.lookup(id.name); },
+auto eval(const top_level& root) noexcept -> void {
+	auto st = symbol_table<value>{};
 
-		[&](const function_expr& fun) -> value {
-			return function{
-				.parameters = fun.parameters,
-				.expression = fun.expression.get(),
-				.environment = std::make_shared<environment>(environment{std::reference_wrapper{env}}),
-			};
-		},
-
-		[&](const function_call_expr& fun_call) -> value { return eval_fun_call(fun_call, env); },
-
-		[&](const binary_operation& op) -> value {
-			switch (op.kind) {
-				using enum binary_operation::kind;
-				case add:         return eval_bin_add(op, env);
-				case sub:         return eval_bin_sub(op, env);
-				case mult:        return eval_bin_mult(op, env);
-				case div:         return eval_bin_div(op, env);
-				case logical_and: return integer_literal{0};
-				case logical_or:  return integer_literal{0};
-				case equal_equal: return eval_bin_equal_equal(op, env);
-				case bang_equal:  return eval_bin_bang_equal(op, env);
-				case bitwise_and: return integer_literal{0};
-				case bitwise_or:  return integer_literal{0};
-				case bitwise_xor: return integer_literal{0};
-			}
-		},
-		[&](const ternary_operation& op) -> value {
-			auto cond = std::visit(visitor{
-									   [&](const literal& lit) -> bool {
-										   return std::visit([](auto&& v) { return static_cast<int>(v.value) == 1; },
-			                                                 lit);
-									   },
-									   [&](const function&) -> bool { return false; },
+	for (const auto& decl : root.declarations) {
+		std::visit(
+			visitor{
+				[&](const variable_declaration& var) {
+					std::visit(visitor{
+								   [&](const function_expr&) {
+									   st.define(var.name.name, eval_expr(st, var.initializer));
 								   },
-		                           eval_expr(op.condition.get(), env));
-
-			if (cond) return eval_expr(op.true_branch.get(), env);
-			return eval_expr(op.false_branch.get(), env);
-		});
-}
-
-auto eval(const top_level& root) -> void {
-	auto env = environment{};
-
-	for (const auto& decl : root.declarations) {
-		visit(decl, [&](const variable_declaration& var) {
-			visit(
-				var.initializer,
-				[&](const function_expr&) { env.define(var.name.name, eval_expr(var.initializer, env)); },
-				[&](const auto&) {});
-		});
+								   [&](const auto&) {},
+							   },
+			                   var.initializer);
+				},
+			},
+			decl);
 	}
 
 	for (const auto& decl : root.declarations) {
-		visit(decl, [&](const variable_declaration& var) {
-			visit(
-				var.initializer,
-				[&](const function_expr&) {},
-				[&](const auto&) { env.define(var.name.name, eval_expr(var.initializer, env)); });
-		});
+		std::visit(
+			visitor{
+				[&](const variable_declaration& var) {
+					std::visit(visitor{
+								   [&](const function_expr&) {},
+								   [&](const auto&) { st.define(var.name.name, eval_expr(st, var.initializer)); },
+							   },
+			                   var.initializer);
+				},
+			},
+			decl);
 	}
 
-	env.print_chain();
+	st.print([](const value& value) {
+		std::visit(visitor{
+					   [&](const auto& v) { std::println("{}", v); },
+					   [&](const function& fun) {
+						   auto out = std::string{"("};
+						   for (auto i = 0uz; i < fun.parameters.size(); ++i) {
+							   out += fun.parameters[i].name;
+							   if (i != fun.parameters.size() - 1) {
+								   out += ", ";
+							   }
+						   }
+						   out += ") -> expr";
+						   std::println("{}", out);
+					   },
+				   },
+		           value);
+	});
 }
 
 }  // namespace voidlang
