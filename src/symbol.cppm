@@ -5,51 +5,62 @@ module;
 export module voidlang.symbol;
 
 import std;
+import voidlang.utility;
 
 export namespace voidlang {
 
 template<typename T>
-struct scope {
-	std::unordered_map<std::string, T> symbols;
-	std::optional<std::reference_wrapper<scope>> parent;
-};
-
-template<typename T>
 class symbol_table {
 public:
-	auto enter_scope() noexcept -> void {
-		scope_ = {.parent = std::ref(scope_)};
+	symbol_table() = default;
+
+	explicit symbol_table(observer_ptr<symbol_table> parent) : parent_{parent} {}
+
+	auto set_parent(observer_ptr<symbol_table> parent) -> void {
+		parent_ = parent;
 	}
 
-	auto exit_scope() noexcept -> void {
-		assert(!scope_.parent && "cannot exit the global scope");
-		scope_ = scope_.parent.value().get();
+	auto define(std::string_view name, const T& value) noexcept -> void {
+		symbols_[std::string{name}] = value;
 	}
 
-	auto insert(std::string_view name, const T& value) noexcept -> void {
-		scope_.symbols.emplace(std::string(name), value);
+	auto assign(std::string_view name, const T& value) noexcept -> void {
+		if (auto it = symbols_.find(std::string{name}); it != symbols_.end()) {
+			it->second = value;
+			return;
+		}
+		if (parent_) parent_->assign(name, value);
 	}
 
 	[[nodiscard]]
-	auto lookup(std::string_view name) noexcept -> std::optional<std::reference_wrapper<const T>> {
-		auto scope = scope_;
-		while (true) {
-			if (auto it = scope.symbols.find(std::string{name}); it != scope.symbols.end()) {
-				return std::cref(it->second);
-			}
-			if (!scope.parent) break;
-			scope = scope.parent.value().get();
+	auto lookup(std::string_view name) const noexcept -> std::optional<std::reference_wrapper<const T>> {
+		if (auto it = symbols_.find(std::string{name}); it != symbols_.end()) {
+			return it->second;
 		}
+		if (parent_) return parent_->lookup(name);
 		return std::nullopt;
 	}
 
 	[[nodiscard]]
-	auto capture() const noexcept -> scope<T> {
-		return scope_;
+	auto capture() const noexcept -> symbol_table {
+		auto st = *this;
+		st.parent_.reset();
+		return st;
+	}
+
+	void print(const std::function<void(const T&)>& printer, std::size_t depth = 0) const {
+		auto indent = std::string(depth * 2, ' ');
+		std::println("{}Scope {}:", indent, depth);
+		for (const auto& [name, value] : symbols_) {
+			std::print("  {}{}: ", indent, name);
+			printer(value);
+		}
+		if (parent_) parent_->print(printer, depth + 1);
 	}
 
 private:
-	scope<T> scope_;
+	observer_ptr<symbol_table> parent_;
+	std::unordered_map<std::string, T> symbols_;
 };
 
 }  // namespace voidlang
