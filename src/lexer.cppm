@@ -23,29 +23,54 @@ auto lex(std::string_view buffer) -> std::expected<std::vector<token>, std::stri
 					 return std::nullopt;
 				 });
 
-	lexer.define(lexer::definitions::multi_char<token_type::arrow, '-', '>'>);
+	lexer.define(lexer::definitions::multi_char<token_type::ampersand_ampersand, '&', '&'>);
+	lexer.define(lexer::definitions::multi_char<token_type::ampersand_equal, '&', '='>);
+	lexer.define(lexer::definitions::multi_char<token_type::asterisk_equal, '*', '='>);
 	lexer.define(lexer::definitions::multi_char<token_type::bang_equal, '!', '='>);
+	lexer.define(lexer::definitions::multi_char<token_type::caret_equal, '^', '='>);
 	lexer.define(lexer::definitions::multi_char<token_type::equal_equal, '=', '='>);
-	lexer.define(lexer::definitions::multi_char<token_type::logical_and, '&', '&'>);
-	lexer.define(lexer::definitions::multi_char<token_type::logical_or, '|', '|'>);
+	lexer.define(lexer::definitions::multi_char<token_type::greater_than_equal, '>', '='>);
+	lexer.define(lexer::definitions::multi_char<token_type::greater_than_greater_than, '>', '>'>);
+	lexer.define(lexer::definitions::multi_char<token_type::greater_than_greater_than_equal, '>', '>', '='>);
+	lexer.define(lexer::definitions::multi_char<token_type::hyphen_equal, '-', '='>);
+	lexer.define(lexer::definitions::multi_char<token_type::hyphen_greater_than, '-', '>'>);
+	lexer.define(lexer::definitions::multi_char<token_type::hyphen_hyphen, '-', '-'>);
+	lexer.define(lexer::definitions::multi_char<token_type::less_than_equal, '<', '='>);
+	lexer.define(lexer::definitions::multi_char<token_type::less_than_less_than, '<', '<'>);
+	lexer.define(lexer::definitions::multi_char<token_type::less_than_less_than_equal, '<', '<', '='>);
+	lexer.define(lexer::definitions::multi_char<token_type::percent_equal, '%', '='>);
+	lexer.define(lexer::definitions::multi_char<token_type::pipe_equal, '|', '='>);
+	lexer.define(lexer::definitions::multi_char<token_type::pipe_pipe, '|', '|'>);
+	lexer.define(lexer::definitions::multi_char<token_type::plus_equal, '+', '='>);
+	lexer.define(lexer::definitions::multi_char<token_type::plus_plus, '+', '+'>);
+	lexer.define(lexer::definitions::multi_char<token_type::slash_equal, '/', '='>);
 
 	lexer.define(lexer::definitions::single_char<token_type::ampersand, '&'>);
-	lexer.define(lexer::definitions::single_char<token_type::assignment, '='>);
 	lexer.define(lexer::definitions::single_char<token_type::asterisk, '*'>);
+	lexer.define(lexer::definitions::single_char<token_type::brace_left, '{'>);
+	lexer.define(lexer::definitions::single_char<token_type::brace_right, '}'>);
 	lexer.define(lexer::definitions::single_char<token_type::caret, '^'>);
 	lexer.define(lexer::definitions::single_char<token_type::colon, ':'>);
 	lexer.define(lexer::definitions::single_char<token_type::comma, ','>);
+	lexer.define(lexer::definitions::single_char<token_type::equal, '='>);
+	lexer.define(lexer::definitions::single_char<token_type::greater_than, '>'>);
 	lexer.define(lexer::definitions::single_char<token_type::hyphen, '-'>);
-	lexer.define(lexer::definitions::single_char<token_type::lparen, '('>);
+	lexer.define(lexer::definitions::single_char<token_type::less_than, '<'>);
+	lexer.define(lexer::definitions::single_char<token_type::paren_left, '('>);
+	lexer.define(lexer::definitions::single_char<token_type::paren_right, ')'>);
+	lexer.define(lexer::definitions::single_char<token_type::percent, '%'>);
 	lexer.define(lexer::definitions::single_char<token_type::pipe, '|'>);
 	lexer.define(lexer::definitions::single_char<token_type::plus, '+'>);
 	lexer.define(lexer::definitions::single_char<token_type::question_mark, '?'>);
-	lexer.define(lexer::definitions::single_char<token_type::rparen, ')'>);
 	lexer.define(lexer::definitions::single_char<token_type::semicolon, ';'>);
 	lexer.define(lexer::definitions::single_char<token_type::slash, '/'>);
 
 	lexer.define(lexer::definitions::multi_char<token_type::kw_let, 'l', 'e', 't'>);
+	lexer.define(lexer::definitions::multi_char<token_type::kw_if, 'i', 'f'>);
+	lexer.define(lexer::definitions::multi_char<token_type::kw_else, 'e', 'l', 's', 'e'>);
+	lexer.define(lexer::definitions::multi_char<token_type::kw_return, 'r', 'e', 't', 'u', 'r', 'n'>);
 
+	lexer.define(lexer::definitions::multi_char<token_type::bt_bool, 'b', 'o', 'o', 'l'>);
 	lexer.define(lexer::definitions::multi_char<token_type::bt_i8, 'i', '8'>);
 	lexer.define(lexer::definitions::multi_char<token_type::bt_i16, 'i', '1', '6'>);
 	lexer.define(lexer::definitions::multi_char<token_type::bt_i32, 'i', '3', '2'>);
@@ -56,6 +81,7 @@ auto lex(std::string_view buffer) -> std::expected<std::vector<token>, std::stri
 
 	lexer.define(lexer::definitions::identifier<token_type::identifier>);
 
+	lexer.define(lexer::definitions::boolean<token_type::lit_bool>);
 	lexer.define([](const auto& ctx) { return ctx.match(std::isdigit); },
 	             [](auto& ctx) -> lexer::token_result<token_type> {
 					 const auto start = ctx.index();
@@ -77,7 +103,8 @@ auto lex(std::string_view buffer) -> std::expected<std::vector<token>, std::stri
 				 });
 
 	lexer.define(lexer::definitions::end_of_file<token_type::eof>);
-	lexer.define(lexer::definitions::anything<token_type::unknown>);
+
+	lexer.define(lexer::definitions::anything<token_type::invalid>);
 
 	auto tokens = std::vector<token>{};
 

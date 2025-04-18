@@ -168,7 +168,7 @@ private:
 			var.type = *type;
 		}
 
-		if (!match_and_next(token_type::assignment)) return expected_error("'='");
+		if (!match_and_next(token_type::equal)) return expected_error("'='");
 
 		const auto expr = parse_expression();
 		if (!expr) return std::unexpected{expr.error()};
@@ -197,13 +197,13 @@ private:
 				return type;
 			}
 
-			case lparen: {
+			case paren_left: {
 				next();
 
 				auto type = function_type{};
 
-				if (match_and_next(token_type::rparen)) {
-					if (!match_and_next(token_type::arrow)) return expected_error("'->'");
+				if (match_and_next(token_type::paren_right)) {
+					if (!match_and_next(token_type::hyphen_greater_than)) return expected_error("'->'");
 
 					const auto return_type = parse_type();
 					if (!return_type) return std::unexpected{return_type.error()};
@@ -218,8 +218,8 @@ private:
 					type.parameters.emplace_back(*param_type);
 
 					if (match_and_next(token_type::comma)) continue;
-					if (!match_and_next(token_type::rparen)) return expected_error("')'");
-					if (!match_and_next(token_type::arrow)) return expected_error("'->'");
+					if (!match_and_next(token_type::paren_right)) return expected_error("')'");
+					if (!match_and_next(token_type::hyphen_greater_than)) return expected_error("'->'");
 
 					const auto return_type = parse_type();
 					if (!return_type) return std::unexpected{return_type.error()};
@@ -264,9 +264,9 @@ private:
 		auto lhs = parse_equality_expr();
 		if (!lhs) return lhs;
 
-		while (match(token_type::logical_and) || match(token_type::logical_or)) {
-			const auto kind = match(token_type::logical_and) ? binary_operation::kind::logical_and
-			                                                 : binary_operation::kind::logical_or;
+		while (match(token_type::ampersand_ampersand) || match(token_type::pipe_pipe)) {
+			const auto kind = match(token_type::ampersand_ampersand) ? binary_operation::kind::logical_and
+			                                                         : binary_operation::kind::logical_or;
 			next();
 
 			auto rhs = parse_equality_expr();
@@ -389,15 +389,15 @@ private:
 
 				auto expr = expression{*id};
 
-				while (match_and_next(token_type::lparen)) {
+				while (match_and_next(token_type::paren_left)) {
 					auto fun_call = function_call_expr{.callee = recursive_wrapper{std::move(expr)}};
 
-					while (!match_and_next(token_type::rparen) && !match(token_type::eof)) {
+					while (!match_and_next(token_type::paren_right) && !match(token_type::eof)) {
 						const auto arg = parse_expression();
 						if (!arg) return std::unexpected{arg.error()};
 						fun_call.arguments.emplace_back(*arg);
 
-						if (!match(token_type::rparen) && !match_and_next(token_type::comma)) {
+						if (!match(token_type::paren_right) && !match_and_next(token_type::comma)) {
 							return expected_error("','");
 						}
 					}
@@ -408,15 +408,15 @@ private:
 				return expr;
 			}
 
-			case token_type::lparen: {
+			case token_type::paren_left: {
 				next();
 
-				if (match(token_type::rparen) || match(token_type::identifier, token_type::rparen)
+				if (match(token_type::paren_right) || match(token_type::identifier, token_type::paren_right)
 				    || match(token_type::identifier, token_type::comma)) {
 					auto expr = function_expr{};
 
-					if (match_and_next(token_type::rparen)) {
-						if (!match_and_next(token_type::arrow)) return expected_error("'->'");
+					if (match_and_next(token_type::paren_right)) {
+						if (!match_and_next(token_type::hyphen_greater_than)) return expected_error("'->'");
 
 						const auto new_expr = parse_expression();
 						if (!new_expr) return std::unexpected{new_expr.error()};
@@ -431,8 +431,8 @@ private:
 						next();
 
 						if (match_and_next(token_type::comma)) continue;
-						if (!match_and_next(token_type::rparen)) return expected_error("')'");
-						if (!match_and_next(token_type::arrow)) return expected_error("'->'");
+						if (!match_and_next(token_type::paren_right)) return expected_error("')'");
+						if (!match_and_next(token_type::hyphen_greater_than)) return expected_error("'->'");
 
 						const auto new_expr = parse_expression();
 						if (!new_expr) return std::unexpected{new_expr.error()};
@@ -443,17 +443,17 @@ private:
 				}
 
 				auto expr = parse_expression();
-				if (!match_and_next(token_type::rparen)) return expected_error("')'");
+				if (!match_and_next(token_type::paren_right)) return expected_error("')'");
 
-				while (match_and_next(token_type::lparen)) {
+				while (match_and_next(token_type::paren_left)) {
 					auto fun_call = function_call_expr{.callee = recursive_wrapper{std::move(*expr)}};
 
-					while (!match_and_next(token_type::rparen) && !match(token_type::eof)) {
+					while (!match_and_next(token_type::paren_right) && !match(token_type::eof)) {
 						const auto arg = parse_expression();
 						if (!arg) return std::unexpected{arg.error()};
 						fun_call.arguments.emplace_back(*arg);
 
-						if (!match(token_type::rparen) && !match_and_next(token_type::comma)) {
+						if (!match(token_type::paren_right) && !match_and_next(token_type::comma)) {
 							return expected_error("','");
 						}
 					}
