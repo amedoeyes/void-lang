@@ -1,49 +1,69 @@
 top_level = { decl_stmt } ;
 
 
-statement = ( decl_stmt | return_stmt ), ";" ;
+statement = ( decl_stmt | if_stmt | return_stmt | expression ), ";" ;
 
-decl_stmt =  variable_decl_stmt ;
+decl_stmt = variable_decl_stmt ;
 
-return_stmt = "return", expression ;
+return_stmt = "return", [ expression ] ;
 
-variable_decl_stmt = "let", identifier, ":", type, "=", expression ;
+variable_decl_stmt = "let", identifier, [ ":", type ], "=", expression ;
+
+if_stmt = "if", expression, statement, [ "else", statement ] ;
 
 
-expression = ternary_expr ;
+expression = assignment_expr ;
+
+assignment_expr = ternary_expr, { assignment_op, ternary_expr } ;
 
 ternary_expr = logical_or_expr, [ "?", expression, ":", ternary_expr ] ;
 
-logical_or_expr = logical_and_expr, { "||", logical_and_expr } ;
+logical_or_expr = logical_and_expr, { logical_or_op, logical_and_expr } ;
 
-logical_and_expr = equality_expr, { "&&", equality_expr } ;
+logical_and_expr = bitwise_or_expr, { logical_and_op, bitwise_or_expr } ;
 
-equality_expr = relational_expr, { ("==" | "!="), relational_expr } ;
+bitwise_or_expr = bitwise_xor_expr, { bitwise_or_op, bitwise_xor_expr } ;
 
-relational_expr = bitwise_or_expr, { ("<" | ">" | "<=" | ">="), bitwise_or_expr } ;
+bitwise_xor_expr = bitwise_and_expr, { bitwise_xor_op, bitwise_and_expr } ;
 
-bitwise_or_expr = bitwise_xor_expr, { "|", bitwise_xor_expr } ;
+bitwise_and_expr = equality_expr, { bitwise_and_op, equality_expr } ;
 
-bitwise_xor_expr = bitwise_and_expr, { "^", bitwise_and_expr } ;
+equality_expr = comparison_expr, { equality_op, comparison_expr } ;
 
-bitwise_and_expr = shift_expr, { "&", shift_expr } ;
+comparison_expr = shift_expr, { comparison_op, shift_expr } ;
 
-shift_expr = add_expr, { ("<<" | ">>"), add_expr } ;
+shift_expr = term_expr, { shift_op, term_expr } ;
 
-add_expr = mul_expr, { ( "+" | "-" ), mul_expr } ;
+term_expr = factor_expr, { term_op, factor_expr } ;
 
-mul_expr = primary_expr, { ( "*" | "/" ), primary_expr } ;
+factor_expr = unary_expr, { factor_op, unary_expr } ;
 
-unary_expr = ( "!" | "-" | "~" ) unary_expr | primary_expr ;
+unary_expr = unary_op, unary_expr | postfix_expr ;
 
-primary_expr = block_expr | function_expr | function_call_expr | identifier | number | "(", expression, ")" ;
+postfix_expr = primary_expr, { call_op }, [ postfix_op ] ;
 
-block_expr = "{", { statement } ,"}" ;
+primary_expr = block_expr | function_expr | identifier | literal | "(", expression, ")" ;
 
-function_expr = "(", [ paramater_list ], ")", "->", expression ;
-paramater_list = identifier, { ",", identifier } ;
+block_expr = "{", { statement }, "}" ;
 
-function_call_expr = expression, "(", [ argument_list ], ")", { "(", [ argument_list ], ")"} ;
+function_expr = "(", [ parameter_list ], ")", "->", expression ;
+
+assignment_op = "=" | "+=" | "-=" | "*=" | "/=" | "%=" | "&=" | "|=" | "^=" | "<<=" | ">>=" ;
+logical_or_op = "||" ;
+logical_and_op = "&&" ;
+bitwise_or_op = "|" ;
+bitwise_xor_op = "^" ;
+bitwise_and_op = "&" ;
+equality_op = "==" | "!=" ;
+comparison_op = "<" | ">" | "<=" | ">=" ;
+shift_op = "<<" | ">>" ;
+term_op = "+" | "-" ;
+factor_op = "*" | "/" | "%" ;
+unary_op = "!" | "-" | "~" ;
+postfix_op = "++" | "--" ;
+call_op = "(", [ argument_list ], ")" ;
+
+parameter_list = identifier, { ",", identifier } ;
 argument_list = expression, { ",", expression } ;
 
 
@@ -56,6 +76,9 @@ paramater_type_list = type, { ",", type } ;
 
 builtin_type = "bool" | "i8" | "i16" | "i32" | "i64" | "f32" | "f64" | "void" ;
 
+literal = boolean | number ;
+
+bool = "true" | "false" ;
 
 identifier = letter, { letter | digit | "_" } ;
 
