@@ -1,6 +1,7 @@
 export module voidlang:lexer;
 
 import lexer;
+import lexer.definitions;
 import std;
 import :token;
 
@@ -65,21 +66,19 @@ auto lex(std::string_view buffer) -> std::expected<std::vector<token>, std::stri
 	lexer.define(lexer::definitions::single_char<token_type::semicolon, ';'>);
 	lexer.define(lexer::definitions::single_char<token_type::slash, '/'>);
 
-	lexer.define(lexer::definitions::multi_char<token_type::kw_let, 'l', 'e', 't'>);
-	lexer.define(lexer::definitions::multi_char<token_type::kw_if, 'i', 'f'>);
-	lexer.define(lexer::definitions::multi_char<token_type::kw_else, 'e', 'l', 's', 'e'>);
-	lexer.define(lexer::definitions::multi_char<token_type::kw_return, 'r', 'e', 't', 'u', 'r', 'n'>);
+	lexer.define(lexer::definitions::keyword<token_type::kw_let, 'l', 'e', 't'>);
+	lexer.define(lexer::definitions::keyword<token_type::kw_if, 'i', 'f'>);
+	lexer.define(lexer::definitions::keyword<token_type::kw_else, 'e', 'l', 's', 'e'>);
+	lexer.define(lexer::definitions::keyword<token_type::kw_return, 'r', 'e', 't', 'u', 'r', 'n'>);
 
-	lexer.define(lexer::definitions::multi_char<token_type::bt_bool, 'b', 'o', 'o', 'l'>);
-	lexer.define(lexer::definitions::multi_char<token_type::bt_i8, 'i', '8'>);
-	lexer.define(lexer::definitions::multi_char<token_type::bt_i16, 'i', '1', '6'>);
-	lexer.define(lexer::definitions::multi_char<token_type::bt_i32, 'i', '3', '2'>);
-	lexer.define(lexer::definitions::multi_char<token_type::bt_i64, 'i', '6', '4'>);
-	lexer.define(lexer::definitions::multi_char<token_type::bt_f32, 'f', '3', '2'>);
-	lexer.define(lexer::definitions::multi_char<token_type::bt_f64, 'f', '6', '4'>);
-	lexer.define(lexer::definitions::multi_char<token_type::bt_void, 'v', 'o', 'i', 'd'>);
-
-	lexer.define(lexer::definitions::identifier<token_type::identifier>);
+	lexer.define(lexer::definitions::keyword<token_type::bt_bool, 'b', 'o', 'o', 'l'>);
+	lexer.define(lexer::definitions::keyword<token_type::bt_i8, 'i', '8'>);
+	lexer.define(lexer::definitions::keyword<token_type::bt_i16, 'i', '1', '6'>);
+	lexer.define(lexer::definitions::keyword<token_type::bt_i32, 'i', '3', '2'>);
+	lexer.define(lexer::definitions::keyword<token_type::bt_i64, 'i', '6', '4'>);
+	lexer.define(lexer::definitions::keyword<token_type::bt_f32, 'f', '3', '2'>);
+	lexer.define(lexer::definitions::keyword<token_type::bt_f64, 'f', '6', '4'>);
+	lexer.define(lexer::definitions::keyword<token_type::bt_void, 'v', 'o', 'i', 'd'>);
 
 	lexer.define(lexer::definitions::boolean<token_type::lit_bool>);
 	lexer.define([](const auto& ctx) { return ctx.match(std::isdigit); },
@@ -101,6 +100,8 @@ auto lex(std::string_view buffer) -> std::expected<std::vector<token>, std::stri
 
 					 return lexer::token{type, ctx.substr(start, ctx.index() - start)};
 				 });
+
+	lexer.define(lexer::definitions::identifier<token_type::identifier>);
 
 	lexer.define(lexer::definitions::end_of_file<token_type::eof>);
 
