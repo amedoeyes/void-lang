@@ -13,6 +13,51 @@ auto main(int argc, char** argv) -> int {
 		return std::nullopt;
 	});
 
+	auto& tokens_command = root_command.add_command("tokens");
+	tokens_command.set_usage("file");
+	tokens_command.set_description("dump tokens");
+	tokens_command.add_option("help", {.description = "display this help and exit", .name = "help", .short_name = 'h'});
+	tokens_command.set_action([](const cli::command& cmd) -> std::optional<std::int32_t> {
+		if (cmd.got_option("help")) {
+			cmd.print_help();
+			return 0;
+		}
+		const auto args = cmd.arguments();
+		if (args.empty()) {
+			std::println("void: tokens command expects a file");
+			return 1;
+		}
+		if (args.size() > 1) {
+			std::println(std::cerr, "void: tokens command expects only one file");
+			return 1;
+		}
+		const auto arg = args[0];
+
+		auto file = std::ifstream{std::string{arg}};
+		if (!file) {
+			std::println(std::cerr, "void: {}: No such file or directory", arg);
+			return 1;
+		}
+		const auto buffer = (std::stringstream{} << file.rdbuf()).str();
+
+		const auto tokens = voidlang::lex(buffer);
+		if (!tokens) {
+			std::println(std::cerr, "{}", tokens.error());
+			return 1;
+		}
+
+		for (const auto& token : *tokens) {
+			std::println("{}:{}:{}: {}: '{}'",
+			             arg,
+			             token.start_line,
+			             token.start_column,
+			             token_name(token.type),
+			             token.lexeme);
+		}
+
+		return 0;
+	});
+
 	auto& ast_command = root_command.add_command("ast");
 	ast_command.set_usage("file");
 	ast_command.set_description("dump AST");
@@ -43,6 +88,7 @@ auto main(int argc, char** argv) -> int {
 		const auto tokens = voidlang::lex(buffer);
 		if (!tokens) {
 			std::println(std::cerr, "{}", tokens.error());
+			return 1;
 		}
 
 		const auto ast = voidlang::parse(*tokens, buffer);
@@ -86,6 +132,7 @@ auto main(int argc, char** argv) -> int {
 		const auto tokens = voidlang::lex(buffer);
 		if (!tokens) {
 			std::println(std::cerr, "{}", tokens.error());
+			return 1;
 		}
 
 		const auto ast = voidlang::parse(*tokens, buffer);
