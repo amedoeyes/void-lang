@@ -19,7 +19,7 @@ struct identifier_type {
 };
 
 struct type : std::variant<builtin_type, identifier_type, function_type> {
-	using std::variant<builtin_type, identifier_type, function_type>::variant;
+	using variant::variant;
 };
 
 struct integer_literal {
@@ -31,7 +31,7 @@ struct float_literal {
 };
 
 struct literal : std::variant<integer_literal, float_literal> {
-	using std::variant<integer_literal, float_literal>::variant;
+	using variant::variant;
 };
 
 struct identifier {
@@ -48,37 +48,86 @@ struct function_call_expr {
 	std::vector<recursive_wrapper<struct expression>> arguments;
 };
 
+enum class prefix_operator : std::int8_t {
+	negate,
+	logical_not,
+	bit_not,
+	increment,
+	decrement,
+};
+
+struct prefix_operation {
+	prefix_operator kind;
+	recursive_wrapper<struct expression> expression;
+};
+
+enum class postfix_operator : std::int8_t {
+	increment,
+	decrement,
+};
+
+struct postfix_operation {
+	postfix_operator kind;
+	recursive_wrapper<struct expression> expression;
+};
+
+using unary_operation = std::variant<prefix_operation, postfix_operation>;
+
+enum class binary_operator : std::int8_t {
+	assign,
+	assign_add,
+	assign_sub,
+	assign_mul,
+	assign_div,
+	assign_mod,
+	assign_bit_and,
+	assign_bit_or,
+	assign_bit_xor,
+	assign_bit_lshift,
+	assign_bit_rshift,
+
+	add,
+	sub,
+	mul,
+	div,
+
+	logical_and,
+	logical_or,
+
+	equal,
+	not_equal,
+	less_than,
+	greater_than,
+	less_than_equal,
+	greater_than_equal,
+
+	bit_and,
+	bit_or,
+	bit_xor,
+	bit_lshift,
+	bit_rshift,
+};
+
+struct binary_operation {
+	binary_operator kind;
+	recursive_wrapper<struct expression> lhs;
+	recursive_wrapper<struct expression> rhs;
+};
+
 struct ternary_operation {
 	recursive_wrapper<struct expression> condition;
 	recursive_wrapper<struct expression> true_branch;
 	recursive_wrapper<struct expression> false_branch;
 };
 
-struct binary_operation {
-	enum class kind : std::int8_t {
-		add,
-		sub,
-		mult,
-		div,
-
-		logical_and,
-		logical_or,
-
-		equal_equal,
-		bang_equal,
-
-		bitwise_and,
-		bitwise_or,
-		bitwise_xor
-	} kind;
-	recursive_wrapper<struct expression> lhs;
-	recursive_wrapper<struct expression> rhs;
-};
-
-struct expression
-	: std::variant<literal, identifier, function_expr, function_call_expr, binary_operation, ternary_operation> {
-	using std::variant<literal, identifier, function_expr, function_call_expr, binary_operation, ternary_operation>::
-		variant;
+struct expression : std::variant<literal,
+                                 identifier,
+                                 function_expr,
+                                 function_call_expr,
+                                 unary_operation,
+                                 ternary_operation,
+                                 binary_operation> {
+	using variant::variant;
 };
 
 struct variable_declaration {

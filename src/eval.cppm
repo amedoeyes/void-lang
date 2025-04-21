@@ -176,18 +176,18 @@ auto eval_bin_bxor(symbol_table<value>& st, const binary_operation& op) noexcept
 
 auto eval_bin(symbol_table<value>& st, const binary_operation& op) noexcept -> value {
 	switch (op.kind) {
-		using enum binary_operation::kind;
+		using enum binary_operator;
 		case add:         return eval_bin_add(st, op);
 		case sub:         return eval_bin_sub(st, op);
-		case mult:        return eval_bin_mul(st, op);
+		case mul:         return eval_bin_mul(st, op);
 		case div:         return eval_bin_div(st, op);
 		case logical_and: return eval_bin_land(st, op);
 		case logical_or:  return eval_bin_lor(st, op);
-		case equal_equal: return eval_bin_eq(st, op);
-		case bang_equal:  return eval_bin_neq(st, op);
-		case bitwise_and: return eval_bin_band(st, op);
-		case bitwise_or:  return eval_bin_bor(st, op);
-		case bitwise_xor: return eval_bin_bxor(st, op);
+		case equal:       return eval_bin_eq(st, op);
+		case not_equal:   return eval_bin_neq(st, op);
+		case bit_and:     return eval_bin_band(st, op);
+		case bit_or:      return eval_bin_bor(st, op);
+		case bit_xor:     return eval_bin_bxor(st, op);
 	}
 }
 
@@ -207,6 +207,10 @@ auto eval_expr(symbol_table<value>& st, const expression& expr) noexcept -> valu
 						  [&](const identifier& id) { return eval_id(st, id); },
 						  [&](const function_expr& fun) { return eval_fun(st, fun); },
 						  [&](const function_call_expr& call) { return eval_fun_call(st, call); },
+						  [&](const unary_operation& op) {
+							  assert(false);
+							  return value{0};
+						  },
 						  [&](const binary_operation& op) { return eval_bin(st, op); },
 						  [&](const ternary_operation& op) { return eval_ter(st, op); },
 					  },

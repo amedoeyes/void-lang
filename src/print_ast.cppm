@@ -93,6 +93,43 @@ void print_expression(const expression& expr, std::int32_t indent) {
 			}
 		},
 
+		[&](const unary_operation& op) {
+			print_indent(indent);
+			std::println("Unary operation:");
+			std::visit(visitor{[&](const prefix_operation& pre) {
+								   print_indent(indent + 2);
+								   std::print("Kind: pre ");
+								   switch (pre.kind) {
+									   using enum prefix_operator;
+									   case negate:      std::print("negate"); break;
+									   case logical_not: std::print("logical_not"); break;
+									   case bit_not:     std::print("bit_not"); break;
+									   case increment:   std::print("increment"); break;
+									   case decrement:   std::print("decrement"); break;
+								   }
+								   std::println("");
+
+								   print_indent(indent + 2);
+								   std::println("Expression:");
+								   print_expression(pre.expression.get(), indent + 4);
+							   },
+		                       [&](const postfix_operation& post) {
+								   print_indent(indent + 2);
+								   std::print("Kind: post ");
+								   switch (post.kind) {
+									   using enum postfix_operator;
+									   case increment: std::print("increment"); break;
+									   case decrement: std::print("decrement"); break;
+								   }
+								   std::println("");
+
+								   print_indent(indent + 2);
+								   std::println("Expression:");
+								   print_expression(post.expression.get(), indent + 4);
+							   }},
+		               op);
+		},
+
 		[&](const binary_operation& op) {
 			print_indent(indent);
 			std::println("Binary operation:");
@@ -100,18 +137,18 @@ void print_expression(const expression& expr, std::int32_t indent) {
 			print_indent(indent + 2);
 			std::print("Kind: ");
 			switch (op.kind) {
-				using enum binary_operation::kind;
+				using enum binary_operator;
 				case add:         std::print("add"); break;
 				case sub:         std::print("sub"); break;
-				case mult:        std::print("mult"); break;
+				case mul:         std::print("mul"); break;
 				case div:         std::print("div"); break;
 				case logical_and: std::print("logical_and"); break;
 				case logical_or:  std::print("logical_or"); break;
-				case equal_equal: std::print("equal_equal"); break;
-				case bang_equal:  std::print("bang_equal"); break;
-				case bitwise_and: std::print("bitwise_and"); break;
-				case bitwise_or:  std::print("bitwise_or"); break;
-				case bitwise_xor: std::print("bitwise_xor"); break;
+				case equal:       std::print("equal_equal"); break;
+				case not_equal:   std::print("bang_equal"); break;
+				case bit_and:     std::print("bit_and"); break;
+				case bit_or:      std::print("bit_or"); break;
+				case bit_xor:     std::print("bit_xor"); break;
 			}
 			std::println("");
 

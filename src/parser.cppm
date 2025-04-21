@@ -8,6 +8,69 @@ import :token;
 
 namespace voidlang {
 
+constexpr auto binary_kind_from_token_type(token_type type) -> binary_operator {
+	switch (type) {
+		using enum token_type;
+		case equal:                           return binary_operator::assign;
+		case plus_equal:                      return binary_operator::assign_add;
+		case hyphen_equal:                    return binary_operator::assign_sub;
+		case asterisk_equal:                  return binary_operator::assign_mul;
+		case slash_equal:                     return binary_operator::assign_div;
+		case percent_equal:                   return binary_operator::assign_mod;
+		case ampersand_equal:                 return binary_operator::assign_bit_and;
+		case pipe_equal:                      return binary_operator::assign_bit_or;
+		case caret_equal:                     return binary_operator::assign_bit_xor;
+		case less_than_less_than_equal:       return binary_operator::assign_bit_lshift;
+		case greater_than_greater_than_equal: return binary_operator::assign_bit_rshift;
+
+		case plus:                            return binary_operator::add;
+		case hyphen:                          return binary_operator::sub;
+		case asterisk:                        return binary_operator::mul;
+		case slash:                           return binary_operator::div;
+
+		case ampersand_ampersand:             return binary_operator::logical_and;
+		case pipe_pipe:                       return binary_operator::logical_or;
+
+		case equal_equal:                     return binary_operator::equal;
+		case bang_equal:                      return binary_operator::not_equal;
+		case less_than:                       return binary_operator::less_than;
+		case greater_than:                    return binary_operator::greater_than;
+		case less_than_equal:                 return binary_operator::less_than_equal;
+		case greater_than_equal:              return binary_operator::greater_than_equal;
+
+		case ampersand:                       return binary_operator::bit_and;
+		case pipe:                            return binary_operator::bit_or;
+		case caret:                           return binary_operator::bit_xor;
+		case less_than_less_than:             return binary_operator::bit_lshift;
+		case greater_than_greater_than:       return binary_operator::bit_rshift;
+
+		default:                              std::unreachable();
+	}
+}
+
+constexpr auto prefix_kind_from_token_type(token_type type) -> prefix_operator {
+	switch (type) {
+		using enum token_type;
+		case hyphen:        return prefix_operator::negate;
+		case bang:          return prefix_operator::logical_not;
+		case tilde:         return prefix_operator::bit_not;
+		case plus_plus:     return prefix_operator::increment;
+		case hyphen_hyphen: return prefix_operator::decrement;
+
+		default:            std::unreachable();
+	}
+}
+
+constexpr auto postfix_kind_from_token_type(token_type type) -> postfix_operator {
+	switch (type) {
+		using enum token_type;
+		case plus_plus:     return postfix_operator::increment;
+		case hyphen_hyphen: return postfix_operator::decrement;
+
+		default:            std::unreachable();
+	}
+}
+
 class parser {
 public:
 	explicit parser(std::span<const token> tokens, std::string_view buffer) : tokens_{tokens}, buffer_{buffer} {}
@@ -64,6 +127,13 @@ private:
 		requires(std::same_as<TokenTypes, token_type> && ...)
 	[[nodiscard]]
 	auto match(TokenTypes... types) const -> bool {
+		return (match(types) || ...);
+	}
+
+	template<typename... TokenTypes>
+		requires(std::same_as<TokenTypes, token_type> && ...)
+	[[nodiscard]]
+	auto match_seq(TokenTypes... types) const -> bool {
 		auto offset = 0uz;
 		const auto check = [&](token_type type) -> bool {
 			const auto tok = offset == 0 ? curr() : peek(offset);
@@ -139,13 +209,13 @@ private:
 
 			case lit_integer: {
 				const auto int_lit = parse_integer_lit();
-				if (!int_lit) return std::unexpected{int_lit.error()};
+				if (!int_lit) return int_lit;
 				return *int_lit;
 			}
 
 			case lit_float: {
 				const auto float_lit = parse_float_lit();
-				if (!float_lit) return std::unexpected{float_lit.error()};
+				if (!float_lit) return float_lit;
 				return *float_lit;
 			}
 
@@ -206,7 +276,7 @@ private:
 					if (!match_and_next(token_type::hyphen_greater_than)) return expected_error("'->'");
 
 					const auto return_type = parse_type();
-					if (!return_type) return std::unexpected{return_type.error()};
+					if (!return_type) return return_type;
 
 					type.return_type = recursive_wrapper{*return_type};
 					return type;
@@ -214,7 +284,7 @@ private:
 
 				while (!match(token_type::eof)) {
 					const auto param_type = parse_type();
-					if (!param_type) return std::unexpected{param_type.error()};
+					if (!param_type) return param_type;
 					type.parameters.emplace_back(*param_type);
 
 					if (match_and_next(token_type::comma)) continue;
@@ -222,7 +292,7 @@ private:
 					if (!match_and_next(token_type::hyphen_greater_than)) return expected_error("'->'");
 
 					const auto return_type = parse_type();
-					if (!return_type) return std::unexpected{return_type.error()};
+					if (!return_type) return return_type;
 					type.return_type = recursive_wrapper{*return_type};
 
 					return type;
@@ -234,11 +304,42 @@ private:
 	}
 
 	auto parse_expression() -> std::expected<expression, std::string> {
-		return parse_ternary_expr();
+		return parse_assignment_expr();
+	}
+
+	auto parse_assignment_expr() -> std::expected<expression, std::string> {
+		auto lhs = parse_ternary_expr();
+		if (!lhs) return lhs;
+
+		while (match(token_type::equal,
+		             token_type::plus_equal,
+		             token_type::hyphen_equal,
+		             token_type::asterisk_equal,
+		             token_type::slash_equal,
+		             token_type::percent_equal,
+		             token_type::ampersand_equal,
+		             token_type::pipe_equal,
+		             token_type::caret_equal,
+		             token_type::less_than_less_than_equal,
+		             token_type::greater_than_greater_than_equal)) {
+			const auto kind = binary_kind_from_token_type(curr().type);
+			next();
+
+			auto rhs = parse_assignment_expr();
+			if (!rhs) return rhs;
+
+			lhs = binary_operation{
+				.kind = kind,
+				.lhs{std::move(*lhs)},
+				.rhs{std::move(*rhs)},
+			};
+		}
+
+		return *lhs;
 	}
 
 	auto parse_ternary_expr() -> std::expected<expression, std::string> {
-		auto cond = parse_logical_expr();
+		auto cond = parse_logical_or_expr();
 		if (!cond) return cond;
 
 		if (match_and_next(token_type::question_mark)) {
@@ -260,13 +361,96 @@ private:
 		return *cond;
 	}
 
-	auto parse_logical_expr() -> std::expected<expression, std::string> {
+	auto parse_logical_or_expr() -> std::expected<expression, std::string> {
+		auto lhs = parse_logical_and_expr();
+		if (!lhs) return lhs;
+
+		while (match(token_type::ampersand_ampersand)) {
+			const auto kind = binary_kind_from_token_type(curr().type);
+			next();
+
+			auto rhs = parse_logical_and_expr();
+			if (!rhs) return rhs;
+
+			lhs = binary_operation{
+				.kind = kind,
+				.lhs{std::move(*lhs)},
+				.rhs{std::move(*rhs)},
+			};
+		}
+
+		return *lhs;
+	}
+
+	auto parse_logical_and_expr() -> std::expected<expression, std::string> {
+		auto lhs = parse_bit_or_expr();
+		if (!lhs) return lhs;
+
+		while (match(token_type::ampersand_ampersand)) {
+			const auto kind = binary_kind_from_token_type(curr().type);
+			next();
+
+			auto rhs = parse_bit_or_expr();
+			if (!rhs) return rhs;
+
+			lhs = binary_operation{
+				.kind = kind,
+				.lhs{std::move(*lhs)},
+				.rhs{std::move(*rhs)},
+			};
+		}
+
+		return *lhs;
+	}
+
+	auto parse_bit_or_expr() -> std::expected<expression, std::string> {
+		auto lhs = parse_bit_xor_expr();
+		if (!lhs) return lhs;
+
+		while (match(token_type::caret)) {
+			const auto kind = binary_kind_from_token_type(curr().type);
+			next();
+
+			auto rhs = parse_bit_xor_expr();
+			if (!rhs) return rhs;
+
+			lhs = binary_operation{
+				.kind = kind,
+				.lhs{std::move(*lhs)},
+				.rhs{std::move(*rhs)},
+			};
+		}
+
+		return *lhs;
+	}
+
+	auto parse_bit_xor_expr() -> std::expected<expression, std::string> {
+		auto lhs = parse_bit_and_expr();
+		if (!lhs) return lhs;
+
+		while (match(token_type::ampersand)) {
+			const auto kind = binary_kind_from_token_type(curr().type);
+			next();
+
+			auto rhs = parse_bit_and_expr();
+			if (!rhs) return rhs;
+
+			lhs = binary_operation{
+				.kind = kind,
+				.lhs{std::move(*lhs)},
+				.rhs{std::move(*rhs)},
+			};
+		}
+
+		return *lhs;
+	}
+
+	auto parse_bit_and_expr() -> std::expected<expression, std::string> {
 		auto lhs = parse_equality_expr();
 		if (!lhs) return lhs;
 
-		while (match(token_type::ampersand_ampersand) || match(token_type::pipe_pipe)) {
-			const auto kind = match(token_type::ampersand_ampersand) ? binary_operation::kind::logical_and
-			                                                         : binary_operation::kind::logical_or;
+		while (match(token_type::ampersand)) {
+			const auto kind = binary_kind_from_token_type(curr().type);
 			next();
 
 			auto rhs = parse_equality_expr();
@@ -283,15 +467,14 @@ private:
 	}
 
 	auto parse_equality_expr() -> std::expected<expression, std::string> {
-		auto lhs = parse_bit_expr();
+		auto lhs = parse_comparison_expr();
 		if (!lhs) return lhs;
 
-		while (match(token_type::equal_equal) || match(token_type::bang_equal)) {
-			const auto kind = match(token_type::equal_equal) ? binary_operation::kind::equal_equal
-			                                                 : binary_operation::kind::bang_equal;
+		while (match(token_type::equal_equal, token_type::bang_equal)) {
+			const auto kind = binary_kind_from_token_type(curr().type);
 			next();
 
-			auto rhs = parse_bit_expr();
+			auto rhs = parse_comparison_expr();
 			if (!rhs) return rhs;
 
 			lhs = binary_operation{
@@ -304,74 +487,150 @@ private:
 		return *lhs;
 	}
 
-	auto parse_bit_expr() -> std::expected<expression, std::string> {
-		auto lhs = parse_add_expr();
+	auto parse_comparison_expr() -> std::expected<expression, std::string> {
+		auto lhs = parse_shift_expr();
 		if (!lhs) return lhs;
 
-		while (match(token_type::ampersand) || match(token_type::pipe) || match(token_type::caret)) {
-			auto kind = binary_operation::kind::bitwise_and;
-			switch (curr().type) {
-				using enum token_type;
-				case ampersand: kind = binary_operation::kind::bitwise_and; break;
-				case pipe:      kind = binary_operation::kind::bitwise_or; break;
-				case caret:     kind = binary_operation::kind::bitwise_xor; break;
-				default:        std::unreachable();
+		if (match(token_type::less_than,
+		          token_type::greater_than,
+		          token_type::less_than_equal,
+		          token_type::greater_than_equal)) {
+			const auto kind = binary_kind_from_token_type(curr().type);
+			next();
+
+			auto rhs = parse_shift_expr();
+			if (!rhs) return rhs;
+
+			return binary_operation{
+				.kind = kind,
+				.lhs{std::move(*lhs)},
+				.rhs{std::move(*rhs)},
+			};
+		}
+
+		return *lhs;
+	}
+
+	auto parse_shift_expr() -> std::expected<expression, std::string> {
+		auto lhs = parse_term_expr();
+		if (!lhs) return lhs;
+
+		while (match(token_type::less_than_less_than, token_type::greater_than_greater_than)) {
+			const auto kind = binary_kind_from_token_type(curr().type);
+			next();
+
+			auto rhs = parse_term_expr();
+			if (!rhs) return rhs;
+
+			lhs = binary_operation{
+				.kind = kind,
+				.lhs{std::move(*lhs)},
+				.rhs{std::move(*rhs)},
+			};
+		}
+
+		return *lhs;
+	}
+
+	auto parse_term_expr() -> std::expected<expression, std::string> {
+		auto lhs = parse_factor_expr();
+		if (!lhs) return lhs;
+
+		while (match(token_type::plus, token_type::hyphen)) {
+			const auto kind = binary_kind_from_token_type(curr().type);
+			next();
+
+			auto rhs = parse_factor_expr();
+			if (!rhs) return rhs;
+
+			lhs = binary_operation{
+				.kind = kind,
+				.lhs{std::move(*lhs)},
+				.rhs{std::move(*rhs)},
+			};
+		}
+
+		return *lhs;
+	}
+
+	auto parse_factor_expr() -> std::expected<expression, std::string> {
+		auto lhs = parse_prefix_expr();
+		if (!lhs) return lhs;
+
+		while (match(token_type::asterisk, token_type::slash)) {
+			const auto kind = binary_kind_from_token_type(curr().type);
+			next();
+
+			auto rhs = parse_prefix_expr();
+			if (!rhs) return rhs;
+
+			lhs = binary_operation{
+				.kind = kind,
+				.lhs{std::move(*lhs)},
+				.rhs{std::move(*rhs)},
+			};
+		}
+
+		return *lhs;
+	}
+
+	auto parse_prefix_expr() -> std::expected<expression, std::string> {
+		if (match(token_type::bang,
+		          token_type::hyphen,
+		          token_type::tilde,
+		          token_type::plus_plus,
+		          token_type::hyphen_hyphen)) {
+			const auto kind = prefix_kind_from_token_type(curr().type);
+			next();
+
+			auto expr = parse_postfix_expr();
+			if (!expr) return expr;
+
+			return prefix_operation{
+				.kind = kind,
+				.expression{std::move(*expr)},
+			};
+		}
+
+		return parse_postfix_expr();
+	}
+
+	auto parse_postfix_expr() -> std::expected<expression, std::string> {
+		auto expr = parse_primary_expr();
+		if (!expr) return expr;
+
+		while (match_and_next(token_type::paren_left)) {
+			auto call_expr = function_call_expr{.callee = recursive_wrapper{std::move(*expr)}};
+
+			if (match_and_next(token_type::paren_right)) {
+				expr = std::move(call_expr);
+				continue;
 			}
+
+			while (!match(token_type::eof)) {
+				const auto arg = parse_expression();
+				if (!arg) return arg;
+				call_expr.arguments.emplace_back(*arg);
+
+				if (match_and_next(token_type::paren_right)) break;
+
+				if (!match_and_next(token_type::comma)) return expected_error("','");
+			}
+
+			expr = std::move(call_expr);
+		}
+
+		if (match(token_type::plus_plus, token_type::hyphen_hyphen)) {
+			const auto kind = postfix_kind_from_token_type(curr().type);
 			next();
 
-			auto rhs = parse_add_expr();
-			if (!rhs) return rhs;
-
-			lhs = binary_operation{
+			return postfix_operation{
 				.kind = kind,
-				.lhs{std::move(*lhs)},
-				.rhs{std::move(*rhs)},
+				.expression{std::move(*expr)},
 			};
 		}
 
-		return *lhs;
-	}
-
-	auto parse_add_expr() -> std::expected<expression, std::string> {
-		auto lhs = parse_mult_expr();
-		if (!lhs) return lhs;
-
-		while (match(token_type::plus) || match(token_type::hyphen)) {
-			const auto kind = match(token_type::plus) ? binary_operation::kind::add : binary_operation::kind::sub;
-			next();
-
-			auto rhs = parse_mult_expr();
-			if (!rhs) return rhs;
-
-			lhs = binary_operation{
-				.kind = kind,
-				.lhs{std::move(*lhs)},
-				.rhs{std::move(*rhs)},
-			};
-		}
-
-		return *lhs;
-	}
-
-	auto parse_mult_expr() -> std::expected<expression, std::string> {
-		auto lhs = parse_primary_expr();
-		if (!lhs) return lhs;
-
-		while (match(token_type::asterisk) || match(token_type::slash)) {
-			const auto kind = match(token_type::asterisk) ? binary_operation::kind::mult : binary_operation::kind::div;
-			next();
-
-			auto rhs = parse_primary_expr();
-			if (!rhs) return rhs;
-
-			lhs = binary_operation{
-				.kind = kind,
-				.lhs{std::move(*lhs)},
-				.rhs{std::move(*rhs)},
-			};
-		}
-
-		return *lhs;
+		return expr;
 	}
 
 	auto parse_primary_expr() -> std::expected<expression, std::string> {
@@ -379,13 +638,13 @@ private:
 			case token_type::lit_integer:
 			case token_type::lit_float:   {
 				const auto lit = parse_literal();
-				if (!lit) return std::unexpected{lit.error()};
+				if (!lit) return lit;
 				return *lit;
 			}
 
 			case token_type::identifier: {
 				const auto id = parse_identifier();
-				if (!id) return std::unexpected{id.error()};
+				if (!id) return id;
 
 				auto expr = expression{*id};
 
@@ -394,7 +653,7 @@ private:
 
 					while (!match_and_next(token_type::paren_right) && !match(token_type::eof)) {
 						const auto arg = parse_expression();
-						if (!arg) return std::unexpected{arg.error()};
+						if (!arg) return arg;
 						fun_call.arguments.emplace_back(*arg);
 
 						if (!match(token_type::paren_right) && !match_and_next(token_type::comma)) {
@@ -411,15 +670,15 @@ private:
 			case token_type::paren_left: {
 				next();
 
-				if (match(token_type::paren_right) || match(token_type::identifier, token_type::paren_right)
-				    || match(token_type::identifier, token_type::comma)) {
+				if (match(token_type::paren_right) || match_seq(token_type::identifier, token_type::paren_right)
+				    || match_seq(token_type::identifier, token_type::comma)) {
 					auto expr = function_expr{};
 
 					if (match_and_next(token_type::paren_right)) {
 						if (!match_and_next(token_type::hyphen_greater_than)) return expected_error("'->'");
 
 						const auto new_expr = parse_expression();
-						if (!new_expr) return std::unexpected{new_expr.error()};
+						if (!new_expr) return new_expr;
 						expr.expression = recursive_wrapper{*new_expr};
 
 						return expr;
@@ -435,7 +694,7 @@ private:
 						if (!match_and_next(token_type::hyphen_greater_than)) return expected_error("'->'");
 
 						const auto new_expr = parse_expression();
-						if (!new_expr) return std::unexpected{new_expr.error()};
+						if (!new_expr) return new_expr;
 						expr.expression = recursive_wrapper{*new_expr};
 
 						return expr;
@@ -444,22 +703,6 @@ private:
 
 				auto expr = parse_expression();
 				if (!match_and_next(token_type::paren_right)) return expected_error("')'");
-
-				while (match_and_next(token_type::paren_left)) {
-					auto fun_call = function_call_expr{.callee = recursive_wrapper{std::move(*expr)}};
-
-					while (!match_and_next(token_type::paren_right) && !match(token_type::eof)) {
-						const auto arg = parse_expression();
-						if (!arg) return std::unexpected{arg.error()};
-						fun_call.arguments.emplace_back(*arg);
-
-						if (!match(token_type::paren_right) && !match_and_next(token_type::comma)) {
-							return expected_error("','");
-						}
-					}
-
-					expr = std::move(fun_call);
-				}
 
 				return expr;
 			}
