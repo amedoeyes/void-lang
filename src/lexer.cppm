@@ -48,6 +48,7 @@ auto lex(std::string_view buffer) -> std::expected<std::vector<token>, std::stri
 
 	lexer.define(lexer::definitions::single_char<token_type::ampersand, '&'>);
 	lexer.define(lexer::definitions::single_char<token_type::asterisk, '*'>);
+	lexer.define(lexer::definitions::single_char<token_type::bang, '!'>);
 	lexer.define(lexer::definitions::single_char<token_type::brace_left, '{'>);
 	lexer.define(lexer::definitions::single_char<token_type::brace_right, '}'>);
 	lexer.define(lexer::definitions::single_char<token_type::caret, '^'>);
@@ -65,6 +66,7 @@ auto lex(std::string_view buffer) -> std::expected<std::vector<token>, std::stri
 	lexer.define(lexer::definitions::single_char<token_type::question_mark, '?'>);
 	lexer.define(lexer::definitions::single_char<token_type::semicolon, ';'>);
 	lexer.define(lexer::definitions::single_char<token_type::slash, '/'>);
+	lexer.define(lexer::definitions::single_char<token_type::tilde, '~'>);
 
 	lexer.define(lexer::definitions::keyword<token_type::kw_let, 'l', 'e', 't'>);
 	lexer.define(lexer::definitions::keyword<token_type::kw_if, 'i', 'f'>);

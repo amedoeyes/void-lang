@@ -11,6 +11,7 @@ enum class token_type : std::int8_t {
 	ampersand_equal,
 	asterisk,
 	asterisk_equal,
+	bang,
 	bang_equal,
 	brace_left,
 	brace_right,
@@ -46,6 +47,7 @@ enum class token_type : std::int8_t {
 	semicolon,
 	slash,
 	slash_equal,
+	tilde,
 
 	kw_let,
 	kw_if,
@@ -83,6 +85,7 @@ auto token_name(token_type token) -> std::string {
 		case ampersand_equal:                 return "ampersand_equal";
 		case asterisk:                        return "asterisk";
 		case asterisk_equal:                  return "asterisk_equal";
+		case bang:                            return "bang";
 		case bang_equal:                      return "bang_equal";
 		case brace_left:                      return "brace_left";
 		case brace_right:                     return "brace_right";
@@ -118,6 +121,7 @@ auto token_name(token_type token) -> std::string {
 		case semicolon:                       return "semicolon";
 		case slash:                           return "slash";
 		case slash_equal:                     return "slash_equal";
+		case tilde:                           return "tilde";
 
 		case identifier:                      return "identifier";
 
