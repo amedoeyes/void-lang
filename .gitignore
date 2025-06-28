@@ -1,2 +1,2 @@
-.xmake
-build
+/target
+.direnv
