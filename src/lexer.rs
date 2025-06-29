@@ -84,11 +84,10 @@ impl Lexer {
     pub fn next_token(&mut self) -> Token {
         self.advance(self.slice_buffer_while(|c| c.is_whitespace()).len());
 
-        if self.remaining_buffer().starts_with("//") {
+        while self.remaining_buffer().starts_with("//") {
             self.advance(self.slice_buffer_while(|c| c != '\n').len());
+            self.advance(self.slice_buffer_while(|c| c.is_whitespace()).len());
         }
-
-        self.advance(self.slice_buffer_while(|c| c.is_whitespace()).len());
 
         if self.remaining_buffer().is_empty() {
             return Token {
