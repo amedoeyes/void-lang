@@ -1,5 +1,6 @@
 mod error;
 mod lexer;
+mod parser;
 
 use clap::{Arg, Command, crate_name, crate_version, value_parser};
 use clap_complete::{Shell, generate};
@@ -8,6 +9,7 @@ use std::{fs, io, path};
 use crate::{
     error::{Error, Result},
     lexer::{Lexer, TokenKind},
+    parser::Parser,
 };
 
 fn run() -> Result<()> {
@@ -19,6 +21,14 @@ fn run() -> Result<()> {
         .subcommand_required(true)
         .subcommand(
             Command::new("tokens").about("Dump tokens").arg(
+                Arg::new("file")
+                    .value_parser(clap::value_parser!(path::PathBuf))
+                    .required(true)
+                    .help("source file"),
+            ),
+        )
+        .subcommand(
+            Command::new("ast").about("Dump ast").arg(
                 Arg::new("file")
                     .value_parser(clap::value_parser!(path::PathBuf))
                     .required(true)
@@ -61,6 +71,14 @@ fn run() -> Result<()> {
                     token.kind
                 )
             }
+        }
+        Some(("ast", sub_matches)) => {
+            let file = sub_matches.get_one::<path::PathBuf>("file").unwrap();
+            let contents = fs::read_to_string(file)?;
+
+            let mut parser = Parser::new(&contents);
+            let ast = parser.parse()?;
+            println!("{ast:#?}");
         }
         _ => unreachable!(),
     };
