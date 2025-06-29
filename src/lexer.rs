@@ -6,11 +6,15 @@ pub enum TokenKind {
     Slash,
     ParenLeft,
     ParenRight,
+    HyphenGreaterThan,
 
     Integer(String),
     Identifier(String),
 
     Let,
+    If,
+    Then,
+    Else,
 
     Eof,
 
@@ -36,13 +40,14 @@ impl Span {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Token {
     pub kind: TokenKind,
     pub span: Span,
 }
 
 const SYMBOLS: &[(&str, TokenKind)] = &[
+    ("->", TokenKind::HyphenGreaterThan),
     ("+", TokenKind::Plus),
     ("-", TokenKind::Hyphen),
     ("*", TokenKind::Star),
@@ -51,7 +56,12 @@ const SYMBOLS: &[(&str, TokenKind)] = &[
     (")", TokenKind::ParenRight),
 ];
 
-const KEYWORDS: &[(&str, TokenKind)] = &[("let", TokenKind::Let)];
+const KEYWORDS: &[(&str, TokenKind)] = &[
+    ("let", TokenKind::Let),
+    ("if", TokenKind::If),
+    ("then", TokenKind::Then),
+    ("else", TokenKind::Else),
+];
 
 #[derive(Debug)]
 pub struct Lexer {
@@ -72,6 +82,12 @@ impl Lexer {
     }
 
     pub fn next_token(&mut self) -> Token {
+        self.advance(self.slice_buffer_while(|c| c.is_whitespace()).len());
+
+        if self.remaining_buffer().starts_with("//") {
+            self.advance(self.slice_buffer_while(|c| c != '\n').len());
+        }
+
         self.advance(self.slice_buffer_while(|c| c.is_whitespace()).len());
 
         if self.remaining_buffer().is_empty() {
