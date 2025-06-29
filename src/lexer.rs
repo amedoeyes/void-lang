@@ -1,11 +1,3 @@
-#[derive(Debug, thiserror::Error)]
-pub enum Error {
-    #[error("{0}:{1}: Unexpected character '{2}'")]
-    UnexpectedChar(usize, usize, char),
-}
-
-pub type Result<T> = std::result::Result<T, Error>;
-
 #[derive(Debug, PartialEq, Clone)]
 pub enum TokenKind {
     Plus,
@@ -21,6 +13,8 @@ pub enum TokenKind {
     Let,
 
     Eof,
+
+    Invalid,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -48,12 +42,6 @@ pub struct Token {
     pub span: Span,
 }
 
-#[derive(Debug)]
-pub struct Lexer {
-    buffer: String,
-    position: Position,
-}
-
 const SYMBOLS: &[(&str, TokenKind)] = &[
     ("+", TokenKind::Plus),
     ("-", TokenKind::Hyphen),
@@ -64,6 +52,12 @@ const SYMBOLS: &[(&str, TokenKind)] = &[
 ];
 
 const KEYWORDS: &[(&str, TokenKind)] = &[("let", TokenKind::Let)];
+
+#[derive(Debug)]
+pub struct Lexer {
+    buffer: String,
+    position: Position,
+}
 
 impl Lexer {
     pub fn new(buffer: &str) -> Self {
@@ -77,41 +71,40 @@ impl Lexer {
         }
     }
 
-    pub fn next_token(&mut self) -> Result<Token> {
+    pub fn next_token(&mut self) -> Token {
         self.advance(self.slice_buffer_while(|c| c.is_whitespace()).len());
 
         if self.remaining_buffer().is_empty() {
-            return Ok(Token {
+            return Token {
                 kind: TokenKind::Eof,
                 span: Span::new(self.position, self.position),
-            });
+            };
         }
 
         for symbol in SYMBOLS {
             if self.remaining_buffer().starts_with(symbol.0) {
-                return Ok(Token {
+                return Token {
                     kind: symbol.1.clone(),
                     span: self.advance_with_span(symbol.0.len()),
-                });
+                };
             }
         }
 
         for keyword in KEYWORDS {
-            if self.remaining_buffer().starts_with(keyword.0) {
-                if let Some(next_char) = self
+            if self.remaining_buffer().starts_with(keyword.0)
+                && let Some(next_char) = self
                     .remaining_buffer()
                     .strip_prefix(keyword.0)
                     .unwrap_or_default()
                     .chars()
                     .next()
-                {
-                    if !next_char.is_alphanumeric() && next_char != '_' {
-                        return Ok(Token {
-                            kind: keyword.1.clone(),
-                            span: self.advance_with_span(keyword.0.len()),
-                        });
-                    }
-                }
+                && !next_char.is_alphanumeric()
+                && next_char != '_'
+            {
+                return Token {
+                    kind: keyword.1.clone(),
+                    span: self.advance_with_span(keyword.0.len()),
+                };
             }
         }
 
@@ -119,25 +112,24 @@ impl Lexer {
 
         if current_char.is_ascii_digit() {
             let slice = self.slice_buffer_while(|c| c.is_ascii_digit());
-            return Ok(Token {
+            return Token {
                 kind: TokenKind::Integer(slice.to_string()),
                 span: self.advance_with_span(slice.len()),
-            });
+            };
         }
 
         if current_char.is_alphabetic() || current_char == '_' {
             let slice = self.slice_buffer_while(|c| c.is_alphanumeric() || c == '_');
-            return Ok(Token {
+            return Token {
                 kind: TokenKind::Identifier(slice.to_string()),
                 span: self.advance_with_span(slice.len()),
-            });
+            };
         }
 
-        Err(Error::UnexpectedChar(
-            self.position.line,
-            self.position.column,
-            current_char,
-        ))
+        Token {
+            kind: TokenKind::Invalid,
+            span: Span::new(self.position, self.position),
+        }
     }
 
     fn current_char(&self) -> Option<char> {
@@ -154,7 +146,11 @@ impl Lexer {
 
     fn slice_buffer_while<P: Fn(char) -> bool>(&self, predicate: P) -> &str {
         let buffer = self.remaining_buffer();
-        &buffer[..buffer.chars().take_while(|&c| predicate(c)).count()]
+        if let Some(pos) = buffer.find(|c| !predicate(c)) {
+            &buffer[..pos]
+        } else {
+            buffer
+        }
     }
 
     fn advance(&mut self, n: usize) {
@@ -176,18 +172,5 @@ impl Lexer {
         self.advance(n);
         let end = self.position;
         Span::new(start, end)
-    }
-}
-
-pub fn tokenize(buffer: &str) -> Result<Vec<Token>> {
-    let mut lexer = Lexer::new(buffer);
-    let mut tokens = vec![];
-    loop {
-        let token = lexer.next_token()?;
-        if token.kind == TokenKind::Eof {
-            tokens.push(token);
-            break Ok(tokens);
-        }
-        tokens.push(token);
     }
 }

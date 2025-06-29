@@ -1,29 +1,92 @@
+mod error;
 mod lexer;
 
-use crate::lexer::tokenize;
-use std::{env::args, fs::read_to_string, process::exit};
+use clap::{Arg, Command, crate_name, crate_version, value_parser};
+use clap_complete::{Shell, generate};
+use std::{fs, io, path};
 
-fn main() {
-    let args: Vec<String> = args().collect();
-    if args.len() < 2 {
-        eprintln!("Usage: {} <filename>", args[0]);
-        exit(1);
+use crate::{
+    error::{Error, Result},
+    lexer::{Lexer, TokenKind},
+};
+
+fn run() -> Result<()> {
+    let mut cmd = Command::new(crate_name!())
+        .version(crate_version!())
+        .disable_colored_help(true)
+        .disable_help_subcommand(true)
+        .arg_required_else_help(true)
+        .subcommand_required(true)
+        .subcommand(
+            Command::new("tokens").about("Dump tokens").arg(
+                Arg::new("file")
+                    .value_parser(clap::value_parser!(path::PathBuf))
+                    .required(true)
+                    .help("source file"),
+            ),
+        )
+        .subcommand(
+            Command::new("completions")
+                .about("Generate shell completions")
+                .arg(
+                    Arg::new("shell")
+                        .value_parser(value_parser!(Shell))
+                        .required(true),
+                ),
+        );
+
+    let matches = cmd.clone().try_get_matches()?;
+
+    if let Some(("completions", sub_matches)) = matches.subcommand() {
+        let shell = sub_matches.get_one::<Shell>("shell").unwrap();
+        let name = &cmd.get_name().to_string();
+        generate(*shell, &mut cmd, name, &mut io::stdout());
+        return Ok(());
     }
-    let filename = &args[1];
 
-    match read_to_string(filename) {
-        Ok(contents) => {
-            let tokens = tokenize(&contents).unwrap();
-            for token in tokens {
+    match matches.subcommand() {
+        Some(("tokens", sub_matches)) => {
+            let file = sub_matches.get_one::<path::PathBuf>("file").unwrap();
+            let contents = fs::read_to_string(file)?;
+
+            let mut lexer = Lexer::new(&contents);
+            while let token = lexer.next_token()
+                && token.kind != TokenKind::Eof
+            {
                 println!(
                     "{}:{}:{}: {:?}",
-                    filename, token.span.start.line, token.span.start.column, token.kind
+                    file.to_str().unwrap(),
+                    token.span.start.line,
+                    token.span.start.column,
+                    token.kind
                 )
             }
         }
-        Err(e) => {
-            eprintln!("Error reading file '{}': {}", filename, e);
-            exit(1);
+        _ => unreachable!(),
+    };
+
+    Ok(())
+}
+
+fn main() {
+    if let Err(error) = run() {
+        match error {
+            Error::Clap(error) => match error.kind() {
+                clap::error::ErrorKind::DisplayHelp
+                | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+                | clap::error::ErrorKind::DisplayVersion => {
+                    eprintln!("{error}");
+                    std::process::exit(0);
+                }
+                _ => {
+                    eprintln!("{error}");
+                    std::process::exit(1);
+                }
+            },
+            _ => {
+                eprintln!("error: {error}");
+                std::process::exit(1);
+            }
         }
     }
 }
