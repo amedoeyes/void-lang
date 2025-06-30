@@ -1,7 +1,6 @@
-use core::num;
 use std::io;
 
-use crate::lexer::{Span, TokenKind};
+use crate::{parser, type_system};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -12,10 +11,10 @@ pub enum Error {
     Io(#[from] io::Error),
 
     #[error(transparent)]
-    ParseInt(#[from] num::ParseIntError),
+    Parser(#[from] parser::Error),
 
-    #[error("expected '{0:#?}' but got '{1:#?}'")]
-    UnexpectedToken(TokenKind, TokenKind, Span),
+    #[error(transparent)]
+    Type(#[from] type_system::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;

@@ -1,3 +1,5 @@
+use core::fmt;
+
 #[derive(Debug, PartialEq, Clone)]
 pub enum TokenKind {
     Plus,
@@ -8,6 +10,7 @@ pub enum TokenKind {
     ParenRight,
     HyphenGreaterThan,
 
+    Boolean(String),
     Integer(String),
     Identifier(String),
 
@@ -19,6 +22,33 @@ pub enum TokenKind {
     Eof,
 
     Invalid,
+}
+
+impl fmt::Display for TokenKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            TokenKind::Plus => write!(f, "+"),
+            TokenKind::Hyphen => write!(f, "-"),
+            TokenKind::Star => write!(f, "*"),
+            TokenKind::Slash => write!(f, "/"),
+            TokenKind::ParenLeft => write!(f, "("),
+            TokenKind::ParenRight => write!(f, ")"),
+            TokenKind::HyphenGreaterThan => write!(f, "->"),
+
+            TokenKind::Boolean(val) => write!(f, "{val}"),
+            TokenKind::Integer(val) => write!(f, "{val}"),
+            TokenKind::Identifier(val) => write!(f, "{val}"),
+
+            TokenKind::Let => write!(f, "let"),
+            TokenKind::If => write!(f, "if"),
+            TokenKind::Then => write!(f, "then"),
+            TokenKind::Else => write!(f, "else"),
+
+            TokenKind::Eof => write!(f, "EOF"),
+
+            TokenKind::Invalid => write!(f, "invalid token"),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -34,9 +64,20 @@ pub struct Span {
     pub end: Position,
 }
 
+impl fmt::Display for Span {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{}:{}", self.start.line, self.start.column)
+    }
+}
+
 impl Span {
     pub fn new(start: Position, end: Position) -> Self {
         Self { start, end }
+    }
+
+    pub fn merge(&mut self, other: &Self) -> &Self {
+        self.end = other.end;
+        self
     }
 }
 
@@ -125,6 +166,25 @@ impl Lexer {
 
         let current_char = self.current_char().unwrap();
 
+        if current_char == 't' || current_char == 'f' {
+            for pattern in ["true", "false"] {
+                if self.remaining_buffer().starts_with(pattern)
+                    && let Some(next_char) = self
+                        .remaining_buffer()
+                        .strip_prefix(pattern)
+                        .unwrap_or_default()
+                        .chars()
+                        .next()
+                    && !next_char.is_alphanumeric()
+                {
+                    return Token {
+                        kind: TokenKind::Boolean(pattern.to_string()),
+                        span: self.advance_with_span(pattern.len()),
+                    };
+                }
+            }
+        }
+
         if current_char.is_ascii_digit() {
             let slice = self.slice_buffer_while(|c| c.is_ascii_digit());
             return Token {
@@ -185,7 +245,9 @@ impl Lexer {
     fn advance_with_span(&mut self, n: usize) -> Span {
         let start = self.position;
         self.advance(n);
-        let end = self.position;
+        let mut end = self.position;
+        end.index -= 1;
+        end.column -= 1;
         Span::new(start, end)
     }
 }
