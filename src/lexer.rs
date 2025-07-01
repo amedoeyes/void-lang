@@ -10,6 +10,7 @@ pub enum Token {
     HyphenGreaterThan,
     ParenLeft,
     ParenRight,
+    Percent,
     Plus,
     Semicolon,
     Slash,
@@ -38,6 +39,7 @@ impl fmt::Display for Token {
             Token::HyphenGreaterThan => write!(f, "->"),
             Token::ParenLeft => write!(f, "("),
             Token::ParenRight => write!(f, ")"),
+            Token::Percent => write!(f, "%"),
             Token::Plus => write!(f, "+"),
             Token::Semicolon => write!(f, ";"),
             Token::Slash => write!(f, "/"),
@@ -62,6 +64,7 @@ impl fmt::Display for Token {
 const SYMBOLS: &[(&str, Token)] = &[
     ("->", Token::HyphenGreaterThan),
     ("==", Token::EqualEqual),
+    ("%", Token::Percent),
     ("(", Token::ParenLeft),
     (")", Token::ParenRight),
     ("*", Token::Star),

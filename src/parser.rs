@@ -1,5 +1,4 @@
 use core::num;
-use std::mem;
 
 use crate::{
     ast::{Expr, InfixOp, PrefixOp, Program, Stmt},
@@ -211,11 +210,11 @@ impl Parser {
     }
 
     fn parse_expr(&mut self, min_bp: u8) -> Result<Spanned<Expr>> {
-        let mut expr = if self.is_prefix() {
+        let mut expr = if PrefixOp::is_prefix(&self.token.value) {
             self.parse_prefix()?
         } else {
             let mut expr = self.parse_atom()?;
-            while self.can_apply() {
+            while self.is_atom() {
                 let arg = self.parse_atom()?;
                 let mut span = expr.span;
                 span.merge(&arg.span);
@@ -230,37 +229,21 @@ impl Parser {
             expr
         };
 
-        if self.is_infix() {
+        if InfixOp::is_infix(&self.token.value) {
             expr = self.parse_infix(&expr, min_bp)?
         }
 
         Ok(expr)
     }
 
-    fn is_prefix(&self) -> bool {
-        matches!(self.token.value, Token::Hyphen)
-    }
-
-    fn is_infix(&self) -> bool {
-        matches!(
-            self.token.value,
-            Token::Plus
-                | Token::Hyphen
-                | Token::Star
-                | Token::Slash
-                | Token::EqualEqual
-                | Token::HyphenGreaterThan
-        )
-    }
-
-    fn can_apply(&self) -> bool {
+    fn is_atom(&self) -> bool {
         matches!(
             self.token.value,
             Token::Boolean(_)
-                | Token::Integer(_)
                 | Token::Identifier(_)
-                | Token::ParenLeft
                 | Token::If
+                | Token::Integer(_)
+                | Token::ParenLeft
         )
     }
 }
