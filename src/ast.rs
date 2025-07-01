@@ -80,8 +80,9 @@ pub enum Expr {
 
 #[derive(Debug, Clone)]
 pub enum Stmt {
-    Let { name: String, value: Expr },
-    Expr(Expr),
+    Let { name: String, expr: Spanned<Expr> },
+    Expr(Spanned<Expr>),
 }
 
+#[derive(Debug)]
 pub struct Program(pub Vec<Spanned<Stmt>>);

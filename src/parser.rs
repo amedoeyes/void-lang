@@ -1,7 +1,8 @@
 use core::num;
+use std::mem;
 
 use crate::{
-    ast::{Expr, InfixOp, PrefixOp},
+    ast::{Expr, InfixOp, PrefixOp, Program, Stmt},
     lexer::{Lexer, Token},
     position::{Span, Spanned},
 };
@@ -30,8 +31,42 @@ impl Parser {
         Parser { lexer, token }
     }
 
-    pub fn parse(&mut self) -> Result<Spanned<Expr>> {
-        self.parse_expr(0)
+    pub fn parse(&mut self) -> Result<Program> {
+        let mut prog = Program(vec![]);
+
+        while self.token.value != Token::Eof {
+            match self.token.value {
+                Token::Let => {
+                    let mut span = self.token.span;
+                    self.advance();
+                    let Token::Identifier(id) = self.token.value.clone() else {
+                        return Err(Error::UnexpectedToken(
+                            self.token.span,
+                            "Identifier".to_string(),
+                            self.token.value.clone(),
+                        ));
+                    };
+                    self.advance();
+                    self.expect(Token::Equal)?;
+                    let expr = self.parse_expr(0)?;
+                    self.expect(Token::Semicolon)?;
+                    span.merge(&self.token.span);
+                    prog.0.push(Spanned {
+                        value: Stmt::Let { name: id, expr },
+                        span,
+                    });
+                }
+                _ => {
+                    let expr = self.parse_expr(0)?;
+                    let span = expr.span;
+                    prog.0.push(Spanned {
+                        value: Stmt::Expr(expr),
+                        span,
+                    });
+                }
+            }
+        }
+        Ok(prog)
     }
 
     fn advance(&mut self) {
@@ -60,7 +95,7 @@ impl Parser {
                 };
                 let span = self.token.span;
                 self.advance();
-                Ok(Spanned::<Expr> {
+                Ok(Spanned {
                     value: Expr::Boolean(val),
                     span,
                 })
@@ -70,7 +105,7 @@ impl Parser {
                 let val = int.parse::<i64>()?;
                 let span = self.token.span;
                 self.advance();
-                Ok(Spanned::<Expr> {
+                Ok(Spanned {
                     value: Expr::Integer(val),
                     span,
                 })
@@ -80,7 +115,7 @@ impl Parser {
                 let id = id.clone();
                 let span = self.token.span;
                 self.advance();
-                Ok(Spanned::<Expr> {
+                Ok(Spanned {
                     value: Expr::Identifier(id),
                     span,
                 })
@@ -95,7 +130,7 @@ impl Parser {
                 self.expect(Token::Else)?;
                 let alt = self.parse_expr(0)?;
                 span.merge(&alt.span);
-                Ok(Spanned::<Expr> {
+                Ok(Spanned {
                     value: Expr::Condition {
                         cond: Box::new(cond),
                         then: Box::new(then),
@@ -129,7 +164,7 @@ impl Parser {
                     let (_, r_bp) = op.precedence();
                     let rhs = self.parse_expr(r_bp)?;
                     span.merge(&rhs.span);
-                    Ok(Spanned::<Expr> {
+                    Ok(Spanned {
                         value: Expr::Prefix {
                             op,
                             rhs: Box::new(rhs),
@@ -162,7 +197,7 @@ impl Parser {
             let rhs = self.parse_expr(r_bp)?;
             span.merge(&rhs.span);
 
-            lhs = Spanned::<Expr> {
+            lhs = Spanned {
                 value: Expr::Infix {
                     lhs: Box::new(lhs),
                     op,
@@ -184,7 +219,7 @@ impl Parser {
                 let arg = self.parse_atom()?;
                 let mut span = expr.span;
                 span.merge(&arg.span);
-                expr = Spanned::<Expr> {
+                expr = Spanned {
                     value: Expr::Application {
                         func: Box::new(expr),
                         arg: Box::new(arg),

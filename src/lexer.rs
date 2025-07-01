@@ -4,14 +4,16 @@ use crate::position::{Position, Span, Spanned};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
-    Plus,
+    Equal,
+    EqualEqual,
     Hyphen,
-    Star,
-    Slash,
+    HyphenGreaterThan,
     ParenLeft,
     ParenRight,
-    EqualEqual,
-    HyphenGreaterThan,
+    Plus,
+    Semicolon,
+    Slash,
+    Star,
 
     Boolean(String),
     Integer(String),
@@ -30,14 +32,16 @@ pub enum Token {
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Token::Plus => write!(f, "+"),
+            Token::Equal => write!(f, "="),
+            Token::EqualEqual => write!(f, "=="),
             Token::Hyphen => write!(f, "-"),
-            Token::Star => write!(f, "*"),
-            Token::Slash => write!(f, "/"),
+            Token::HyphenGreaterThan => write!(f, "->"),
             Token::ParenLeft => write!(f, "("),
             Token::ParenRight => write!(f, ")"),
-            Token::HyphenGreaterThan => write!(f, "->"),
-            Token::EqualEqual => write!(f, "=="),
+            Token::Plus => write!(f, "+"),
+            Token::Semicolon => write!(f, ";"),
+            Token::Slash => write!(f, "/"),
+            Token::Star => write!(f, "*"),
 
             Token::Boolean(val) => write!(f, "{val}"),
             Token::Integer(val) => write!(f, "{val}"),
@@ -58,12 +62,14 @@ impl fmt::Display for Token {
 const SYMBOLS: &[(&str, Token)] = &[
     ("->", Token::HyphenGreaterThan),
     ("==", Token::EqualEqual),
-    ("+", Token::Plus),
-    ("-", Token::Hyphen),
-    ("*", Token::Star),
-    ("/", Token::Slash),
     ("(", Token::ParenLeft),
     (")", Token::ParenRight),
+    ("*", Token::Star),
+    ("+", Token::Plus),
+    ("-", Token::Hyphen),
+    ("/", Token::Slash),
+    (";", Token::Semicolon),
+    ("=", Token::Equal),
 ];
 
 const KEYWORDS: &[(&str, Token)] = &[
@@ -100,7 +106,7 @@ impl Lexer {
         }
 
         if self.remaining_buffer().is_empty() {
-            return Spanned::<Token> {
+            return Spanned {
                 value: Token::Eof,
                 span: Span::new(self.position, self.position),
             };
@@ -108,7 +114,7 @@ impl Lexer {
 
         for symbol in SYMBOLS {
             if self.remaining_buffer().starts_with(symbol.0) {
-                return Spanned::<Token> {
+                return Spanned {
                     value: symbol.1.clone(),
                     span: self.advance_with_span(symbol.0.len()),
                 };
@@ -126,7 +132,7 @@ impl Lexer {
                 && !next_char.is_alphanumeric()
                 && next_char != '_'
             {
-                return Spanned::<Token> {
+                return Spanned {
                     value: keyword.1.clone(),
                     span: self.advance_with_span(keyword.0.len()),
                 };
@@ -146,7 +152,7 @@ impl Lexer {
                         .next()
                     && !next_char.is_alphanumeric()
                 {
-                    return Spanned::<Token> {
+                    return Spanned {
                         value: Token::Boolean(pattern.to_string()),
                         span: self.advance_with_span(pattern.len()),
                     };
@@ -156,7 +162,7 @@ impl Lexer {
 
         if current_char.is_ascii_digit() {
             let slice = self.slice_buffer_while(|c| c.is_ascii_digit());
-            return Spanned::<Token> {
+            return Spanned {
                 value: Token::Integer(slice.to_string()),
                 span: self.advance_with_span(slice.len()),
             };
@@ -164,13 +170,13 @@ impl Lexer {
 
         if current_char.is_alphabetic() || current_char == '_' {
             let slice = self.slice_buffer_while(|c| c.is_alphanumeric() || c == '_');
-            return Spanned::<Token> {
+            return Spanned {
                 value: Token::Identifier(slice.to_string()),
                 span: self.advance_with_span(slice.len()),
             };
         }
 
-        Spanned::<Token> {
+        Spanned {
             value: Token::Invalid,
             span: Span::new(self.position, self.position),
         }
