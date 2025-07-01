@@ -1,6 +1,8 @@
+mod ast;
 mod error;
 mod lexer;
 mod parser;
+mod position;
 
 use clap::{Arg, Command, crate_name, crate_version, value_parser};
 use clap_complete::{Shell, generate};
@@ -8,7 +10,7 @@ use std::{fs, io, path};
 
 use crate::{
     error::{Error, Result},
-    lexer::{Lexer, TokenKind},
+    lexer::{Lexer, Token},
     parser::Parser,
 };
 
@@ -61,14 +63,14 @@ fn run() -> Result<()> {
 
             let mut lexer = Lexer::new(&contents);
             while let token = lexer.next_token()
-                && token.kind != TokenKind::Eof
+                && token.value != Token::Eof
             {
                 println!(
                     "{}:{}:{}: {:?}",
                     file.to_str().unwrap(),
                     token.span.start.line,
                     token.span.start.column,
-                    token.kind
+                    token.value
                 )
             }
         }

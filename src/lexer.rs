@@ -1,13 +1,16 @@
 use core::fmt;
 
+use crate::position::{Position, Span, Spanned};
+
 #[derive(Debug, PartialEq, Clone)]
-pub enum TokenKind {
+pub enum Token {
     Plus,
     Hyphen,
     Star,
     Slash,
     ParenLeft,
     ParenRight,
+    EqualEqual,
     HyphenGreaterThan,
 
     Boolean(String),
@@ -24,84 +27,50 @@ pub enum TokenKind {
     Invalid,
 }
 
-impl fmt::Display for TokenKind {
+impl fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            TokenKind::Plus => write!(f, "+"),
-            TokenKind::Hyphen => write!(f, "-"),
-            TokenKind::Star => write!(f, "*"),
-            TokenKind::Slash => write!(f, "/"),
-            TokenKind::ParenLeft => write!(f, "("),
-            TokenKind::ParenRight => write!(f, ")"),
-            TokenKind::HyphenGreaterThan => write!(f, "->"),
+            Token::Plus => write!(f, "+"),
+            Token::Hyphen => write!(f, "-"),
+            Token::Star => write!(f, "*"),
+            Token::Slash => write!(f, "/"),
+            Token::ParenLeft => write!(f, "("),
+            Token::ParenRight => write!(f, ")"),
+            Token::HyphenGreaterThan => write!(f, "->"),
+            Token::EqualEqual => write!(f, "=="),
 
-            TokenKind::Boolean(val) => write!(f, "{val}"),
-            TokenKind::Integer(val) => write!(f, "{val}"),
-            TokenKind::Identifier(val) => write!(f, "{val}"),
+            Token::Boolean(val) => write!(f, "{val}"),
+            Token::Integer(val) => write!(f, "{val}"),
+            Token::Identifier(val) => write!(f, "{val}"),
 
-            TokenKind::Let => write!(f, "let"),
-            TokenKind::If => write!(f, "if"),
-            TokenKind::Then => write!(f, "then"),
-            TokenKind::Else => write!(f, "else"),
+            Token::Let => write!(f, "let"),
+            Token::If => write!(f, "if"),
+            Token::Then => write!(f, "then"),
+            Token::Else => write!(f, "else"),
 
-            TokenKind::Eof => write!(f, "EOF"),
+            Token::Eof => write!(f, "EOF"),
 
-            TokenKind::Invalid => write!(f, "invalid token"),
+            Token::Invalid => write!(f, "invalid token"),
         }
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct Position {
-    pub index: usize,
-    pub line: usize,
-    pub column: usize,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Span {
-    pub start: Position,
-    pub end: Position,
-}
-
-impl fmt::Display for Span {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}:{}", self.start.line, self.start.column)
-    }
-}
-
-impl Span {
-    pub fn new(start: Position, end: Position) -> Self {
-        Self { start, end }
-    }
-
-    pub fn merge(&mut self, other: &Self) -> &Self {
-        self.end = other.end;
-        self
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Token {
-    pub kind: TokenKind,
-    pub span: Span,
-}
-
-const SYMBOLS: &[(&str, TokenKind)] = &[
-    ("->", TokenKind::HyphenGreaterThan),
-    ("+", TokenKind::Plus),
-    ("-", TokenKind::Hyphen),
-    ("*", TokenKind::Star),
-    ("/", TokenKind::Slash),
-    ("(", TokenKind::ParenLeft),
-    (")", TokenKind::ParenRight),
+const SYMBOLS: &[(&str, Token)] = &[
+    ("->", Token::HyphenGreaterThan),
+    ("==", Token::EqualEqual),
+    ("+", Token::Plus),
+    ("-", Token::Hyphen),
+    ("*", Token::Star),
+    ("/", Token::Slash),
+    ("(", Token::ParenLeft),
+    (")", Token::ParenRight),
 ];
 
-const KEYWORDS: &[(&str, TokenKind)] = &[
-    ("let", TokenKind::Let),
-    ("if", TokenKind::If),
-    ("then", TokenKind::Then),
-    ("else", TokenKind::Else),
+const KEYWORDS: &[(&str, Token)] = &[
+    ("let", Token::Let),
+    ("if", Token::If),
+    ("then", Token::Then),
+    ("else", Token::Else),
 ];
 
 #[derive(Debug)]
@@ -122,7 +91,7 @@ impl Lexer {
         }
     }
 
-    pub fn next_token(&mut self) -> Token {
+    pub fn next_token(&mut self) -> Spanned<Token> {
         self.advance(self.slice_buffer_while(|c| c.is_whitespace()).len());
 
         while self.remaining_buffer().starts_with("//") {
@@ -131,16 +100,16 @@ impl Lexer {
         }
 
         if self.remaining_buffer().is_empty() {
-            return Token {
-                kind: TokenKind::Eof,
+            return Spanned::<Token> {
+                value: Token::Eof,
                 span: Span::new(self.position, self.position),
             };
         }
 
         for symbol in SYMBOLS {
             if self.remaining_buffer().starts_with(symbol.0) {
-                return Token {
-                    kind: symbol.1.clone(),
+                return Spanned::<Token> {
+                    value: symbol.1.clone(),
                     span: self.advance_with_span(symbol.0.len()),
                 };
             }
@@ -157,8 +126,8 @@ impl Lexer {
                 && !next_char.is_alphanumeric()
                 && next_char != '_'
             {
-                return Token {
-                    kind: keyword.1.clone(),
+                return Spanned::<Token> {
+                    value: keyword.1.clone(),
                     span: self.advance_with_span(keyword.0.len()),
                 };
             }
@@ -177,8 +146,8 @@ impl Lexer {
                         .next()
                     && !next_char.is_alphanumeric()
                 {
-                    return Token {
-                        kind: TokenKind::Boolean(pattern.to_string()),
+                    return Spanned::<Token> {
+                        value: Token::Boolean(pattern.to_string()),
                         span: self.advance_with_span(pattern.len()),
                     };
                 }
@@ -187,22 +156,22 @@ impl Lexer {
 
         if current_char.is_ascii_digit() {
             let slice = self.slice_buffer_while(|c| c.is_ascii_digit());
-            return Token {
-                kind: TokenKind::Integer(slice.to_string()),
+            return Spanned::<Token> {
+                value: Token::Integer(slice.to_string()),
                 span: self.advance_with_span(slice.len()),
             };
         }
 
         if current_char.is_alphabetic() || current_char == '_' {
             let slice = self.slice_buffer_while(|c| c.is_alphanumeric() || c == '_');
-            return Token {
-                kind: TokenKind::Identifier(slice.to_string()),
+            return Spanned::<Token> {
+                value: Token::Identifier(slice.to_string()),
                 span: self.advance_with_span(slice.len()),
             };
         }
 
-        Token {
-            kind: TokenKind::Invalid,
+        Spanned::<Token> {
+            value: Token::Invalid,
             span: Span::new(self.position, self.position),
         }
     }
@@ -213,10 +182,6 @@ impl Lexer {
 
     fn remaining_buffer(&self) -> &str {
         &self.buffer[self.position.index..]
-    }
-
-    fn slice_buffer(&self, span: &Span) -> &str {
-        &self.buffer[span.start.index..span.end.index]
     }
 
     fn slice_buffer_while<P: Fn(char) -> bool>(&self, predicate: P) -> &str {

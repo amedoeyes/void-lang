@@ -1,8 +1,9 @@
 use core::num;
 
 use crate::{
-    expr::{Expr, InfixOp, PrefixOp, SpannedExpr},
-    lexer::{Lexer, Span, Token, TokenKind},
+    ast::{Expr, InfixOp, PrefixOp},
+    lexer::{Lexer, Token},
+    position::{Span, Spanned},
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -11,7 +12,7 @@ pub enum Error {
     ParseInt(#[from] num::ParseIntError),
 
     #[error("{0}: expected '{1}' but got '{2}'")]
-    UnexpectedToken(Span, String, TokenKind),
+    UnexpectedToken(Span, String, Token),
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -19,98 +20,82 @@ type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
 pub struct Parser {
     lexer: Lexer,
-    current_token: Token,
-    lookahead_token: Option<Token>,
+    token: Spanned<Token>,
 }
 
 impl Parser {
     pub fn new(input: &str) -> Self {
         let mut lexer = Lexer::new(input);
         let token = lexer.next_token();
-        Parser {
-            lexer,
-            current_token: token,
-            lookahead_token: None,
-        }
+        Parser { lexer, token }
     }
 
-    pub fn parse(&mut self) -> Result<SpannedExpr> {
+    pub fn parse(&mut self) -> Result<Spanned<Expr>> {
         self.parse_expr(0)
     }
 
     fn advance(&mut self) {
-        if let Some(token) = self.lookahead_token.take() {
-            self.current_token = token;
-        } else {
-            self.current_token = self.lexer.next_token();
-        }
+        self.token = self.lexer.next_token();
     }
 
-    fn expect(&mut self, kind: TokenKind) -> Result<()> {
-        if self.current_token.kind != kind {
+    fn expect(&mut self, token: Token) -> Result<()> {
+        if self.token.value != token {
             return Err(Error::UnexpectedToken(
-                self.current_token.span,
-                kind.to_string(),
-                self.current_token.kind.clone(),
+                self.token.span,
+                token.to_string(),
+                self.token.value.clone(),
             ));
         }
         self.advance();
         Ok(())
     }
 
-    fn peek(&mut self) -> &Token {
-        if self.lookahead_token.is_none() {
-            self.lookahead_token = Some(self.lexer.next_token());
-        }
-        self.lookahead_token.as_ref().unwrap()
-    }
-
-    fn parse_atom(&mut self) -> Result<SpannedExpr> {
-        match &self.current_token.kind {
-            TokenKind::Boolean(bool) => {
+    fn parse_atom(&mut self) -> Result<Spanned<Expr>> {
+        match &self.token.value {
+            Token::Boolean(bool) => {
                 let val = match bool.as_str() {
                     "true" => true,
                     "false" => false,
                     _ => unreachable!(),
                 };
-                let span = self.current_token.span;
+                let span = self.token.span;
                 self.advance();
-                Ok(SpannedExpr {
+                Ok(Spanned::<Expr> {
                     value: Expr::Boolean(val),
                     span,
                 })
             }
 
-            TokenKind::Integer(int) => {
+            Token::Integer(int) => {
                 let val = int.parse::<i64>()?;
-                let span = self.current_token.span;
+                let span = self.token.span;
                 self.advance();
-                Ok(SpannedExpr {
+                Ok(Spanned::<Expr> {
                     value: Expr::Integer(val),
                     span,
                 })
             }
 
-            TokenKind::Identifier(id) => {
+            Token::Identifier(id) => {
                 let id = id.clone();
-                let span = self.current_token.span;
+                let span = self.token.span;
                 self.advance();
-                Ok(SpannedExpr {
+                Ok(Spanned::<Expr> {
                     value: Expr::Identifier(id),
                     span,
                 })
             }
 
-            TokenKind::If => {
-                let mut span = self.current_token.span;
+            Token::If => {
+                let mut span = self.token.span;
                 self.advance();
                 let cond = self.parse_expr(0)?;
-                self.expect(TokenKind::Then)?;
+                self.expect(Token::Then)?;
                 let then = self.parse_expr(0)?;
-                self.expect(TokenKind::Else)?;
+                self.expect(Token::Else)?;
                 let alt = self.parse_expr(0)?;
                 span.merge(&alt.span);
-                Ok(SpannedExpr {
+                Ok(Spanned::<Expr> {
                     value: Expr::Condition {
                         cond: Box::new(cond),
                         then: Box::new(then),
@@ -120,31 +105,31 @@ impl Parser {
                 })
             }
 
-            TokenKind::ParenLeft => {
+            Token::ParenLeft => {
                 self.advance();
                 let expr = self.parse_expr(0)?;
-                self.expect(TokenKind::ParenRight)?;
+                self.expect(Token::ParenRight)?;
                 Ok(expr)
             }
 
             _ => Err(Error::UnexpectedToken(
-                self.current_token.span,
+                self.token.span,
                 "expression".to_string(),
-                self.current_token.kind.clone(),
+                self.token.value.clone(),
             )),
         }
     }
 
-    fn parse_prefix(&mut self) -> Result<SpannedExpr> {
-        if let Some(op) = PrefixOp::from_token(&self.current_token.kind) {
+    fn parse_prefix(&mut self) -> Result<Spanned<Expr>> {
+        if let Some(op) = PrefixOp::from_token(&self.token.value) {
             match op {
                 PrefixOp::Neg => {
-                    let mut span = self.current_token.span;
+                    let mut span = self.token.span;
                     self.advance();
                     let (_, r_bp) = op.precedence();
                     let rhs = self.parse_expr(r_bp)?;
                     span.merge(&rhs.span);
-                    Ok(SpannedExpr {
+                    Ok(Spanned::<Expr> {
                         value: Expr::Prefix {
                             op,
                             rhs: Box::new(rhs),
@@ -155,17 +140,17 @@ impl Parser {
             }
         } else {
             Err(Error::UnexpectedToken(
-                self.current_token.span,
+                self.token.span,
                 "prefix operator".to_string(),
-                self.current_token.kind.clone(),
+                self.token.value.clone(),
             ))
         }
     }
 
-    fn parse_infix(&mut self, lhs: &SpannedExpr, min_bp: u8) -> Result<SpannedExpr> {
+    fn parse_infix(&mut self, lhs: &Spanned<Expr>, min_bp: u8) -> Result<Spanned<Expr>> {
         let mut lhs = lhs.clone();
 
-        while let Some(op) = InfixOp::from_token(&self.current_token.kind) {
+        while let Some(op) = InfixOp::from_token(&self.token.value) {
             let (l_bp, r_bp) = op.precedence();
             if l_bp < min_bp {
                 break;
@@ -177,7 +162,7 @@ impl Parser {
             let rhs = self.parse_expr(r_bp)?;
             span.merge(&rhs.span);
 
-            lhs = SpannedExpr {
+            lhs = Spanned::<Expr> {
                 value: Expr::Infix {
                     lhs: Box::new(lhs),
                     op,
@@ -190,7 +175,7 @@ impl Parser {
         Ok(lhs)
     }
 
-    fn parse_expr(&mut self, min_bp: u8) -> Result<SpannedExpr> {
+    fn parse_expr(&mut self, min_bp: u8) -> Result<Spanned<Expr>> {
         let mut expr = if self.is_prefix() {
             self.parse_prefix()?
         } else {
@@ -199,8 +184,8 @@ impl Parser {
                 let arg = self.parse_atom()?;
                 let mut span = expr.span;
                 span.merge(&arg.span);
-                expr = SpannedExpr {
-                    value: Expr::App {
+                expr = Spanned::<Expr> {
+                    value: Expr::Application {
                         func: Box::new(expr),
                         arg: Box::new(arg),
                     },
@@ -218,28 +203,29 @@ impl Parser {
     }
 
     fn is_prefix(&self) -> bool {
-        matches!(self.current_token.kind, TokenKind::Hyphen)
+        matches!(self.token.value, Token::Hyphen)
     }
 
     fn is_infix(&self) -> bool {
         matches!(
-            self.current_token.kind,
-            TokenKind::Plus
-                | TokenKind::Hyphen
-                | TokenKind::Star
-                | TokenKind::Slash
-                | TokenKind::HyphenGreaterThan
+            self.token.value,
+            Token::Plus
+                | Token::Hyphen
+                | Token::Star
+                | Token::Slash
+                | Token::EqualEqual
+                | Token::HyphenGreaterThan
         )
     }
 
     fn can_apply(&self) -> bool {
         matches!(
-            self.current_token.kind,
-            TokenKind::Boolean(_)
-                | TokenKind::Integer(_)
-                | TokenKind::Identifier(_)
-                | TokenKind::ParenLeft
-                | TokenKind::If
+            self.token.value,
+            Token::Boolean(_)
+                | Token::Integer(_)
+                | Token::Identifier(_)
+                | Token::ParenLeft
+                | Token::If
         )
     }
 }

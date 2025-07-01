@@ -1,2 +1,17 @@
-  // 20 / (if (a -> a) 10 then 2 else -0) * 10
-((a -> b -> a + b) 11) 31
+// let fact = n -> if n == 0 then 1 else n * fact (n - 1);
+
+// (a -> b -> a + b) 11 31
+
+// if false then 2 else 4
+
+// (a -> a 11) (a -> a + 31)
+
+// a -> b -> a + b
+
+// (x -> x 11) (x -> b -> b + x)
+
+// (a -> b -> c -> if a then b else c) true 1 2
+
+// a -> b -> c -> a b c
+
+if 1 == 2 then 1 else 2
