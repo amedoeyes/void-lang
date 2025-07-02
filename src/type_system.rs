@@ -1,3 +1,4 @@
+use core::fmt;
 use std::collections::HashMap;
 use std::result;
 
@@ -43,26 +44,42 @@ pub enum Type {
     Fun(Box<Type>, Box<Type>),
     Poly(Vec<usize>, Box<Type>),
 }
-
-impl std::fmt::Display for Type {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl Type {
+    fn fmt(&self, f: &mut fmt::Formatter, mapping: &HashMap<usize, usize>) -> fmt::Result {
         match self {
             Type::Unit => write!(f, "Unit"),
+
             Type::Int => write!(f, "Int"),
+
             Type::Bool => write!(f, "Bool"),
-            Type::Var(n) => write!(f, "t{n}"),
-            Type::Fun(l, r) => write!(f, "{l} -> {r}"),
+
+            Type::Var(n) => write!(f, "t{}", mapping.get(n).unwrap_or(n)),
+
+            Type::Fun(l, r) => {
+                l.fmt(f, mapping)?;
+                write!(f, " -> ")?;
+                r.fmt(f, mapping)
+            }
+
             Type::Poly(vars, body) => {
-                write!(f, "forall ")?;
-                for (i, var) in vars.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, " ")?;
-                    }
-                    write!(f, "t{var}")?;
-                }
-                write!(f, " . {body}")
+                write!(
+                    f,
+                    "forall {} . ",
+                    vars.iter()
+                        .enumerate()
+                        .map(|(i, _)| format!("t{i}"))
+                        .collect::<Vec<String>>()
+                        .join(" ")
+                )?;
+                body.fmt(f, &vars.iter().enumerate().map(|(i, &v)| (v, i)).collect())
             }
         }
+    }
+}
+
+impl fmt::Display for Type {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.fmt(f, &HashMap::new())
     }
 }
 
