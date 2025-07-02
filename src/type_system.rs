@@ -11,11 +11,28 @@ pub enum Error {
     #[error("{0}: type mismatch between '{1}' and '{2}'")]
     TypeMismatch(Span, Type, Type),
 
+    #[error("{0}: infinite type '{1}'")]
+    InfiniteType(Span, Type),
+
     #[error("{0}: unkown variable '{1}'")]
     UnknownIdentifier(Span, String),
 }
 
 type Result<T> = result::Result<T, Error>;
+
+enum UnifyError {
+    TypeMismatch(Type, Type),
+    InfiniteType(Type),
+}
+
+impl UnifyError {
+    fn to_error(&self, span: &Span) -> Error {
+        match self {
+            UnifyError::TypeMismatch(t1, t2) => Error::TypeMismatch(*span, t1.clone(), t2.clone()),
+            UnifyError::InfiniteType(t) => Error::InfiniteType(*span, t.clone()),
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Type {
@@ -171,7 +188,7 @@ impl Env {
         }
     }
 
-    fn unify(&mut self, t1: &Type, t2: &Type) -> result::Result<(), (Type, Type)> {
+    fn unify(&mut self, t1: &Type, t2: &Type) -> result::Result<(), UnifyError> {
         let t1 = self.substitute(t1);
         let t2 = self.substitute(t2);
 
@@ -197,13 +214,13 @@ impl Env {
                 Ok(())
             }
 
-            _ => Err((t1, t2)),
+            _ => Err(UnifyError::TypeMismatch(t1, t2)),
         }
     }
 
-    fn occurs_check(var: usize, ty: &Type) -> result::Result<(), (Type, Type)> {
+    fn occurs_check(var: usize, ty: &Type) -> result::Result<(), UnifyError> {
         match ty {
-            Type::Var(a) if *a == var => Err((Type::Var(var), ty.clone())),
+            Type::Var(a) if *a == var => Err(UnifyError::InfiniteType(ty.clone())),
 
             Type::Fun(l, r) => {
                 Self::occurs_check(var, l)?;
@@ -239,13 +256,13 @@ pub fn infer_expr(env: &mut Env, expr: &Spanned<Expr>) -> Result<Type> {
             let cond_ty = infer_expr(env, cond)?;
 
             env.unify(&cond_ty, &Type::Bool)
-                .map_err(|err| Error::TypeMismatch(cond.span, err.0, err.1))?;
+                .map_err(|err| err.to_error(&cond.span))?;
 
             let then_ty = infer_expr(env, then)?;
             let alt_ty = infer_expr(env, alt)?;
 
             env.unify(&then_ty, &alt_ty)
-                .map_err(|err| Error::TypeMismatch(alt.span, err.0, err.1))?;
+                .map_err(|err| err.to_error(&alt.span))?;
 
             Ok(then_ty)
         }
@@ -255,7 +272,7 @@ pub fn infer_expr(env: &mut Env, expr: &Spanned<Expr>) -> Result<Type> {
             match op {
                 PrefixOp::Neg => {
                     env.unify(&rhs_ty, &Type::Int)
-                        .map_err(|err| Error::TypeMismatch(rhs.span, err.0, err.1))?;
+                        .map_err(|err| err.to_error(&rhs.span))?;
                     Ok(Type::Int)
                 }
             }
@@ -268,17 +285,17 @@ pub fn infer_expr(env: &mut Env, expr: &Spanned<Expr>) -> Result<Type> {
             match op {
                 InfixOp::Add | InfixOp::Sub | InfixOp::Mul | InfixOp::Div | InfixOp::Mod => {
                     env.unify(&lhs_ty, &Type::Int)
-                        .map_err(|err| Error::TypeMismatch(lhs.span, err.0, err.1))?;
+                        .map_err(|err| err.to_error(&lhs.span))?;
 
                     env.unify(&rhs_ty, &Type::Int)
-                        .map_err(|err| Error::TypeMismatch(rhs.span, err.0, err.1))?;
+                        .map_err(|err| err.to_error(&rhs.span))?;
 
                     Ok(Type::Int)
                 }
 
                 InfixOp::Eq => {
                     env.unify(&lhs_ty, &rhs_ty)
-                        .map_err(|err| Error::TypeMismatch(lhs.span, err.0, err.1))?;
+                        .map_err(|err| err.to_error(&lhs.span))?;
 
                     Ok(Type::Bool)
                 }
@@ -298,7 +315,7 @@ pub fn infer_expr(env: &mut Env, expr: &Spanned<Expr>) -> Result<Type> {
             let ty = env.fresh_var();
 
             env.unify(&func_ty, &Type::Fun(Box::new(arg_ty), Box::new(ty.clone())))
-                .map_err(|err| Error::TypeMismatch(func.span, err.0, err.1))?;
+                .map_err(|err| err.to_error(&func.span))?;
 
             Ok(ty)
         }
