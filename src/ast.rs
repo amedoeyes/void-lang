@@ -54,6 +54,7 @@ impl InfixOp {
 
 #[derive(Debug, Clone)]
 pub enum Expr {
+    Unit,
     Boolean(bool),
     Integer(i64),
     Identifier(String),

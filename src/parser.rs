@@ -84,6 +84,14 @@ impl Parser {
         Ok(())
     }
 
+    fn expect_optional(&mut self, token: Token) -> bool {
+        let val = self.token.value == token;
+        if val {
+            self.advance();
+        }
+        val
+    }
+
     fn parse_atom(&mut self) -> Result<Spanned<Expr>> {
         match &self.token.value {
             Token::Boolean(bool) => {
@@ -140,10 +148,23 @@ impl Parser {
             }
 
             Token::ParenLeft => {
+                let mut span = self.token.span;
                 self.advance();
-                let expr = self.parse_expr(0)?;
-                self.expect(Token::ParenRight)?;
-                Ok(expr)
+                span.merge(&self.token.span);
+                if self.expect_optional(Token::ParenRight) {
+                    Ok(Spanned {
+                        value: Expr::Unit,
+                        span,
+                    })
+                } else {
+                    let expr = self.parse_expr(0)?;
+                    self.expect(Token::ParenRight)?;
+                    span.merge(&expr.span);
+                    Ok(Spanned {
+                        value: expr.value,
+                        span,
+                    })
+                }
             }
 
             _ => Err(Error::UnexpectedToken(
@@ -217,10 +238,9 @@ impl Parser {
             self.parse_atom()?
         };
 
-        if self.token.value == Token::HyphenGreaterThan
+        if self.expect_optional(Token::HyphenGreaterThan)
             && let Expr::Identifier(id) = expr.value
         {
-            self.advance();
             let body = self.parse_expr(0)?;
             let span = *expr.span.merge(&body.span);
             expr = Spanned {
