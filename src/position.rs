@@ -1,4 +1,5 @@
 use core::fmt;
+use std::fmt::Debug;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Position {
@@ -25,7 +26,12 @@ impl Span {
     }
 
     pub fn merge(&mut self, other: &Self) -> &Self {
-        self.end = other.end;
+        if self.end.index < other.end.index {
+            self.end = other.end;
+        }
+        if self.start.index > other.start.index {
+            self.start = other.start;
+        }
         self
     }
 }
