@@ -3,6 +3,7 @@ mod error;
 mod lexer;
 mod parser;
 mod position;
+mod type_system;
 
 use clap::{Arg, Command, crate_name, crate_version, value_parser};
 use clap_complete::{Shell, generate};
@@ -12,6 +13,7 @@ use crate::{
     error::{Error, Result},
     lexer::{Lexer, Token},
     parser::parse,
+    type_system::infer,
 };
 
 fn run() -> Result<()> {
@@ -30,7 +32,15 @@ fn run() -> Result<()> {
             ),
         )
         .subcommand(
-            Command::new("ast").about("Dump ast").arg(
+            Command::new("ast").about("Dump AST").arg(
+                Arg::new("file")
+                    .value_parser(clap::value_parser!(path::PathBuf))
+                    .required(true)
+                    .help("source file"),
+            ),
+        )
+        .subcommand(
+            Command::new("type").about("Dump typed AST").arg(
                 Arg::new("file")
                     .value_parser(clap::value_parser!(path::PathBuf))
                     .required(true)
@@ -74,6 +84,7 @@ fn run() -> Result<()> {
                 )
             }
         }
+
         Some(("ast", sub_matches)) => {
             let file = sub_matches.get_one::<path::PathBuf>("file").unwrap();
             let contents = fs::read_to_string(file)?;
@@ -81,6 +92,24 @@ fn run() -> Result<()> {
             let ast = parse(&contents)?;
             println!("{ast:#?}");
         }
+
+        Some(("type", sub_matches)) => {
+            let file = sub_matches.get_one::<path::PathBuf>("file").unwrap();
+            let contents = fs::read_to_string(file)?;
+
+            let ast = parse(&contents)?;
+
+            let typed_ast = infer(&ast)?;
+
+            for node in typed_ast {
+                match node.value.value {
+                    ast::Stmt::Let { name, .. } => println!("{} : {}", name, node.ty),
+                    ast::Stmt::Expr(_) => println!("{}", node.ty),
+                }
+            }
+        }
+
+
         _ => unreachable!(),
     };
 
