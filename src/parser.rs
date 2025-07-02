@@ -238,18 +238,24 @@ impl Parser {
             self.parse_atom()?
         };
 
-        if self.expect_optional(Token::HyphenGreaterThan)
-            && let Expr::Identifier(id) = expr.value
-        {
-            let body = self.parse_expr(0)?;
-            let span = *expr.span.merge(&body.span);
-            expr = Spanned {
-                value: Expr::Lambda {
-                    param: id.clone(),
-                    body: Box::new(body),
-                },
-                span,
-            };
+        if self.expect_optional(Token::HyphenGreaterThan) {
+            if let Expr::Identifier(id) = expr.value {
+                let body = self.parse_expr(0)?;
+                let span = *expr.span.merge(&body.span);
+                expr = Spanned {
+                    value: Expr::Lambda {
+                        param: id.clone(),
+                        body: Box::new(body),
+                    },
+                    span,
+                };
+            } else {
+                return Err(Error::UnexpectedToken(
+                    self.token.span,
+                    "identifier".to_string(),
+                    self.token.value.clone(),
+                ));
+            }
         }
 
         while matches!(
