@@ -13,10 +13,6 @@ impl PrefixOp {
         }
     }
 
-    pub fn is_prefix(token: &Token) -> bool {
-        matches!(token, Token::Hyphen)
-    }
-
     pub fn precedence(&self) -> (u8, u8) {
         match self {
             PrefixOp::Neg => (0, 9),
@@ -32,7 +28,6 @@ pub enum InfixOp {
     Div,
     Mod,
     Eq,
-    Lam,
 }
 
 impl InfixOp {
@@ -44,27 +39,12 @@ impl InfixOp {
             Token::Slash => Some(InfixOp::Div),
             Token::Percent => Some(InfixOp::Mod),
             Token::EqualEqual => Some(InfixOp::Eq),
-            Token::HyphenGreaterThan => Some(InfixOp::Lam),
             _ => None,
         }
     }
 
-    pub fn is_infix(token: &Token) -> bool {
-        matches!(
-            token,
-            Token::EqualEqual
-                | Token::Hyphen
-                | Token::HyphenGreaterThan
-                | Token::Percent
-                | Token::Plus
-                | Token::Slash
-                | Token::Star
-        )
-    }
-
     pub fn precedence(&self) -> (u8, u8) {
         match self {
-            InfixOp::Lam => (2, 1),
             InfixOp::Eq => (3, 4),
             InfixOp::Add | InfixOp::Sub => (5, 6),
             InfixOp::Mul | InfixOp::Div | InfixOp::Mod => (7, 8),
@@ -91,6 +71,10 @@ pub enum Expr {
         op: PrefixOp,
         rhs: Box<Spanned<Expr>>,
     },
+    Lambda {
+        param: String,
+        body: Box<Spanned<Expr>>,
+    },
     Application {
         func: Box<Spanned<Expr>>,
         arg: Box<Spanned<Expr>>,
@@ -102,6 +86,3 @@ pub enum Stmt {
     Let { name: String, expr: Spanned<Expr> },
     Expr(Spanned<Expr>),
 }
-
-#[derive(Debug)]
-pub struct Program(pub Vec<Spanned<Stmt>>);

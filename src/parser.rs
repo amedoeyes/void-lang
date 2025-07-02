@@ -1,7 +1,7 @@
 use core::num;
 
 use crate::{
-    ast::{Expr, InfixOp, PrefixOp, Program, Stmt},
+    ast::{Expr, InfixOp, PrefixOp, Stmt},
     lexer::{Lexer, Token},
     position::{Span, Spanned},
 };
@@ -30,8 +30,8 @@ impl Parser {
         Parser { lexer, token }
     }
 
-    pub fn parse(&mut self) -> Result<Program> {
-        let mut prog = Program(vec![]);
+    fn parse(&mut self) -> Result<Vec<Spanned<Stmt>>> {
+        let mut prog = vec![];
 
         while self.token.value != Token::Eof {
             match self.token.value {
@@ -50,7 +50,7 @@ impl Parser {
                     let expr = self.parse_expr(0)?;
                     self.expect(Token::Semicolon)?;
                     span.merge(&self.token.span);
-                    prog.0.push(Spanned {
+                    prog.push(Spanned {
                         value: Stmt::Let { name: id, expr },
                         span,
                     });
@@ -58,7 +58,7 @@ impl Parser {
                 _ => {
                     let expr = self.parse_expr(0)?;
                     let span = expr.span;
-                    prog.0.push(Spanned {
+                    prog.push(Spanned {
                         value: Stmt::Expr(expr),
                         span,
                     });
@@ -155,7 +155,12 @@ impl Parser {
     }
 
     fn parse_prefix(&mut self) -> Result<Spanned<Expr>> {
-        if let Some(op) = PrefixOp::from_token(&self.token.value) {
+        let mut expr = Spanned {
+            value: Expr::Integer(0),
+            span: self.token.span,
+        };
+
+        while let Some(op) = PrefixOp::from_token(&self.token.value) {
             match op {
                 PrefixOp::Neg => {
                     let mut span = self.token.span;
@@ -163,22 +168,18 @@ impl Parser {
                     let (_, r_bp) = op.precedence();
                     let rhs = self.parse_expr(r_bp)?;
                     span.merge(&rhs.span);
-                    Ok(Spanned {
+                    expr = Spanned {
                         value: Expr::Prefix {
                             op,
                             rhs: Box::new(rhs),
                         },
                         span,
-                    })
+                    };
                 }
-            }
-        } else {
-            Err(Error::UnexpectedToken(
-                self.token.span,
-                "prefix operator".to_string(),
-                self.token.value.clone(),
-            ))
+            };
         }
+
+        Ok(expr)
     }
 
     fn parse_infix(&mut self, lhs: &Spanned<Expr>, min_bp: u8) -> Result<Spanned<Expr>> {
@@ -210,40 +211,63 @@ impl Parser {
     }
 
     fn parse_expr(&mut self, min_bp: u8) -> Result<Spanned<Expr>> {
-        let mut expr = if PrefixOp::is_prefix(&self.token.value) {
+        let mut expr = if matches!(self.token.value, Token::Hyphen) {
             self.parse_prefix()?
         } else {
-            let mut expr = self.parse_atom()?;
-            while self.is_atom() {
-                let arg = self.parse_atom()?;
-                let mut span = expr.span;
-                span.merge(&arg.span);
-                expr = Spanned {
-                    value: Expr::Application {
-                        func: Box::new(expr),
-                        arg: Box::new(arg),
-                    },
-                    span,
-                };
-            }
-            expr
+            self.parse_atom()?
         };
 
-        if InfixOp::is_infix(&self.token.value) {
-            expr = self.parse_infix(&expr, min_bp)?
+        if self.token.value == Token::HyphenGreaterThan
+            && let Expr::Identifier(id) = expr.value
+        {
+            self.advance();
+            let body = self.parse_expr(0)?;
+            let span = *expr.span.merge(&body.span);
+            expr = Spanned {
+                value: Expr::Lambda {
+                    param: id.clone(),
+                    body: Box::new(body),
+                },
+                span,
+            };
         }
 
-        Ok(expr)
-    }
-
-    fn is_atom(&self) -> bool {
-        matches!(
+        while matches!(
             self.token.value,
             Token::Boolean(_)
                 | Token::Identifier(_)
                 | Token::If
                 | Token::Integer(_)
                 | Token::ParenLeft
-        )
+        ) {
+            let arg = self.parse_atom()?;
+            let span = *expr.span.merge(&arg.span);
+            expr = Spanned {
+                value: Expr::Application {
+                    func: Box::new(expr),
+                    arg: Box::new(arg),
+                },
+                span,
+            };
+        }
+
+        if matches!(
+            self.token.value,
+            Token::EqualEqual
+                | Token::Hyphen
+                | Token::Percent
+                | Token::Plus
+                | Token::Slash
+                | Token::Star
+        ) {
+            expr = self.parse_infix(&expr, min_bp)?
+        }
+
+        Ok(expr)
     }
+}
+
+pub fn parse(input: &str) -> Result<Vec<Spanned<Stmt>>> {
+    let mut parser = Parser::new(input);
+    parser.parse()
 }

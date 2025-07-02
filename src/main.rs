@@ -11,7 +11,7 @@ use std::{fs, io, path};
 use crate::{
     error::{Error, Result},
     lexer::{Lexer, Token},
-    parser::Parser,
+    parser::parse,
 };
 
 fn run() -> Result<()> {
@@ -78,8 +78,7 @@ fn run() -> Result<()> {
             let file = sub_matches.get_one::<path::PathBuf>("file").unwrap();
             let contents = fs::read_to_string(file)?;
 
-            let mut parser = Parser::new(&contents);
-            let ast = parser.parse()?;
+            let ast = parse(&contents)?;
             println!("{ast:#?}");
         }
         _ => unreachable!(),
