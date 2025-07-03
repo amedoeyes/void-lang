@@ -85,6 +85,7 @@ const KEYWORDS: &[(&str, Token)] = &[
 #[derive(Debug)]
 pub struct Lexer {
     buffer: String,
+    index: usize,
     position: Position,
 }
 
@@ -92,11 +93,8 @@ impl Lexer {
     pub fn new(buffer: &str) -> Self {
         Self {
             buffer: buffer.to_string(),
-            position: Position {
-                index: 0,
-                line: 1,
-                column: 1,
-            },
+            index: 0,
+            position: Position { line: 1, column: 1 },
         }
     }
 
@@ -186,11 +184,11 @@ impl Lexer {
     }
 
     fn current_char(&self) -> Option<char> {
-        self.buffer.chars().nth(self.position.index)
+        self.buffer.chars().nth(self.index)
     }
 
     fn remaining_buffer(&self) -> &str {
-        &self.buffer[self.position.index..]
+        &self.buffer[self.index..]
     }
 
     fn slice_buffer_while<P: Fn(char) -> bool>(&self, predicate: P) -> &str {
@@ -211,7 +209,7 @@ impl Lexer {
                 } else {
                     self.position.column += 1;
                 }
-                self.position.index += c.len_utf8();
+                self.index += c.len_utf8();
             }
         }
     }
@@ -220,7 +218,6 @@ impl Lexer {
         let start = self.position;
         self.advance(n);
         let mut end = self.position;
-        end.index -= 1;
         end.column -= 1;
         Span::new(start, end)
     }

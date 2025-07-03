@@ -3,7 +3,6 @@ use std::fmt::Debug;
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct Position {
-    pub index: usize,
     pub line: usize,
     pub column: usize,
 }
@@ -27,11 +26,15 @@ impl Span {
 
     pub fn merge(self, other: &Self) -> Self {
         let mut span = self;
-        if span.end.index < other.end.index {
-            span.end = other.end;
-        }
-        if span.start.index > other.start.index {
+        if other.start.line < span.start.line
+            || (other.start.line == span.start.line && other.start.column < span.start.column)
+        {
             span.start = other.start;
+        }
+        if other.end.line > span.end.line
+            || (other.end.line == span.end.line && other.end.column > span.end.column)
+        {
+            span.end = other.end;
         }
         span
     }

@@ -1,5 +1,6 @@
 mod ast;
 mod error;
+mod eval;
 mod lexer;
 mod parser;
 mod span;
@@ -7,7 +8,7 @@ mod type_system;
 
 use clap::{Arg, Command, crate_name, crate_version, value_parser};
 use clap_complete::{Shell, generate};
-use std::{fs, io, path};
+use std::{fs, io};
 
 use crate::{
     error::{Error, Result},
@@ -24,28 +25,19 @@ fn run() -> Result<()> {
         .arg_required_else_help(true)
         .subcommand_required(true)
         .subcommand(
-            Command::new("tokens").about("Dump tokens").arg(
-                Arg::new("file")
-                    .value_parser(clap::value_parser!(path::PathBuf))
-                    .required(true)
-                    .help("source file"),
-            ),
+            Command::new("tokens")
+                .about("Dump tokens")
+                .arg(Arg::new("file").required(true).help("source file")),
         )
         .subcommand(
-            Command::new("ast").about("Dump AST").arg(
-                Arg::new("file")
-                    .value_parser(clap::value_parser!(path::PathBuf))
-                    .required(true)
-                    .help("source file"),
-            ),
+            Command::new("ast")
+                .about("Dump AST")
+                .arg(Arg::new("file").required(true).help("source file")),
         )
         .subcommand(
-            Command::new("type").about("Dump typed AST").arg(
-                Arg::new("file")
-                    .value_parser(clap::value_parser!(path::PathBuf))
-                    .required(true)
-                    .help("source file"),
-            ),
+            Command::new("type")
+                .about("Dump typed AST")
+                .arg(Arg::new("file").required(true).help("source file")),
         )
         .subcommand(
             Command::new("completions")
@@ -68,7 +60,7 @@ fn run() -> Result<()> {
 
     match matches.subcommand() {
         Some(("tokens", sub_matches)) => {
-            let file = sub_matches.get_one::<path::PathBuf>("file").unwrap();
+            let file = sub_matches.get_one::<String>("file").unwrap();
             let contents = fs::read_to_string(file)?;
 
             let mut lexer = Lexer::new(&contents);
@@ -77,29 +69,36 @@ fn run() -> Result<()> {
             {
                 println!(
                     "{}:{}:{}: {:?}",
-                    file.to_str().unwrap(),
-                    token.span.start.line,
-                    token.span.start.column,
-                    token.value
+                    file, token.span.start.line, token.span.start.column, token.value
                 )
             }
         }
 
         Some(("ast", sub_matches)) => {
-            let file = sub_matches.get_one::<path::PathBuf>("file").unwrap();
+            let file = sub_matches.get_one::<String>("file").unwrap();
             let contents = fs::read_to_string(file)?;
 
-            let ast = parse(&contents)?;
+            let ast = match parse(&contents) {
+                Ok(ast) => ast,
+                Err(err) => return Err(Error::Parser(file.clone(), contents, Box::new(err))),
+            };
+
             println!("{ast:#?}");
         }
 
         Some(("type", sub_matches)) => {
-            let file = sub_matches.get_one::<path::PathBuf>("file").unwrap();
+            let file = sub_matches.get_one::<String>("file").unwrap();
             let contents = fs::read_to_string(file)?;
 
-            let ast = parse(&contents)?;
+            let ast = match parse(&contents) {
+                Ok(ast) => ast,
+                Err(err) => return Err(Error::Parser(file.clone(), contents, Box::new(err))),
+            };
 
-            let typed_ast = infer(&ast)?;
+            let typed_ast = match infer(&ast) {
+                Ok(typed_ast) => typed_ast,
+                Err(err) => return Err(Error::Type(file.clone(), contents, Box::new(err))),
+            };
 
             for node in typed_ast {
                 match node.value.value {
@@ -108,7 +107,6 @@ fn run() -> Result<()> {
                 }
             }
         }
-
 
         _ => unreachable!(),
     };
@@ -132,7 +130,7 @@ fn main() {
                 }
             },
             _ => {
-                eprintln!("error: {error}");
+                eprint!("{error}");
                 std::process::exit(1);
             }
         }

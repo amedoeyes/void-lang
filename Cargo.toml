@@ -6,4 +6,3 @@ edition = "2024"
 [dependencies]
 clap = { version = "4", features = ["cargo", "derive"] }
 clap_complete = "4"
-thiserror = "2"

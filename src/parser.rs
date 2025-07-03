@@ -1,18 +1,12 @@
-use core::num;
-
 use crate::{
     ast::{Expr, InfixOp, PrefixOp, Stmt},
     lexer::{Lexer, Token},
-    span::{Span, Spanned},
+    span::Spanned,
 };
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error(transparent)]
-    ParseInt(#[from] num::ParseIntError),
-
-    #[error("{0}: expected '{1}' but got '{2}'")]
-    UnexpectedToken(Span, String, Token),
+    UnexpectedToken(String, Spanned<Token>),
 }
 
 type Result<T> = std::result::Result<T, Error>;
@@ -41,9 +35,8 @@ impl Parser {
                     self.advance();
                     let Token::Identifier(id) = self.token.value.clone() else {
                         return Err(Error::UnexpectedToken(
-                            self.token.span,
                             "Identifier".to_string(),
-                            self.token.value.clone(),
+                            self.token.clone(),
                         ));
                     };
 
@@ -77,9 +70,8 @@ impl Parser {
     fn expect(&mut self, token: Token) -> Result<()> {
         if self.token.value != token {
             return Err(Error::UnexpectedToken(
-                self.token.span,
                 token.to_string(),
-                self.token.value.clone(),
+                self.token.clone(),
             ));
         }
         self.advance();
@@ -100,7 +92,7 @@ impl Parser {
             }
 
             Token::Integer(int) => {
-                let val = int.parse::<i64>()?;
+                let val = int.parse::<i64>().unwrap();
                 let span = self.token.span;
                 self.advance();
                 Ok(Spanned::new(Expr::Integer(val), span))
@@ -138,19 +130,20 @@ impl Parser {
                 let span = self.token.span;
                 self.advance();
                 if self.token.value == Token::ParenRight {
+                    let span = span.merge(&self.token.span);
                     self.advance();
-                    Ok(Spanned::new(Expr::Unit, span.merge(&self.token.span)))
+                    Ok(Spanned::new(Expr::Unit, span))
                 } else {
                     let expr = self.parse_expr(0)?;
+                    let span = span.merge(&self.token.span);
                     self.expect(Token::ParenRight)?;
-                    Ok(Spanned::new(expr.value, span.merge(&expr.span)))
+                    Ok(Spanned::new(expr.value, span))
                 }
             }
 
             _ => Err(Error::UnexpectedToken(
-                self.token.span,
                 "expression".to_string(),
-                self.token.value.clone(),
+                self.token.clone(),
             )),
         }
     }
@@ -213,7 +206,7 @@ impl Parser {
 
         if self.token.value == Token::HyphenGreaterThan {
             if let Expr::Identifier(id) = expr.value {
-                let span = self.token.span;
+                let span = expr.span;
                 self.advance();
 
                 let body = self.parse_expr(0)?;
@@ -228,9 +221,8 @@ impl Parser {
                 );
             } else {
                 return Err(Error::UnexpectedToken(
-                    self.token.span,
                     "identifier".to_string(),
-                    self.token.value.clone(),
+                    self.token.clone(),
                 ));
             }
         }

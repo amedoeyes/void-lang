@@ -7,19 +7,14 @@ use crate::{
     span::Spanned,
 };
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum Error {
-    #[error("{0}: type mismatch expected '{1}' but found '{3}'")]
-    TypeMismatch(Span, Type, Span, Type),
-
-    #[error("{0}: infinite type '{1}'")]
-    InfiniteType(Span, Type),
-
-    #[error("{0}: unkown variable '{1}'")]
-    UnknownIdentifier(Span, String),
+    TypeMismatch(Box<Spanned<Type>>, Box<Spanned<Type>>),
+    InfiniteType(Spanned<Type>),
+    UnknownIdentifier(Spanned<String>),
 }
 
-type Result<T> = result::Result<T, Box<Error>>;
+type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug, Clone)]
 pub enum Type {
@@ -237,17 +232,13 @@ impl Env {
                 Ok(())
             }
 
-            _ => Err(Box::new(Error::TypeMismatch(
-                t1.span, t1.value, t2.span, t2.value,
-            ))),
+            _ => Err(Error::TypeMismatch(Box::new(t1), Box::new(t2))),
         }
     }
 
     fn occurs_check(var: usize, ty: &Spanned<Type>) -> Result<()> {
         match &ty.value {
-            Type::Var(a) if *a == var => {
-                Err(Box::new(Error::InfiniteType(ty.span, ty.value.clone())))
-            }
+            Type::Var(a) if *a == var => Err(Error::InfiniteType(ty.clone())),
 
             Type::Fun(l, r) => {
                 Self::occurs_check(var, l)?;
@@ -274,7 +265,10 @@ pub fn infer_expr(env: &mut Env, expr: &Spanned<Expr>) -> Result<Spanned<Type>> 
                 .vars
                 .get(&name.clone())
                 .cloned()
-                .ok_or(Error::UnknownIdentifier(expr.span, name.clone()))?;
+                .ok_or(Error::UnknownIdentifier(Spanned::new(
+                    name.clone(),
+                    expr.span,
+                )))?;
 
             env.instantiate(&ty)
         }
@@ -282,7 +276,7 @@ pub fn infer_expr(env: &mut Env, expr: &Spanned<Expr>) -> Result<Spanned<Type>> 
         Expr::Condition { cond, then, alt } => {
             let cond_ty = infer_expr(env, cond)?;
 
-            env.unify(&cond_ty, &Spanned::new(Type::Bool, cond_ty.span))?;
+            env.unify(&Spanned::new(Type::Bool, cond_ty.span), &cond_ty)?;
 
             let then_ty = infer_expr(env, then)?;
             let alt_ty = infer_expr(env, alt)?;
@@ -296,7 +290,7 @@ pub fn infer_expr(env: &mut Env, expr: &Spanned<Expr>) -> Result<Spanned<Type>> 
             let rhs_ty = infer_expr(env, rhs)?;
             match op {
                 PrefixOp::Neg => {
-                    env.unify(&rhs_ty, &Spanned::new(Type::Int, rhs_ty.span))?;
+                    env.unify(&Spanned::new(Type::Int, rhs_ty.span), &rhs_ty)?;
                     Spanned::new(Type::Int, expr.span)
                 }
             }
@@ -308,8 +302,8 @@ pub fn infer_expr(env: &mut Env, expr: &Spanned<Expr>) -> Result<Spanned<Type>> 
 
             match op {
                 InfixOp::Add | InfixOp::Sub | InfixOp::Mul | InfixOp::Div | InfixOp::Mod => {
-                    env.unify(&lhs_ty, &Spanned::new(Type::Int, lhs_ty.span))?;
-                    env.unify(&rhs_ty, &Spanned::new(Type::Int, rhs_ty.span))?;
+                    env.unify(&Spanned::new(Type::Int, lhs_ty.span), &lhs_ty)?;
+                    env.unify(&Spanned::new(Type::Int, rhs_ty.span), &rhs_ty)?;
                     Spanned::new(Type::Int, expr.span)
                 }
 
@@ -324,6 +318,7 @@ pub fn infer_expr(env: &mut Env, expr: &Spanned<Expr>) -> Result<Spanned<Type>> 
             let param_ty = Spanned::new(env.fresh_var(), param.span);
             env.vars.insert(param.value.clone(), param_ty.clone());
             let body_ty = infer_expr(env, body)?;
+            env.vars.remove(&param.value);
             Spanned::new(Type::Fun(Box::new(param_ty), Box::new(body_ty)), expr.span)
         }
 
@@ -336,7 +331,6 @@ pub fn infer_expr(env: &mut Env, expr: &Spanned<Expr>) -> Result<Spanned<Type>> 
                 &func_ty,
                 &Spanned::new(Type::Fun(Box::new(arg_ty), Box::new(ty.clone())), span),
             )?;
-
             ty
         }
     };
