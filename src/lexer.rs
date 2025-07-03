@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::position::{Position, Span, Spanned};
+use crate::span::{Position, Span, Spanned};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {

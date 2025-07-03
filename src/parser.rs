@@ -3,7 +3,7 @@ use core::num;
 use crate::{
     ast::{Expr, InfixOp, PrefixOp, Stmt},
     lexer::{Lexer, Token},
-    position::{Span, Spanned},
+    span::{Span, Spanned},
 };
 
 #[derive(Debug, thiserror::Error)]

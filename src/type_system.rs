@@ -4,7 +4,7 @@ use std::result;
 
 use crate::{
     ast::{self, Expr, InfixOp, PrefixOp, Stmt},
-    position::{Span, Spanned},
+    span::Spanned,
 };
 
 #[derive(Debug, thiserror::Error)]

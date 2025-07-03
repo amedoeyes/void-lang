@@ -1,4 +1,4 @@
-use crate::{lexer::Token, position::Spanned};
+use crate::{lexer::Token, span::Spanned};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PrefixOp {

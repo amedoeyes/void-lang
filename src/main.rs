@@ -2,7 +2,7 @@ mod ast;
 mod error;
 mod lexer;
 mod parser;
-mod position;
+mod span;
 mod type_system;
 
 use clap::{Arg, Command, crate_name, crate_version, value_parser};
