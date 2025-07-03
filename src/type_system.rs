@@ -9,8 +9,8 @@ use crate::{
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("{0}: type mismatch between '{1}' and '{2}'")]
-    TypeMismatch(Span, Type, Type),
+    #[error("{0}: type mismatch expected '{1}' but found '{3}'")]
+    TypeMismatch(Span, Type, Span, Type),
 
     #[error("{0}: infinite type '{1}'")]
     InfiniteType(Span, Type),
@@ -19,31 +19,18 @@ pub enum Error {
     UnknownIdentifier(Span, String),
 }
 
-type Result<T> = result::Result<T, Error>;
+type Result<T> = result::Result<T, Box<Error>>;
 
-enum UnifyError {
-    TypeMismatch(Type, Type),
-    InfiniteType(Type),
-}
-
-impl UnifyError {
-    fn to_error(&self, span: &Span) -> Error {
-        match self {
-            UnifyError::TypeMismatch(t1, t2) => Error::TypeMismatch(*span, t1.clone(), t2.clone()),
-            UnifyError::InfiniteType(t) => Error::InfiniteType(*span, t.clone()),
-        }
-    }
-}
-
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone)]
 pub enum Type {
     Unit,
     Int,
     Bool,
     Var(usize),
-    Fun(Box<Type>, Box<Type>),
-    Poly(Vec<usize>, Box<Type>),
+    Fun(Box<Spanned<Type>>, Box<Spanned<Type>>),
+    Poly(Vec<usize>, Box<Spanned<Type>>),
 }
+
 impl Type {
     fn fmt(&self, f: &mut fmt::Formatter, mapping: &HashMap<usize, usize>) -> fmt::Result {
         match self {
@@ -56,9 +43,9 @@ impl Type {
             Type::Var(n) => write!(f, "t{}", mapping.get(n).unwrap_or(n)),
 
             Type::Fun(l, r) => {
-                l.fmt(f, mapping)?;
+                l.value.fmt(f, mapping)?;
                 write!(f, " -> ")?;
-                r.fmt(f, mapping)
+                r.value.fmt(f, mapping)
             }
 
             Type::Poly(vars, body) => {
@@ -71,7 +58,8 @@ impl Type {
                         .collect::<Vec<String>>()
                         .join(" ")
                 )?;
-                body.fmt(f, &vars.iter().enumerate().map(|(i, &v)| (v, i)).collect())
+                body.value
+                    .fmt(f, &vars.iter().enumerate().map(|(i, &v)| (v, i)).collect())
             }
         }
     }
@@ -91,9 +79,9 @@ pub struct Typed<T> {
 
 #[derive(Debug, Clone)]
 pub struct Env {
-    vars: HashMap<String, Type>,
+    vars: HashMap<String, Spanned<Type>>,
     counter: usize,
-    substitutions: HashMap<usize, Type>,
+    substitutions: HashMap<usize, Spanned<Type>>,
 }
 
 impl Env {
@@ -111,7 +99,7 @@ impl Env {
         var
     }
 
-    pub fn generalize(&self, ty: &Type) -> Type {
+    pub fn generalize(&self, ty: &Spanned<Type>) -> Spanned<Type> {
         let mut free_vars = Vec::new();
         Self::collect_free_vars(ty, &mut free_vars, &mut Vec::new());
 
@@ -124,11 +112,15 @@ impl Env {
         free_vars.sort();
         free_vars.dedup();
 
-        Type::Poly(free_vars, Box::new(ty.clone()))
+        Spanned::new(Type::Poly(free_vars, Box::new(ty.clone())), ty.span)
     }
 
-    fn collect_free_vars(ty: &Type, free_vars: &mut Vec<usize>, bound_vars: &mut Vec<usize>) {
-        match ty {
+    fn collect_free_vars(
+        ty: &Spanned<Type>,
+        free_vars: &mut Vec<usize>,
+        bound_vars: &mut Vec<usize>,
+    ) {
+        match &ty.value {
             Type::Var(n) => {
                 if !bound_vars.contains(n) {
                     free_vars.push(*n);
@@ -150,13 +142,30 @@ impl Env {
         }
     }
 
-    pub fn instantiate(&mut self, ty: &Type) -> Type {
+    pub fn instantiate(&mut self, ty: &Spanned<Type>) -> Spanned<Type> {
         let mut substitutions = HashMap::new();
         self.instantiate_helper(ty, &mut substitutions)
     }
 
-    fn instantiate_helper(&mut self, ty: &Type, substitutions: &mut HashMap<usize, Type>) -> Type {
-        match ty {
+    fn instantiate_helper(
+        &mut self,
+        ty: &Spanned<Type>,
+        substitutions: &mut HashMap<usize, Type>,
+    ) -> Spanned<Type> {
+        match &ty.value {
+            Type::Var(n) => Spanned::new(
+                substitutions.get(n).cloned().unwrap_or(Type::Var(*n)),
+                ty.span,
+            ),
+
+            Type::Fun(l, r) => Spanned::new(
+                Type::Fun(
+                    Box::new(self.instantiate_helper(l, substitutions)),
+                    Box::new(self.instantiate_helper(r, substitutions)),
+                ),
+                ty.span,
+            ),
+
             Type::Poly(vars, body) => {
                 for var in vars {
                     substitutions.insert(*var, self.fresh_var());
@@ -164,19 +173,12 @@ impl Env {
                 self.instantiate_helper(body, substitutions)
             }
 
-            Type::Var(n) => substitutions.get(n).cloned().unwrap_or(Type::Var(*n)),
-
-            Type::Fun(l, r) => Type::Fun(
-                Box::new(self.instantiate_helper(l, substitutions)),
-                Box::new(self.instantiate_helper(r, substitutions)),
-            ),
-
             _ => ty.clone(),
         }
     }
 
-    fn substitute(&self, ty: &Type) -> Type {
-        match ty {
+    fn substitute(&self, ty: &Spanned<Type>) -> Spanned<Type> {
+        match &ty.value {
             Type::Var(n) => {
                 if let Some(sub) = self.substitutions.get(n) {
                     self.substitute(sub)
@@ -185,9 +187,10 @@ impl Env {
                 }
             }
 
-            Type::Fun(l, r) => {
-                Type::Fun(Box::new(self.substitute(l)), Box::new(self.substitute(r)))
-            }
+            Type::Fun(l, r) => Spanned::new(
+                Type::Fun(Box::new(self.substitute(l)), Box::new(self.substitute(r))),
+                ty.span,
+            ),
 
             Type::Poly(vars, body) => {
                 let mut new_subs = self.substitutions.clone();
@@ -199,17 +202,20 @@ impl Env {
                     counter: self.counter,
                     substitutions: new_subs,
                 };
-                Type::Poly(vars.clone(), Box::new(new_env.substitute(body)))
+                Spanned::new(
+                    Type::Poly(vars.clone(), Box::new(new_env.substitute(body))),
+                    ty.span,
+                )
             }
             _ => ty.clone(),
         }
     }
 
-    fn unify(&mut self, t1: &Type, t2: &Type) -> result::Result<(), UnifyError> {
+    fn unify(&mut self, t1: &Spanned<Type>, t2: &Spanned<Type>) -> Result<()> {
         let t1 = self.substitute(t1);
         let t2 = self.substitute(t2);
 
-        match (&t1, &t2) {
+        match (&t1.value, &t2.value) {
             (Type::Int, Type::Int) | (Type::Bool, Type::Bool) | (Type::Unit, Type::Unit) => Ok(()),
 
             (Type::Var(a), Type::Var(b)) if a == b => Ok(()),
@@ -231,13 +237,17 @@ impl Env {
                 Ok(())
             }
 
-            _ => Err(UnifyError::TypeMismatch(t1, t2)),
+            _ => Err(Box::new(Error::TypeMismatch(
+                t1.span, t1.value, t2.span, t2.value,
+            ))),
         }
     }
 
-    fn occurs_check(var: usize, ty: &Type) -> result::Result<(), UnifyError> {
-        match ty {
-            Type::Var(a) if *a == var => Err(UnifyError::InfiniteType(ty.clone())),
+    fn occurs_check(var: usize, ty: &Spanned<Type>) -> Result<()> {
+        match &ty.value {
+            Type::Var(a) if *a == var => {
+                Err(Box::new(Error::InfiniteType(ty.span, ty.value.clone())))
+            }
 
             Type::Fun(l, r) => {
                 Self::occurs_check(var, l)?;
@@ -251,13 +261,13 @@ impl Env {
     }
 }
 
-pub fn infer_expr(env: &mut Env, expr: &Spanned<Expr>) -> Result<Type> {
+pub fn infer_expr(env: &mut Env, expr: &Spanned<Expr>) -> Result<Spanned<Type>> {
     let ty = match &expr.value {
-        Expr::Unit => Ok(Type::Unit),
+        Expr::Unit => Spanned::new(Type::Unit, expr.span),
 
-        Expr::Integer(_) => Ok(Type::Int),
+        Expr::Integer(_) => Spanned::new(Type::Int, expr.span),
 
-        Expr::Boolean(_) => Ok(Type::Bool),
+        Expr::Boolean(_) => Spanned::new(Type::Bool, expr.span),
 
         Expr::Identifier(name) => {
             let ty = env
@@ -266,31 +276,28 @@ pub fn infer_expr(env: &mut Env, expr: &Spanned<Expr>) -> Result<Type> {
                 .cloned()
                 .ok_or(Error::UnknownIdentifier(expr.span, name.clone()))?;
 
-            Ok(env.instantiate(&ty))
+            env.instantiate(&ty)
         }
 
         Expr::Condition { cond, then, alt } => {
             let cond_ty = infer_expr(env, cond)?;
 
-            env.unify(&cond_ty, &Type::Bool)
-                .map_err(|err| err.to_error(&cond.span))?;
+            env.unify(&cond_ty, &Spanned::new(Type::Bool, cond_ty.span))?;
 
             let then_ty = infer_expr(env, then)?;
             let alt_ty = infer_expr(env, alt)?;
 
-            env.unify(&then_ty, &alt_ty)
-                .map_err(|err| err.to_error(&alt.span))?;
+            env.unify(&then_ty, &alt_ty)?;
 
-            Ok(then_ty)
+            then_ty
         }
 
         Expr::Prefix { op, rhs } => {
             let rhs_ty = infer_expr(env, rhs)?;
             match op {
                 PrefixOp::Neg => {
-                    env.unify(&rhs_ty, &Type::Int)
-                        .map_err(|err| err.to_error(&rhs.span))?;
-                    Ok(Type::Int)
+                    env.unify(&rhs_ty, &Spanned::new(Type::Int, rhs_ty.span))?;
+                    Spanned::new(Type::Int, expr.span)
                 }
             }
         }
@@ -301,54 +308,50 @@ pub fn infer_expr(env: &mut Env, expr: &Spanned<Expr>) -> Result<Type> {
 
             match op {
                 InfixOp::Add | InfixOp::Sub | InfixOp::Mul | InfixOp::Div | InfixOp::Mod => {
-                    env.unify(&lhs_ty, &Type::Int)
-                        .map_err(|err| err.to_error(&lhs.span))?;
-
-                    env.unify(&rhs_ty, &Type::Int)
-                        .map_err(|err| err.to_error(&rhs.span))?;
-
-                    Ok(Type::Int)
+                    env.unify(&lhs_ty, &Spanned::new(Type::Int, lhs_ty.span))?;
+                    env.unify(&rhs_ty, &Spanned::new(Type::Int, rhs_ty.span))?;
+                    Spanned::new(Type::Int, expr.span)
                 }
 
                 InfixOp::Eq => {
-                    env.unify(&lhs_ty, &rhs_ty)
-                        .map_err(|err| err.to_error(&lhs.span))?;
-
-                    Ok(Type::Bool)
+                    env.unify(&lhs_ty, &rhs_ty)?;
+                    Spanned::new(Type::Bool, expr.span)
                 }
             }
         }
 
         Expr::Lambda { param, body } => {
-            let param_ty = env.fresh_var();
-            env.vars.insert(param.clone(), param_ty.clone());
+            let param_ty = Spanned::new(env.fresh_var(), param.span);
+            env.vars.insert(param.value.clone(), param_ty.clone());
             let body_ty = infer_expr(env, body)?;
-            Ok(Type::Fun(Box::new(param_ty), Box::new(body_ty)))
+            Spanned::new(Type::Fun(Box::new(param_ty), Box::new(body_ty)), expr.span)
         }
 
         Expr::Application { func, arg } => {
             let func_ty = infer_expr(env, func)?;
             let arg_ty = infer_expr(env, arg)?;
-            let ty = env.fresh_var();
+            let ty = Spanned::new(env.fresh_var(), expr.span);
+            let span = arg_ty.span.merge(&ty.span);
+            env.unify(
+                &func_ty,
+                &Spanned::new(Type::Fun(Box::new(arg_ty), Box::new(ty.clone())), span),
+            )?;
 
-            env.unify(&func_ty, &Type::Fun(Box::new(arg_ty), Box::new(ty.clone())))
-                .map_err(|err| err.to_error(&func.span))?;
-
-            Ok(ty)
+            ty
         }
-    }?;
+    };
 
     Ok(env.substitute(&ty))
 }
 
-pub fn infer(prog: &[Spanned<Stmt>]) -> Result<Vec<Typed<Spanned<Stmt>>>> {
-    let mut typed_prog = vec![];
+pub fn infer(ast: &[Spanned<Stmt>]) -> Result<Vec<Typed<Spanned<Stmt>>>> {
+    let mut typed_ast = vec![];
     let mut env = Env::new();
 
-    for stmt in prog {
-        match &stmt.value {
+    for node in ast {
+        match &node.value {
             ast::Stmt::Let { name, expr } => {
-                let ty = env.fresh_var();
+                let ty = Spanned::new(env.fresh_var(), node.span);
                 env.vars.insert(name.clone(), ty.clone());
 
                 let expr_ty = infer_expr(&mut env, expr)?;
@@ -356,22 +359,22 @@ pub fn infer(prog: &[Spanned<Stmt>]) -> Result<Vec<Typed<Spanned<Stmt>>>> {
                 let generalized_ty = env.generalize(&expr_ty);
                 env.vars.insert(name.clone(), generalized_ty.clone());
 
-                typed_prog.push(Typed {
-                    value: stmt.clone(),
-                    ty: generalized_ty,
+                typed_ast.push(Typed {
+                    value: node.clone(),
+                    ty: generalized_ty.value,
                 });
             }
 
             ast::Stmt::Expr(expr) => {
                 let expr_ty = infer_expr(&mut env, expr)?;
                 let generalized_ty = env.generalize(&expr_ty);
-                typed_prog.push(Typed {
-                    value: stmt.clone(),
-                    ty: generalized_ty,
+                typed_ast.push(Typed {
+                    value: node.clone(),
+                    ty: generalized_ty.value,
                 });
             }
         }
     }
 
-    Ok(typed_prog)
+    Ok(typed_ast)
 }

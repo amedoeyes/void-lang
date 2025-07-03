@@ -73,7 +73,7 @@ pub enum Expr {
         rhs: Box<Spanned<Expr>>,
     },
     Lambda {
-        param: String,
+        param: Spanned<String>,
         body: Box<Spanned<Expr>>,
     },
     Application {
