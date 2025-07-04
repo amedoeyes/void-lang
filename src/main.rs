@@ -12,6 +12,7 @@ use std::{fs, io};
 
 use crate::{
     error::{Error, Result},
+    eval::evaluate,
     lexer::{Lexer, Token},
     parser::parse,
     type_system::infer,
@@ -37,6 +38,11 @@ fn run() -> Result<()> {
         .subcommand(
             Command::new("type")
                 .about("Dump typed AST")
+                .arg(Arg::new("file").required(true).help("source file")),
+        )
+        .subcommand(
+            Command::new("eval")
+                .about("evaluate")
                 .arg(Arg::new("file").required(true).help("source file")),
         )
         .subcommand(
@@ -106,6 +112,28 @@ fn run() -> Result<()> {
                     ast::Stmt::Expr(_) => println!("{}", node.ty),
                 }
             }
+        }
+
+        Some(("eval", sub_matches)) => {
+            let file = sub_matches.get_one::<String>("file").unwrap();
+            let contents = fs::read_to_string(file)?;
+
+            let ast = match parse(&contents) {
+                Ok(ast) => ast,
+                Err(err) => return Err(Error::Parser(file.clone(), contents, Box::new(err))),
+            };
+
+            let typed_ast = match infer(&ast) {
+                Ok(typed_ast) => typed_ast,
+                Err(err) => return Err(Error::Type(file.clone(), contents, Box::new(err))),
+            };
+
+            let value = match evaluate(&typed_ast) {
+                Ok(value) => value,
+                Err(err) => return Err(Error::Eval(file.clone(), contents, err)),
+            };
+
+            println!("{value}");
         }
 
         _ => unreachable!(),

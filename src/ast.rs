@@ -1,3 +1,5 @@
+use core::fmt;
+
 use crate::{lexer::Token, span::Spanned};
 
 #[derive(Debug, Clone, PartialEq)]
@@ -16,6 +18,14 @@ impl PrefixOp {
     pub fn precedence(&self) -> (u8, u8) {
         match self {
             PrefixOp::Neg => (0, 9),
+        }
+    }
+}
+
+impl fmt::Display for PrefixOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            PrefixOp::Neg => write!(f, "-"),
         }
     }
 }
@@ -52,6 +62,19 @@ impl InfixOp {
     }
 }
 
+impl fmt::Display for InfixOp {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            InfixOp::Add => write!(f, "+"),
+            InfixOp::Sub => write!(f, "-"),
+            InfixOp::Mul => write!(f, "*"),
+            InfixOp::Div => write!(f, "/"),
+            InfixOp::Mod => write!(f, "%"),
+            InfixOp::Eq => write!(f, "=="),
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Expr {
     Unit,
@@ -80,6 +103,36 @@ pub enum Expr {
         func: Box<Spanned<Expr>>,
         arg: Box<Spanned<Expr>>,
     },
+}
+
+impl fmt::Display for Expr {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Expr::Unit => write!(f, "()"),
+            Expr::Boolean(val) => write!(f, "{val}"),
+            Expr::Integer(val) => write!(f, "{val}"),
+            Expr::Identifier(id) => write!(f, "{id}",),
+            Expr::Condition { cond, then, alt } => {
+                write!(
+                    f,
+                    "if {} then {} else {}",
+                    cond.value, then.value, alt.value
+                )
+            }
+            Expr::Infix { lhs, op, rhs } => {
+                write!(f, "({} {} {})", lhs.value, op, rhs.value)
+            }
+            Expr::Prefix { op, rhs } => {
+                write!(f, "{}{}", op, rhs.value)
+            }
+            Expr::Lambda { param, body } => {
+                write!(f, "{} -> {}", param.value, body.value)
+            }
+            Expr::Application { func, arg } => {
+                write!(f, "({} {})", func.value, arg.value)
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

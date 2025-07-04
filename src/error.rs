@@ -1,7 +1,7 @@
 use core::fmt;
 use std::io;
 
-use crate::{lexer::Token, parser, span::Span, type_system};
+use crate::{eval, lexer::Token, parser, span::Span, type_system};
 
 #[derive(Debug)]
 pub enum Error {
@@ -9,6 +9,7 @@ pub enum Error {
     Io(io::Error),
     Parser(String, String, Box<parser::Error>),
     Type(String, String, Box<type_system::Error>),
+    Eval(String, String, eval::Error),
 }
 
 impl From<std::io::Error> for Error {
@@ -126,6 +127,13 @@ impl fmt::Display for Error {
                         &format!("unknown identifier '{}'", id.value),
                     )?;
                     write_lines(f, source, &id.span)
+                }
+            },
+
+            Error::Eval(filename, source, err) => match err {
+                eval::Error::DivisionByZero(span) => {
+                    write_message(f, filename, span, "division by zero")?;
+                    write_lines(f, source, span)
                 }
             },
         }
