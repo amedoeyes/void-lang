@@ -1,29 +1,37 @@
-// let x = 1;
-// let y = 2;
-// let z = x + y;
-// let maff = (((z * y) / 2) - 5 + 10) * y;
+let add = a -> b -> a + b;
+let sub = a -> b -> a - b;
+let div = a -> b -> a / b;
+let mul = a -> b -> a * b;
 
-// let two_pass = add(31, 11);
+let fact = n ->
+	if n == 0 then 1 
+	else n * fact (n - 1);
 
-// let add = (a, b) -> a + b;
-// let sub = (a, b) -> a - b;
-// let mult = (a, b) -> a * b;
-// let div = (a, b) -> a / b;
-// let added = add(31, 11);
-// let maff = add(sub(4, 2), div(10, 2));
+let fib = n -> 
+	if n == 0 then 0 
+	else if n == 1 then 1 
+	else fib (n - 1) + fib (n - 2);
 
-// let f = () -> (a, b) -> a + b;
-// let fun = f()(31, 11);
-// let funny = ((x) -> x)(42);
-// let funnier = (() -> (a, b) -> a + b)()(31, 11);
+let sum = n -> 
+	if n == 0 then 0 
+	else n + sum (n - 1);
 
-// let g = (a, b) -> () -> a + b;
-// let gun = g(31, 11);
-// let gunny = gun();
-// let gunnier = ((a, b) -> () -> a + b)(31, 11)();
+let power = x -> n -> 
+	if n == 0 then 1 
+	else x * power x (n - 1);
 
-// let fact = (n) -> n == 0 ? 1 : n * fact(n - 1);
-// let fact_res = fact(10);
+let gcd = a -> b -> 
+	if b == 0 then a 
+	else gcd b (a % b);
 
-// let fib = (n, a, b) -> n == 0 ? a : fib(n - 1, b, a + b);
-// let fib_res = fib(10, 0, 1);
+let eq = a -> b -> a == b;
+let id = x -> x;
+
+let compose = f -> g -> x -> f (g x);
+
+let inc = x -> x + 1;
+let is_even = x -> x % 2 == 0;
+
+let pair = x -> y -> f -> f x y;
+let first = p -> p (x -> y -> x);
+let second = p -> p (x -> y -> y);
