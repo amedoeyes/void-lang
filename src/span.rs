@@ -1,4 +1,3 @@
-use core::fmt;
 use std::fmt::Debug;
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -11,12 +10,6 @@ pub struct Position {
 pub struct Span {
     pub start: Position,
     pub end: Position,
-}
-
-impl fmt::Display for Span {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{}:{}", self.start.line, self.start.column)
-    }
 }
 
 impl Span {
