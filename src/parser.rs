@@ -24,7 +24,7 @@ impl Parser {
         Parser { lexer, token }
     }
 
-    fn parse(&mut self) -> Result<Vec<Spanned<Stmt>>> {
+    fn parse(mut self) -> Result<Vec<Spanned<Stmt>>> {
         let mut ast = vec![];
 
         while self.token.value != Token::Eof {
@@ -33,12 +33,11 @@ impl Parser {
                     let span = self.token.span;
 
                     self.advance();
-                    let Token::Identifier(id) = self.token.value.clone() else {
-                        return Err(Error::UnexpectedToken(
-                            "Identifier".to_string(),
-                            self.token.clone(),
-                        ));
+                    let Token::Identifier(ref id) = self.token.value else {
+                        return Err(Error::UnexpectedToken("Identifier".to_string(), self.token));
                     };
+
+                    let name = id.clone();
 
                     self.advance();
                     self.expect(Token::Equal)?;
@@ -47,8 +46,8 @@ impl Parser {
                     self.expect(Token::Semicolon)?;
 
                     ast.push(Spanned::new(
-                        Stmt::Let { name: id, expr },
-                        span.merge(&self.token.span),
+                        Stmt::Let { name, expr },
+                        span.merge(self.token.span),
                     ));
                 }
 
@@ -102,7 +101,7 @@ impl Parser {
                 let id = id.clone();
                 let span = self.token.span;
                 self.advance();
-                Ok(Spanned::new(Expr::Identifier(id.clone()), span))
+                Ok(Spanned::new(Expr::Identifier(id), span))
             }
 
             Token::If => {
@@ -115,7 +114,7 @@ impl Parser {
                 self.expect(Token::Else)?;
                 let alt = self.parse_expr(0)?;
 
-                let span = span.merge(&alt.span);
+                let span = span.merge(alt.span);
                 Ok(Spanned::new(
                     Expr::Condition {
                         cond: Box::new(cond),
@@ -130,12 +129,12 @@ impl Parser {
                 let span = self.token.span;
                 self.advance();
                 if self.token.value == Token::ParenRight {
-                    let span = span.merge(&self.token.span);
+                    let span = span.merge(self.token.span);
                     self.advance();
                     Ok(Spanned::new(Expr::Unit, span))
                 } else {
                     let expr = self.parse_expr(0)?;
-                    let span = span.merge(&self.token.span);
+                    let span = span.merge(self.token.span);
                     self.expect(Token::ParenRight)?;
                     Ok(Spanned::new(expr.value, span))
                 }
@@ -158,7 +157,7 @@ impl Parser {
                     let (_, r_bp) = op.precedence();
                     let rhs = self.parse_expr(r_bp)?;
 
-                    let span = span.merge(&rhs.span);
+                    let span = span.merge(rhs.span);
                     Ok(Spanned::new(
                         Expr::Prefix {
                             op,
@@ -173,8 +172,8 @@ impl Parser {
         }
     }
 
-    fn parse_infix(&mut self, lhs: &Spanned<Expr>, min_bp: u8) -> Result<Spanned<Expr>> {
-        let mut lhs = lhs.clone();
+    fn parse_infix(&mut self, lhs: Spanned<Expr>, min_bp: u8) -> Result<Spanned<Expr>> {
+        let mut lhs = lhs;
 
         while let Some(op) = InfixOp::from_token(&self.token.value) {
             let (l_bp, r_bp) = op.precedence();
@@ -183,7 +182,7 @@ impl Parser {
             }
             self.advance();
             let rhs = self.parse_expr(r_bp)?;
-            let span = lhs.span.merge(&rhs.span);
+            let span = lhs.span.merge(rhs.span);
             lhs = Spanned::new(
                 Expr::Infix {
                     lhs: Box::new(lhs),
@@ -206,15 +205,14 @@ impl Parser {
 
         if self.token.value == Token::HyphenGreaterThan {
             if let Expr::Identifier(id) = expr.value {
-                let span = expr.span;
                 self.advance();
 
                 let body = self.parse_expr(0)?;
 
-                let span = span.merge(&body.span);
+                let span = expr.span.merge(body.span);
                 expr = Spanned::new(
                     Expr::Lambda {
-                        param: Spanned::new(id.clone(), expr.span),
+                        param: Spanned::new(id, expr.span),
                         body: Box::new(body),
                     },
                     span,
@@ -236,7 +234,7 @@ impl Parser {
                 | Token::ParenLeft
         ) {
             let arg = self.parse_atom()?;
-            let span = expr.span.merge(&arg.span);
+            let span = expr.span.merge(arg.span);
             expr = Spanned::new(
                 Expr::Application {
                     func: Box::new(expr),
@@ -255,7 +253,7 @@ impl Parser {
                 | Token::Slash
                 | Token::Star
         ) {
-            expr = self.parse_infix(&expr, min_bp)?
+            expr = self.parse_infix(expr, min_bp)?
         }
 
         Ok(expr)
@@ -263,6 +261,5 @@ impl Parser {
 }
 
 pub fn parse(input: &str) -> Result<Vec<Spanned<Stmt>>> {
-    let mut parser = Parser::new(input);
-    parser.parse()
+    Parser::new(input).parse()
 }

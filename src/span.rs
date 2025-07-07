@@ -17,7 +17,7 @@ impl Span {
         Self { start, end }
     }
 
-    pub fn merge(self, other: &Self) -> Self {
+    pub fn merge(self, other: Self) -> Self {
         let mut span = self;
         if other.start.line < span.start.line
             || (other.start.line == span.start.line && other.start.column < span.start.column)

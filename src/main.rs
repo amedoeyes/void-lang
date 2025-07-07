@@ -101,7 +101,7 @@ fn run() -> Result<()> {
                 Err(err) => return Err(Error::Parser(file.clone(), contents, Box::new(err))),
             };
 
-            let typed_ast = match infer(&ast) {
+            let typed_ast = match infer(ast) {
                 Ok(typed_ast) => typed_ast,
                 Err(err) => return Err(Error::Type(file.clone(), contents, Box::new(err))),
             };
@@ -123,12 +123,12 @@ fn run() -> Result<()> {
                 Err(err) => return Err(Error::Parser(file.clone(), contents, Box::new(err))),
             };
 
-            let typed_ast = match infer(&ast) {
+            let typed_ast = match infer(ast) {
                 Ok(typed_ast) => typed_ast,
                 Err(err) => return Err(Error::Type(file.clone(), contents, Box::new(err))),
             };
 
-            let value = match evaluate(&typed_ast) {
+            let value = match evaluate(typed_ast) {
                 Ok(value) => value,
                 Err(err) => return Err(Error::Eval(file.clone(), contents, err)),
             };
