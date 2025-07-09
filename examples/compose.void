@@ -1,0 +1,5 @@
+let compose = f -> g -> x -> f (g x);
+let inc = x -> x + 1;
+let is_even = x -> x % 2 == 0;
+
+compose is_even inc 5

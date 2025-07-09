@@ -1,0 +1,32 @@
+let nil = f -> z -> z;
+let cons = h -> t -> f -> z -> f h (t f z); 
+let fold = f -> z -> list -> list f z;
+
+let length = list -> 
+	fold (x -> acc -> acc + 1) 0 list;
+
+let sum = list -> 
+	fold (a -> b -> a + b) 0 list;
+
+let map = f -> list -> 
+	fold (h -> t -> cons (f h) t) nil list;
+
+let filter = pred -> list ->
+	fold (h -> t -> if pred h then cons h t else t) nil list;
+
+let append = list1 -> list2 ->
+	fold cons list2 list1;
+
+let concat = fold append nil;
+
+let reverse = list -> 
+	fold (h -> t -> append t (cons h nil)) nil list;
+
+let take_while = pred -> list ->
+	fold (h -> t -> if pred h then cons h t else nil) nil list;
+
+let drop_while = pred -> list ->
+	fold (h -> t -> if pred h then drop_while pred t else cons h t) nil list;
+
+
+length (filter (x -> x % 2 == 0) (cons 1 (cons 2 (cons 3 nil))))
