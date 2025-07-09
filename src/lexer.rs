@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::span::{Position, Span, Spanned};
+use crate::span::{Position, Span};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
@@ -98,7 +98,7 @@ impl Lexer {
         }
     }
 
-    pub fn next_token(&mut self) -> Spanned<Token> {
+    pub fn next_token(&mut self) -> (Token, Span) {
         self.advance(self.slice_buffer_while(|c| c.is_whitespace()).len());
 
         while self.remaining_buffer().starts_with("//") {
@@ -107,18 +107,12 @@ impl Lexer {
         }
 
         if self.remaining_buffer().is_empty() {
-            return Spanned {
-                value: Token::Eof,
-                span: Span::new(self.position, self.position),
-            };
+            return (Token::Eof, Span::new(self.position, self.position));
         }
 
         for symbol in SYMBOLS {
             if self.remaining_buffer().starts_with(symbol.0) {
-                return Spanned {
-                    value: symbol.1.clone(),
-                    span: self.advance_with_span(symbol.0.len()),
-                };
+                return (symbol.1.clone(), self.advance_with_span(symbol.0.len()));
             }
         }
 
@@ -133,10 +127,7 @@ impl Lexer {
                 && !next_char.is_alphanumeric()
                 && next_char != '_'
             {
-                return Spanned {
-                    value: keyword.1.clone(),
-                    span: self.advance_with_span(keyword.0.len()),
-                };
+                return (keyword.1.clone(), self.advance_with_span(keyword.0.len()));
             }
         }
 
@@ -153,34 +144,31 @@ impl Lexer {
                         .next()
                     && !next_char.is_alphanumeric()
                 {
-                    return Spanned {
-                        value: Token::Boolean(pattern.to_string()),
-                        span: self.advance_with_span(pattern.len()),
-                    };
+                    return (
+                        Token::Boolean(pattern.to_string()),
+                        self.advance_with_span(pattern.len()),
+                    );
                 }
             }
         }
 
         if current_char.is_ascii_digit() {
             let slice = self.slice_buffer_while(|c| c.is_ascii_digit());
-            return Spanned {
-                value: Token::Integer(slice.to_string()),
-                span: self.advance_with_span(slice.len()),
-            };
+            return (
+                Token::Integer(slice.to_string()),
+                self.advance_with_span(slice.len()),
+            );
         }
 
         if current_char.is_alphabetic() || current_char == '_' {
             let slice = self.slice_buffer_while(|c| c.is_alphanumeric() || c == '_');
-            return Spanned {
-                value: Token::Identifier(slice.to_string()),
-                span: self.advance_with_span(slice.len()),
-            };
+            return (
+                Token::Identifier(slice.to_string()),
+                self.advance_with_span(slice.len()),
+            );
         }
 
-        Spanned {
-            value: Token::Invalid,
-            span: Span::new(self.position, self.position),
-        }
+        (Token::Invalid, Span::new(self.position, self.position))
     }
 
     fn current_char(&self) -> Option<char> {

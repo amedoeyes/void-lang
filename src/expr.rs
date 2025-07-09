@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::{lexer::Token, span::Spanned};
+use crate::{context::NodeId, lexer::Token};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum PrefixOp {
@@ -82,61 +82,25 @@ pub enum Expr {
     Integer(i64),
     Identifier(String),
     Condition {
-        cond: Box<Spanned<Expr>>,
-        then: Box<Spanned<Expr>>,
-        alt: Box<Spanned<Expr>>,
+        cond: NodeId,
+        then: NodeId,
+        alt: NodeId,
     },
     Infix {
-        lhs: Box<Spanned<Expr>>,
+        lhs: NodeId,
         op: InfixOp,
-        rhs: Box<Spanned<Expr>>,
+        rhs: NodeId,
     },
     Prefix {
         op: PrefixOp,
-        rhs: Box<Spanned<Expr>>,
+        rhs: NodeId,
     },
     Lambda {
-        param: Spanned<String>,
-        body: Box<Spanned<Expr>>,
+        param: NodeId,
+        body: NodeId,
     },
     Application {
-        func: Box<Spanned<Expr>>,
-        arg: Box<Spanned<Expr>>,
+        func: NodeId,
+        arg: NodeId,
     },
-}
-
-impl fmt::Display for Expr {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Expr::Unit => write!(f, "()"),
-            Expr::Boolean(val) => write!(f, "{val}"),
-            Expr::Integer(val) => write!(f, "{val}"),
-            Expr::Identifier(id) => write!(f, "{id}",),
-            Expr::Condition { cond, then, alt } => {
-                write!(
-                    f,
-                    "if {} then {} else {}",
-                    cond.value, then.value, alt.value
-                )
-            }
-            Expr::Infix { lhs, op, rhs } => {
-                write!(f, "({} {} {})", lhs.value, op, rhs.value)
-            }
-            Expr::Prefix { op, rhs } => {
-                write!(f, "{}{}", op, rhs.value)
-            }
-            Expr::Lambda { param, body } => {
-                write!(f, "{} -> {}", param.value, body.value)
-            }
-            Expr::Application { func, arg } => {
-                write!(f, "({} {})", func.value, arg.value)
-            }
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum Stmt {
-    Let { name: String, expr: Spanned<Expr> },
-    Expr(Spanned<Expr>),
 }

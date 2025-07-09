@@ -2,16 +2,17 @@ use core::fmt;
 use std::collections::HashMap;
 use std::result;
 
+use crate::context::{Context, Node, NodeId};
 use crate::{
-    ast::{self, Expr, InfixOp, PrefixOp, Stmt},
-    span::{Span, Spanned},
+    expr::{Expr, InfixOp, PrefixOp},
+    span::Span,
 };
 
 #[derive(Debug)]
 pub enum Error {
-    TypeMismatch(Box<Spanned<Type>>, Box<Spanned<Type>>),
-    InfiniteType(Spanned<Type>),
-    UnknownIdentifier(Spanned<String>),
+    TypeMismatch((String, Span), (String, Span)),
+    InfiniteType(String, Span),
+    UnknownIdentifier(String, Span),
 }
 
 type Result<T> = result::Result<T, Error>;
@@ -22,8 +23,8 @@ pub enum Type {
     Int,
     Bool,
     Var(usize),
-    Fun(Box<Spanned<Type>>, Box<Spanned<Type>>),
-    Poly(Vec<usize>, Box<Spanned<Type>>),
+    Fun(Box<Type>, Box<Type>),
+    Poly(Vec<usize>, Box<Type>),
 }
 
 impl Type {
@@ -38,9 +39,9 @@ impl Type {
             Type::Var(n) => write!(f, "t{}", mapping.get(n).unwrap_or(n)),
 
             Type::Fun(l, r) => {
-                l.value.fmt(f, mapping)?;
+                l.fmt(f, mapping)?;
                 write!(f, " -> ")?;
-                r.value.fmt(f, mapping)
+                r.fmt(f, mapping)
             }
 
             Type::Poly(vars, body) => {
@@ -53,8 +54,7 @@ impl Type {
                         .collect::<Vec<String>>()
                         .join(" ")
                 )?;
-                body.value
-                    .fmt(f, &vars.iter().enumerate().map(|(i, &v)| (v, i)).collect())
+                body.fmt(f, &vars.iter().enumerate().map(|(i, &v)| (v, i)).collect())
             }
         }
     }
@@ -66,21 +66,15 @@ impl fmt::Display for Type {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Typed<T> {
-    pub value: T,
-    pub ty: Type,
-}
-
-#[derive(Debug, Clone)]
-pub struct Env {
-    vars: HashMap<String, Spanned<Type>>,
+#[derive(Debug)]
+struct Env {
+    vars: HashMap<String, Type>,
     counter: usize,
-    substitutions: HashMap<usize, Spanned<Type>>,
+    substitutions: HashMap<usize, Type>,
 }
 
 impl Env {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Env {
             vars: HashMap::new(),
             counter: 0,
@@ -94,7 +88,7 @@ impl Env {
         var
     }
 
-    pub fn generalize(&self, ty: Spanned<Type>) -> Spanned<Type> {
+    fn generalize(&self, ty: Type) -> Type {
         let mut free_vars = Vec::new();
         Self::collect_free_vars(&ty, &mut free_vars, &mut Vec::new());
 
@@ -107,15 +101,11 @@ impl Env {
         free_vars.sort();
         free_vars.dedup();
 
-        Spanned::new(Type::Poly(free_vars, Box::new(ty.clone())), ty.span)
+        Type::Poly(free_vars, Box::new(ty))
     }
 
-    fn collect_free_vars(
-        ty: &Spanned<Type>,
-        free_vars: &mut Vec<usize>,
-        bound_vars: &mut Vec<usize>,
-    ) {
-        match &ty.value {
+    fn collect_free_vars(ty: &Type, free_vars: &mut Vec<usize>, bound_vars: &mut Vec<usize>) {
+        match &ty {
             Type::Var(n) => {
                 if !bound_vars.contains(n) {
                     free_vars.push(*n);
@@ -137,28 +127,18 @@ impl Env {
         }
     }
 
-    pub fn instantiate(&mut self, ty: Spanned<Type>) -> Spanned<Type> {
+    fn instantiate(&mut self, ty: Type) -> Type {
         let mut substitutions = HashMap::new();
         self.instantiate_helper(ty, &mut substitutions)
     }
 
-    fn instantiate_helper(
-        &mut self,
-        ty: Spanned<Type>,
-        substitutions: &mut HashMap<usize, Type>,
-    ) -> Spanned<Type> {
-        match ty.value {
-            Type::Var(n) => Spanned::new(
-                substitutions.get(&n).cloned().unwrap_or(Type::Var(n)),
-                ty.span,
-            ),
+    fn instantiate_helper(&mut self, ty: Type, substitutions: &mut HashMap<usize, Type>) -> Type {
+        match ty {
+            Type::Var(n) => substitutions.get(&n).cloned().unwrap_or(Type::Var(n)),
 
-            Type::Fun(l, r) => Spanned::new(
-                Type::Fun(
-                    Box::new(self.instantiate_helper(*l, substitutions)),
-                    Box::new(self.instantiate_helper(*r, substitutions)),
-                ),
-                ty.span,
+            Type::Fun(l, r) => Type::Fun(
+                Box::new(self.instantiate_helper(*l, substitutions)),
+                Box::new(self.instantiate_helper(*r, substitutions)),
             ),
 
             Type::Poly(vars, body) => {
@@ -172,8 +152,8 @@ impl Env {
         }
     }
 
-    fn substitute(&self, ty: Spanned<Type>) -> Spanned<Type> {
-        match ty.value {
+    fn substitute(&self, ty: Type) -> Type {
+        match ty {
             Type::Var(n) => {
                 if let Some(sub) = self.substitutions.get(&n) {
                     self.substitute(sub.clone())
@@ -182,10 +162,9 @@ impl Env {
                 }
             }
 
-            Type::Fun(l, r) => Spanned::new(
-                Type::Fun(Box::new(self.substitute(*l)), Box::new(self.substitute(*r))),
-                ty.span,
-            ),
+            Type::Fun(l, r) => {
+                Type::Fun(Box::new(self.substitute(*l)), Box::new(self.substitute(*r)))
+            }
 
             Type::Poly(vars, body) => {
                 let mut new_subs = self.substitutions.clone();
@@ -197,182 +176,206 @@ impl Env {
                     counter: self.counter,
                     substitutions: new_subs,
                 };
-                Spanned::new(
-                    Type::Poly(vars, Box::new(new_env.substitute(*body))),
-                    ty.span,
-                )
+                Type::Poly(vars, Box::new(new_env.substitute(*body)))
             }
             _ => ty,
         }
     }
 
-    fn unify(&mut self, t1: Spanned<Type>, t2: Spanned<Type>) -> Result<()> {
+    fn unify(&mut self, t1: (Type, Span), t2: (Type, Span)) -> Result<()> {
+        let (t1, s1) = t1;
+        let (t2, s2) = t2;
+
         let t1 = self.substitute(t1);
         let t2 = self.substitute(t2);
 
-        match (t1.value, t2.value) {
+        match (t1, t2) {
             (Type::Int, Type::Int) | (Type::Bool, Type::Bool) | (Type::Unit, Type::Unit) => Ok(()),
 
             (Type::Var(a), Type::Var(b)) if a == b => Ok(()),
 
             (Type::Fun(l1, r1), Type::Fun(l2, r2)) => {
-                self.unify(*l1, *l2)?;
-                self.unify(*r1, *r2)
+                self.unify((*l1, s1), (*l2, s2))?;
+                self.unify((*r1, s1), (*r2, s2))
             }
 
             (Type::Var(a), b) => {
-                let t2 = Spanned::new(b, t2.span);
-                Self::occurs_check(a, &t2)?;
-                self.substitutions.insert(a, t2);
+                self.occurs_check(a, &b, s2)?;
+                self.substitutions.insert(a, b);
                 Ok(())
             }
 
             (a, Type::Var(b)) => {
-                let t1 = Spanned::new(a, t1.span);
-                Self::occurs_check(b, &t1)?;
-                self.substitutions.insert(b, t1);
+                self.occurs_check(b, &a, s1)?;
+                self.substitutions.insert(b, a);
                 Ok(())
             }
 
             (a, b) => Err(Error::TypeMismatch(
-                Box::new(Spanned::new(a, t1.span)),
-                Box::new(Spanned::new(b, t2.span)),
+                (self.generalize(a).to_string(), s1),
+                (self.generalize(b).to_string(), s2),
             )),
         }
     }
 
-    fn occurs_check(var: usize, ty: &Spanned<Type>) -> Result<()> {
-        match &ty.value {
-            Type::Var(a) if *a == var => Err(Error::InfiniteType(ty.clone())),
+    fn occurs_check(&self, var: usize, ty: &Type, span: Span) -> Result<()> {
+        match &ty {
+            Type::Var(a) if *a == var => Err(Error::InfiniteType(
+                self.generalize(ty.clone()).to_string(),
+                span,
+            )),
 
             Type::Fun(l, r) => {
-                Self::occurs_check(var, l)?;
-                Self::occurs_check(var, r)
+                self.occurs_check(var, l, span)?;
+                self.occurs_check(var, r, span)
             }
 
-            Type::Poly(vars, body) if !vars.contains(&var) => Self::occurs_check(var, body),
+            Type::Poly(vars, body) if !vars.contains(&var) => self.occurs_check(var, body, span),
 
             _ => Ok(()),
         }
     }
 }
 
-pub fn infer_expr(env: &mut Env, expr: &Spanned<Expr>) -> Result<Spanned<Type>> {
-    let ty = match &expr.value {
-        Expr::Unit => Spanned::new(Type::Unit, expr.span),
+fn infer_expr(ctx: &mut Context, env: &mut Env, expr: NodeId) -> Result<()> {
+    let ty = match ctx.get_node(expr).clone() {
+        Node::Expr(Expr::Unit) => Type::Unit,
 
-        Expr::Integer(_) => Spanned::new(Type::Int, expr.span),
+        Node::Expr(Expr::Integer(_)) => Type::Int,
 
-        Expr::Boolean(_) => Spanned::new(Type::Bool, expr.span),
+        Node::Expr(Expr::Boolean(_)) => Type::Bool,
 
-        Expr::Identifier(name) => {
-            let ty = env
-                .vars
-                .get(name)
+        Node::Expr(Expr::Identifier(name)) => env.instantiate(
+            env.vars
+                .get(&name)
                 .cloned()
-                .ok_or(Error::UnknownIdentifier(Spanned::new(
-                    name.clone(),
-                    expr.span,
-                )))?;
+                .ok_or(Error::UnknownIdentifier(name, *ctx.get_span(expr)))?,
+        ),
 
-            env.instantiate(ty)
+        Node::Expr(Expr::Condition { cond, then, alt }) => {
+            infer_expr(ctx, env, cond)?;
+            let cond_ty = ctx.get_type(cond);
+            let cond_span = ctx.get_span(cond);
+
+            env.unify((Type::Bool, *cond_span), (cond_ty.clone(), *cond_span))?;
+
+            infer_expr(ctx, env, then)?;
+            infer_expr(ctx, env, alt)?;
+
+            let then_ty = ctx.get_type(then);
+            let alt_ty = ctx.get_type(alt);
+
+            env.unify(
+                (then_ty.clone(), *ctx.get_span(then)),
+                (alt_ty.clone(), *ctx.get_span(alt)),
+            )?;
+
+            then_ty.clone()
         }
 
-        Expr::Condition { cond, then, alt } => {
-            let cond_ty = infer_expr(env, cond)?;
-
-            env.unify(Spanned::new(Type::Bool, cond_ty.span), cond_ty)?;
-
-            let then_ty = infer_expr(env, then)?;
-            let alt_ty = infer_expr(env, alt)?;
-
-            env.unify(then_ty.clone(), alt_ty)?;
-
-            then_ty
-        }
-
-        Expr::Prefix { op, rhs } => {
-            let rhs_ty = infer_expr(env, rhs)?;
+        Node::Expr(Expr::Prefix { op, rhs }) => {
+            infer_expr(ctx, env, rhs)?;
+            let rhs_ty = ctx.get_type(rhs);
             match op {
                 PrefixOp::Neg => {
-                    env.unify(Spanned::new(Type::Int, rhs_ty.span), rhs_ty.clone())?;
-                    Spanned::new(Type::Int, expr.span)
+                    env.unify(
+                        (Type::Int, *ctx.get_span(rhs)),
+                        (rhs_ty.clone(), *ctx.get_span(rhs)),
+                    )?;
+                    Type::Int
                 }
             }
         }
 
-        Expr::Infix { lhs, op, rhs } => {
-            let lhs_ty = infer_expr(env, lhs)?;
-            let rhs_ty = infer_expr(env, rhs)?;
+        Node::Expr(Expr::Infix { lhs, op, rhs }) => {
+            infer_expr(ctx, env, lhs)?;
+            infer_expr(ctx, env, rhs)?;
+
+            let lhs_ty = ctx.get_type(lhs);
+            let rhs_ty = ctx.get_type(rhs);
 
             match op {
                 InfixOp::Add | InfixOp::Sub | InfixOp::Mul | InfixOp::Div | InfixOp::Mod => {
-                    env.unify(Spanned::new(Type::Int, lhs_ty.span), lhs_ty)?;
-                    env.unify(Spanned::new(Type::Int, rhs_ty.span), rhs_ty)?;
-                    Spanned::new(Type::Int, expr.span)
+                    env.unify(
+                        (Type::Int, *ctx.get_span(lhs)),
+                        (lhs_ty.clone(), *ctx.get_span(lhs)),
+                    )?;
+                    env.unify(
+                        (Type::Int, *ctx.get_span(rhs)),
+                        (rhs_ty.clone(), *ctx.get_span(rhs)),
+                    )?;
+                    Type::Int
                 }
 
                 InfixOp::Eq => {
-                    env.unify(lhs_ty, rhs_ty)?;
-                    Spanned::new(Type::Bool, expr.span)
+                    env.unify(
+                        (lhs_ty.clone(), *ctx.get_span(lhs)),
+                        (rhs_ty.clone(), *ctx.get_span(rhs)),
+                    )?;
+                    Type::Bool
                 }
             }
         }
 
-        Expr::Lambda { param, body } => {
-            let param_ty = Spanned::new(env.fresh_var(), param.span);
-            env.vars.insert(param.value.clone(), param_ty.clone());
-            let body_ty = infer_expr(env, body)?;
-            env.vars.remove(&param.value);
-            Spanned::new(Type::Fun(Box::new(param_ty), Box::new(body_ty)), expr.span)
-        }
+        Node::Expr(Expr::Lambda { param, body }) => match ctx.get_node(param).clone() {
+            Node::Expr(Expr::Identifier(id)) => {
+                let param_ty = env.fresh_var();
+                env.vars.insert(id.clone(), param_ty.clone());
+                infer_expr(ctx, env, body)?;
+                env.vars.remove(&id);
+                Type::Fun(Box::new(param_ty), Box::new(ctx.get_type(body).clone()))
+            }
+            _ => unreachable!(),
+        },
 
-        Expr::Application { func, arg } => {
-            let func_ty = infer_expr(env, func)?;
-            let arg_ty = infer_expr(env, arg)?;
-            let ty = Spanned::new(env.fresh_var(), Span::default());
+        Node::Expr(Expr::Application { func, arg }) => {
+            infer_expr(ctx, env, func)?;
+            infer_expr(ctx, env, arg)?;
+            let func_ty = ctx.get_type(func);
+            let arg_ty = ctx.get_type(arg);
+            let ty = env.fresh_var();
             env.unify(
-                func_ty,
-                Spanned::new(Type::Fun(Box::new(arg_ty), Box::new(ty.clone())), expr.span),
+                (func_ty.clone(), *ctx.get_span(func)),
+                (
+                    Type::Fun(Box::new(arg_ty.clone()), Box::new(ty.clone())),
+                    *ctx.get_span(expr),
+                ),
             )?;
             ty
         }
+
+        _ => unreachable!(),
     };
 
-    Ok(env.substitute(ty))
+    ctx.set_type(expr, env.substitute(ty));
+
+    Ok(())
 }
 
-pub fn infer(ast: Vec<Spanned<Stmt>>) -> Result<Vec<Typed<Spanned<Stmt>>>> {
-    let mut typed_ast = vec![];
+pub fn infer(ctx: &mut Context, nodes: &[NodeId]) -> Result<()> {
     let mut env = Env::new();
 
-    for node in ast {
-        match &node.value {
-            ast::Stmt::Let { name, expr } => {
-                let ty = Spanned::new(env.fresh_var(), node.span);
-                env.vars.insert(name.clone(), ty);
-
-                let expr_ty = infer_expr(&mut env, expr)?;
-
-                let generalized_ty = env.generalize(expr_ty);
-                env.vars.insert(name.clone(), generalized_ty.clone());
-
-                typed_ast.push(Typed {
-                    value: node,
-                    ty: generalized_ty.value,
-                });
+    for node in nodes {
+        match ctx.get_node(*node).clone() {
+            Node::Expr(_) => {
+                infer_expr(ctx, &mut env, *node)?;
+                ctx.set_type(
+                    *node,
+                    env.generalize(env.substitute(ctx.get_type(*node).clone())),
+                );
             }
 
-            ast::Stmt::Expr(expr) => {
-                let expr_ty = infer_expr(&mut env, expr)?;
-                let generalized_ty = env.generalize(expr_ty);
-                typed_ast.push(Typed {
-                    value: node,
-                    ty: generalized_ty.value,
-                });
+            Node::Bind(name, expr) => {
+                let ty = env.fresh_var();
+                env.vars.insert(name.clone(), ty);
+                infer_expr(ctx, &mut env, expr)?;
+                let ty = env.generalize(env.substitute(ctx.get_type(expr).clone()));
+                env.vars.insert(name.clone(), ty.clone());
+                ctx.set_type(expr, ty.clone());
+                ctx.set_type(*node, ty);
             }
         }
     }
 
-    Ok(typed_ast)
+    Ok(())
 }

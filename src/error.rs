@@ -24,12 +24,7 @@ impl From<clap::Error> for Error {
     }
 }
 
-fn write_message(
-    f: &mut fmt::Formatter,
-    filename: &str,
-    span: &Span,
-    message: &str,
-) -> fmt::Result {
+fn write_message(f: &mut fmt::Formatter, filename: &str, span: Span, message: &str) -> fmt::Result {
     writeln!(
         f,
         "{}:{}:{}: {}",
@@ -37,7 +32,7 @@ fn write_message(
     )
 }
 
-fn write_lines(f: &mut fmt::Formatter, source: &str, span: &Span) -> fmt::Result {
+fn write_lines(f: &mut fmt::Formatter, source: &str, span: Span) -> fmt::Result {
     let lines = source
         .lines()
         .skip(span.start.line - 1)
@@ -82,58 +77,43 @@ impl fmt::Display for Error {
             Error::Io(err) => err.fmt(f),
 
             Error::Parser(filename, source, err) => match err.as_ref() {
-                parser::Error::UnexpectedToken(expected, token) => {
+                parser::Error::UnexpectedToken(expected, (token, span)) => {
                     write_message(
                         f,
                         filename,
-                        &token.span,
-                        &format!("expected '{}' but got '{}'", expected, token.value),
+                        *span,
+                        &format!("expected '{}' but got '{}'", expected, *token),
                     )?;
-                    if token.value != Token::Eof {
-                        write_lines(f, source, &token.span)?;
+                    if *token != Token::Eof {
+                        write_lines(f, source, *span)?;
                     }
                     Ok(())
                 }
             },
 
             Error::Type(filename, source, err) => match err.as_ref() {
-                type_system::Error::TypeMismatch(t1, t2) => {
-                    write_message(
-                        f,
-                        filename,
-                        &t1.span,
-                        &format!("type mismatch: expected '{}'", t1.value),
-                    )?;
-                    write_lines(f, source, &t1.span)?;
-                    write_message(f, filename, &t2.span, &format!("found '{}'", t2.value))?;
-                    write_lines(f, source, &t2.span)
+                type_system::Error::TypeMismatch((t1, s1), (t2, s2)) => {
+                    write_message(f, filename, *s1, &format!("type mismatch: expected '{t1}'"))?;
+                    write_lines(f, source, *s1)?;
+                    write_message(f, filename, *s2, &format!("found '{t2}'"))?;
+                    write_lines(f, source, *s2)
                 }
 
-                type_system::Error::InfiniteType(ty) => {
-                    write_message(
-                        f,
-                        filename,
-                        &ty.span,
-                        &format!("infinite type '{}'", ty.value),
-                    )?;
-                    write_lines(f, source, &ty.span)
+                type_system::Error::InfiniteType(ty, span) => {
+                    write_message(f, filename, *span, &format!("infinite type '{ty}'"))?;
+                    write_lines(f, source, *span)
                 }
 
-                type_system::Error::UnknownIdentifier(id) => {
-                    write_message(
-                        f,
-                        filename,
-                        &id.span,
-                        &format!("unknown identifier '{}'", id.value),
-                    )?;
-                    write_lines(f, source, &id.span)
+                type_system::Error::UnknownIdentifier(id, span) => {
+                    write_message(f, filename, *span, &format!("unknown identifier '{id}'"))?;
+                    write_lines(f, source, *span)
                 }
             },
 
             Error::Eval(filename, source, err) => match err {
                 eval::Error::DivisionByZero(span) => {
-                    write_message(f, filename, span, "division by zero")?;
-                    write_lines(f, source, span)
+                    write_message(f, filename, *span, "division by zero")?;
+                    write_lines(f, source, *span)
                 }
             },
         }

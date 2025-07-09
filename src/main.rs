@@ -1,16 +1,17 @@
-mod ast;
+mod context;
 mod error;
 mod eval;
+mod expr;
 mod lexer;
 mod parser;
 mod span;
 mod type_system;
 
-use clap::{Arg, Command, crate_name, crate_version, value_parser};
-use clap_complete::{Shell, generate};
-use std::{fs, io};
+use clap::{Arg, Command, crate_name, crate_version};
+use std::fs;
 
 use crate::{
+    context::{Context, Node},
     error::{Error, Result},
     eval::evaluate,
     lexer::{Lexer, Token},
@@ -19,97 +20,66 @@ use crate::{
 };
 
 fn run() -> Result<()> {
-    let mut cmd = Command::new(crate_name!())
+    let cmd = Command::new(crate_name!())
         .version(crate_version!())
         .disable_colored_help(true)
         .disable_help_subcommand(true)
         .arg_required_else_help(true)
         .subcommand_required(true)
-        .subcommand(
-            Command::new("tokens")
-                .about("Dump tokens")
-                .arg(Arg::new("file").required(true).help("source file")),
-        )
-        .subcommand(
-            Command::new("ast")
-                .about("Dump AST")
-                .arg(Arg::new("file").required(true).help("source file")),
-        )
-        .subcommand(
-            Command::new("type")
-                .about("Dump typed AST")
-                .arg(Arg::new("file").required(true).help("source file")),
-        )
-        .subcommand(
-            Command::new("eval")
-                .about("evaluate")
-                .arg(Arg::new("file").required(true).help("source file")),
-        )
-        .subcommand(
-            Command::new("completions")
-                .about("Generate shell completions")
-                .arg(
-                    Arg::new("shell")
-                        .value_parser(value_parser!(Shell))
-                        .required(true),
-                ),
-        );
+        .subcommand(Command::new("tokens").arg(Arg::new("file").required(true).help("source file")))
+        .subcommand(Command::new("nodes").arg(Arg::new("file").required(true).help("source file")))
+        .subcommand(Command::new("type").arg(Arg::new("file").required(true).help("source file")))
+        .subcommand(Command::new("eval").arg(Arg::new("file").required(true).help("source file")));
 
-    let matches = cmd.clone().try_get_matches()?;
-
-    if let Some(("completions", sub_matches)) = matches.subcommand() {
-        let shell = sub_matches.get_one::<Shell>("shell").unwrap();
-        let name = &cmd.get_name().to_string();
-        generate(*shell, &mut cmd, name, &mut io::stdout());
-        return Ok(());
-    }
-
-    match matches.subcommand() {
+    match cmd.try_get_matches()?.subcommand() {
         Some(("tokens", sub_matches)) => {
             let file = sub_matches.get_one::<String>("file").unwrap();
             let contents = fs::read_to_string(file)?;
 
             let mut lexer = Lexer::new(&contents);
-            while let token = lexer.next_token()
-                && token.value != Token::Eof
+            while let (token, span) = lexer.next_token()
+                && token != Token::Eof
             {
                 println!(
                     "{}:{}:{}: {:?}",
-                    file, token.span.start.line, token.span.start.column, token.value
+                    file, span.start.line, span.start.column, token
                 )
             }
         }
 
-        Some(("ast", sub_matches)) => {
+        Some(("nodes", sub_matches)) => {
             let file = sub_matches.get_one::<String>("file").unwrap();
             let contents = fs::read_to_string(file)?;
 
-            let ast = match parse(&contents) {
-                Ok(ast) => ast,
+            let mut ctx = Context::new();
+            let nodes = match parse(&mut ctx, &contents) {
+                Ok(nodes) => nodes,
                 Err(err) => return Err(Error::Parser(file.clone(), contents, Box::new(err))),
             };
 
-            println!("{ast:#?}");
+            for node in nodes {
+                println!("{}", node.display(&ctx));
+            }
         }
 
         Some(("type", sub_matches)) => {
             let file = sub_matches.get_one::<String>("file").unwrap();
             let contents = fs::read_to_string(file)?;
 
-            let ast = match parse(&contents) {
-                Ok(ast) => ast,
+            let mut ctx = Context::new();
+            let nodes = match parse(&mut ctx, &contents) {
+                Ok(nodes) => nodes,
                 Err(err) => return Err(Error::Parser(file.clone(), contents, Box::new(err))),
             };
 
-            let typed_ast = match infer(ast) {
-                Ok(typed_ast) => typed_ast,
-                Err(err) => return Err(Error::Type(file.clone(), contents, Box::new(err))),
+            if let Err(err) = infer(&mut ctx, &nodes) {
+                return Err(Error::Type(file.clone(), contents, Box::new(err)));
             };
 
-            for node in typed_ast {
-                match node.value.value {
-                    ast::Stmt::Let { name, .. } => println!("{} : {}", name, node.ty),
-                    ast::Stmt::Expr(_) => println!("{}", node.ty),
+            for node in nodes {
+                match ctx.get_node(node) {
+                    Node::Expr(_) => println!("{}", ctx.get_type(node)),
+                    Node::Bind(name, _) => println!("{} : {}", name, ctx.get_type(node)),
                 }
             }
         }
@@ -118,22 +88,22 @@ fn run() -> Result<()> {
             let file = sub_matches.get_one::<String>("file").unwrap();
             let contents = fs::read_to_string(file)?;
 
-            let ast = match parse(&contents) {
-                Ok(ast) => ast,
+            let mut ctx = Context::new();
+            let nodes = match parse(&mut ctx, &contents) {
+                Ok(nodes) => nodes,
                 Err(err) => return Err(Error::Parser(file.clone(), contents, Box::new(err))),
             };
 
-            let typed_ast = match infer(ast) {
-                Ok(typed_ast) => typed_ast,
-                Err(err) => return Err(Error::Type(file.clone(), contents, Box::new(err))),
+            if let Err(err) = infer(&mut ctx, &nodes) {
+                return Err(Error::Type(file.clone(), contents, Box::new(err)));
             };
 
-            let value = match evaluate(typed_ast) {
+            let value = match evaluate(&ctx, &nodes) {
                 Ok(value) => value,
                 Err(err) => return Err(Error::Eval(file.clone(), contents, err)),
             };
 
-            println!("{value}");
+            println!("{}", value.display(&ctx));
         }
 
         _ => unreachable!(),
@@ -145,18 +115,17 @@ fn run() -> Result<()> {
 fn main() {
     if let Err(error) = run() {
         match error {
-            Error::Clap(error) => match error.kind() {
-                clap::error::ErrorKind::DisplayHelp
-                | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
-                | clap::error::ErrorKind::DisplayVersion => {
-                    eprintln!("{error}");
-                    std::process::exit(0);
+            Error::Clap(error) => {
+                error.print().expect("error writing error");
+                match error.kind() {
+                    clap::error::ErrorKind::DisplayHelp
+                    | clap::error::ErrorKind::DisplayVersion
+                    | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => {
+                        std::process::exit(0)
+                    }
+                    _ => std::process::exit(1),
                 }
-                _ => {
-                    eprintln!("{error}");
-                    std::process::exit(1);
-                }
-            },
+            }
             _ => {
                 eprint!("{error}");
                 std::process::exit(1);

@@ -2,9 +2,9 @@ use core::fmt;
 use std::{collections::HashMap, result};
 
 use crate::{
-    ast::{Expr, InfixOp, PrefixOp, Stmt},
-    span::{Span, Spanned},
-    type_system::Typed,
+    context::{Context, Node, NodeId},
+    expr::{Expr, InfixOp, PrefixOp},
+    span::Span,
 };
 
 #[derive(Debug)]
@@ -21,63 +21,81 @@ pub enum Value {
     Boolean(bool),
     Function {
         param: String,
-        body: Spanned<Expr>,
+        body: NodeId,
         env: Env,
     },
     Thunk {
-        expr: Spanned<Expr>,
+        expr: NodeId,
     },
 }
 
-impl fmt::Display for Value {
+impl Value {
+    pub fn display<'a>(&self, context: &'a Context) -> Display<'a> {
+        Display::new(self.clone(), context)
+    }
+}
+
+pub struct Display<'a> {
+    value: Value,
+    context: &'a Context,
+}
+
+impl<'a> Display<'a> {
+    pub fn new(value: Value, context: &'a Context) -> Self {
+        Self { value, context }
+    }
+}
+
+impl<'a> fmt::Display for Display<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
+        match &self.value {
             Value::Unit => write!(f, "()"),
             Value::Integer(n) => write!(f, "{n}"),
             Value::Boolean(b) => write!(f, "{b}"),
             Value::Function { param, body, .. } => {
-                write!(f, "{} -> {}", param, body.value)
+                write!(f, "{} -> {}", param, body.display(self.context))
             }
-            Value::Thunk { expr } => write!(f, "<thunk: {}>", expr.value),
+            Value::Thunk { expr } => write!(f, "<thunk: {}>", expr.display(self.context)),
         }
     }
 }
 
 pub type Env = HashMap<String, Value>;
 
-fn force(value: Value, env: &mut Env) -> Result<Value> {
+fn force(ctx: &Context, env: &mut Env, value: Value) -> Result<Value> {
     match value {
-        Value::Thunk { expr } => eval_expr(expr, env),
+        Value::Thunk { expr } => eval_expr(ctx, env, expr),
         v => Ok(v),
     }
 }
 
-fn eval_expr(expr: Spanned<Expr>, env: &mut Env) -> Result<Value> {
-    match expr.value {
-        Expr::Unit => Ok(Value::Unit),
+fn eval_expr(ctx: &Context, env: &mut Env, expr: NodeId) -> Result<Value> {
+    match ctx.get_node(expr) {
+        Node::Expr(Expr::Unit) => Ok(Value::Unit),
 
-        Expr::Boolean(bool) => Ok(Value::Boolean(bool)),
+        Node::Expr(Expr::Boolean(bool)) => Ok(Value::Boolean(*bool)),
 
-        Expr::Integer(n) => Ok(Value::Integer(n)),
+        Node::Expr(Expr::Integer(n)) => Ok(Value::Integer(*n)),
 
-        Expr::Identifier(name) => {
-            let val = env.remove(&name).unwrap();
-            let val = force(val, env)?;
-            Ok(env.insert(name.clone(), val).unwrap())
+        Node::Expr(Expr::Identifier(name)) => {
+            let val = env.get(name).unwrap().clone();
+            let val = force(ctx, env, val)?;
+            env.insert(name.clone(), val.clone());
+            Ok(val)
         }
 
-        Expr::Condition { cond, then, alt } => {
-            let cond_val = eval_expr(*cond, env)?;
+        Node::Expr(Expr::Condition { cond, then, alt }) => {
+            let cond_val = eval_expr(ctx, env, *cond)?;
             match cond_val {
-                Value::Boolean(true) => eval_expr(*then, env),
-                Value::Boolean(false) => eval_expr(*alt, env),
+                Value::Boolean(true) => eval_expr(ctx, env, *then),
+                Value::Boolean(false) => eval_expr(ctx, env, *alt),
                 _ => unreachable!(),
             }
         }
 
-        Expr::Infix { lhs, op, rhs } => {
-            let lhs_val = eval_expr(*lhs, env)?;
-            let rhs_val = eval_expr(*rhs, env)?;
+        Node::Expr(Expr::Infix { lhs, op, rhs }) => {
+            let lhs_val = eval_expr(ctx, env, *lhs)?;
+            let rhs_val = eval_expr(ctx, env, *rhs)?;
 
             match (lhs_val, rhs_val) {
                 (Value::Integer(a), Value::Integer(b)) => match op {
@@ -87,7 +105,7 @@ fn eval_expr(expr: Spanned<Expr>, env: &mut Env) -> Result<Value> {
                     InfixOp::Div => a
                         .checked_div(b)
                         .map(Value::Integer)
-                        .ok_or(Error::DivisionByZero(expr.span)),
+                        .ok_or(Error::DivisionByZero(*ctx.get_span(expr))),
                     InfixOp::Mod => Ok(Value::Integer(a % b)),
                     InfixOp::Eq => Ok(Value::Boolean(a == b)),
                 },
@@ -106,23 +124,27 @@ fn eval_expr(expr: Spanned<Expr>, env: &mut Env) -> Result<Value> {
             }
         }
 
-        Expr::Prefix { op, rhs } => {
-            let rhs_val = eval_expr(*rhs, env)?;
+        Node::Expr(Expr::Prefix { op, rhs }) => {
+            let rhs_val = eval_expr(ctx, env, *rhs)?;
             match (op, rhs_val) {
                 (PrefixOp::Neg, Value::Integer(n)) => Ok(Value::Integer(-n)),
                 _ => unreachable!(),
             }
         }
 
-        Expr::Lambda { param, body } => Ok(Value::Function {
-            param: param.value,
-            body: *body,
-            env: env.clone(),
-        }),
+        Node::Expr(Expr::Lambda { param, body }) => match ctx.get_node(*param) {
+            Node::Expr(Expr::Identifier(id)) => Ok(Value::Function {
+                param: id.clone(),
+                body: *body,
+                env: env.clone(),
+            }),
 
-        Expr::Application { func, arg } => {
-            let func_val = eval_expr(*func, env)?;
-            let arg_val = eval_expr(*arg, env)?;
+            _ => unreachable!(),
+        },
+
+        Node::Expr(Expr::Application { func, arg }) => {
+            let func_val = eval_expr(ctx, env, *func)?;
+            let arg_val = eval_expr(ctx, env, *arg)?;
 
             match func_val {
                 Value::Function {
@@ -131,24 +153,26 @@ fn eval_expr(expr: Spanned<Expr>, env: &mut Env) -> Result<Value> {
                     env: mut closure_env,
                 } => {
                     closure_env.insert(param, arg_val);
-                    eval_expr(body, &mut closure_env)
+                    eval_expr(ctx, &mut closure_env, body)
                 }
+
                 _ => unreachable!(),
             }
         }
+
+        _ => unreachable!(),
     }
 }
 
-pub fn evaluate(ast: Vec<Typed<Spanned<Stmt>>>) -> Result<Value> {
+pub fn evaluate(ctx: &Context, nodes: &[NodeId]) -> Result<Value> {
     let mut env = Env::new();
 
-    for node in ast {
-        match node.value.value {
-            Stmt::Let { name, expr } => {
-                env.insert(name.clone(), Value::Thunk { expr });
+    for node in nodes {
+        match ctx.get_node(*node) {
+            Node::Expr(_) => return eval_expr(ctx, &mut env, *node),
+            Node::Bind(name, expr) => {
+                env.insert(name.clone(), Value::Thunk { expr: *expr });
             }
-
-            Stmt::Expr(expr) => return eval_expr(expr, &mut env),
         }
     }
 
