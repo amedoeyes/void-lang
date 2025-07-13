@@ -8,6 +8,7 @@ mod span;
 mod type_system;
 
 use clap::{Arg, Command, crate_name, crate_version};
+use rustyline::DefaultEditor;
 use std::fs;
 
 use crate::{
@@ -29,7 +30,8 @@ fn run() -> Result<()> {
         .subcommand(Command::new("tokens").arg(Arg::new("file").required(true).help("source file")))
         .subcommand(Command::new("nodes").arg(Arg::new("file").required(true).help("source file")))
         .subcommand(Command::new("type").arg(Arg::new("file").required(true).help("source file")))
-        .subcommand(Command::new("eval").arg(Arg::new("file").required(true).help("source file")));
+        .subcommand(Command::new("eval").arg(Arg::new("file").required(true).help("source file")))
+        .subcommand(Command::new("repl"));
 
     match cmd.try_get_matches()?.subcommand() {
         Some(("tokens", sub_matches)) => {
@@ -104,6 +106,70 @@ fn run() -> Result<()> {
             };
 
             println!("{}", value.display(&ctx));
+        }
+
+        Some(("repl", _)) => {
+            let mut rl = DefaultEditor::new().expect("could not initialize line editor");
+            let mut ctx = Context::new();
+            let mut nodes = Vec::new();
+            loop {
+                let input = match rl.readline("> ") {
+                    Ok(line) => {
+                        rl.add_history_entry(&line)
+                            .expect("could not add history entry");
+                        line
+                    }
+                    Err(rustyline::error::ReadlineError::Interrupted) => {
+                        continue;
+                    }
+                    Err(_) => {
+                        break;
+                    }
+                };
+
+                nodes.extend(match parse(&mut ctx, &input) {
+                    Ok(nodes) => nodes,
+                    Err(err) => {
+                        match err {
+                            parser::Error::UnexpectedToken(ref expect, (token, _)) => {
+                                println!("expected '{expect}' but got '{token}'")
+                            }
+                        }
+                        continue;
+                    }
+                });
+
+                if let Err(err) = infer(&mut ctx, &nodes) {
+                    match err {
+                        type_system::Error::TypeMismatch((ref t1, _), (ref t2, _)) => {
+                            println!("type mismatch: expected '{t1}' but found '{t2}'")
+                        }
+                        type_system::Error::InfiniteType(ref ty, _) => {
+                            println!("infinite type '{ty}'")
+                        }
+                        type_system::Error::UnknownIdentifier(ref id, _) => {
+                            println!("unknown identifier '{id}'")
+                        }
+                    }
+                    nodes.pop();
+                    continue;
+                };
+
+                if let Node::Expr(_) = ctx.get_node(*nodes.last().unwrap()) {
+                    let value = match evaluate(&ctx, &nodes) {
+                        Ok(value) => value,
+                        Err(err) => {
+                            match err {
+                                eval::Error::DivisionByZero(_) => println!("division by zero"),
+                            }
+                            continue;
+                        }
+                    };
+
+                    println!("{}", value.display(&ctx));
+                    nodes.pop();
+                }
+            }
         }
 
         _ => unreachable!(),
