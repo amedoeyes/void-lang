@@ -118,14 +118,13 @@ impl Lexer {
 
         for keyword in KEYWORDS {
             if self.remaining_buffer().starts_with(keyword.0)
-                && let Some(next_char) = self
+                && self
                     .remaining_buffer()
                     .strip_prefix(keyword.0)
                     .unwrap_or_default()
                     .chars()
                     .next()
-                && !next_char.is_alphanumeric()
-                && next_char != '_'
+                    .is_none_or(|c| !c.is_alphanumeric() && c != '_')
             {
                 return (keyword.1.clone(), self.advance_with_span(keyword.0.len()));
             }
@@ -136,13 +135,13 @@ impl Lexer {
         if current_char == 't' || current_char == 'f' {
             for pattern in ["true", "false"] {
                 if self.remaining_buffer().starts_with(pattern)
-                    && let Some(next_char) = self
+                    && self
                         .remaining_buffer()
                         .strip_prefix(pattern)
                         .unwrap_or_default()
                         .chars()
                         .next()
-                    && !next_char.is_alphanumeric()
+                        .is_none_or(|c| !c.is_alphanumeric())
                 {
                     return (
                         Token::Boolean(pattern.to_string()),
