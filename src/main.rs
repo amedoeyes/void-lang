@@ -127,6 +127,10 @@ fn run() -> Result<()> {
                     }
                 };
 
+                if input.trim().is_empty() {
+                    continue;
+                }
+
                 nodes.extend(match parse(&mut ctx, &input) {
                     Ok(nodes) => nodes,
                     Err(err) => {
