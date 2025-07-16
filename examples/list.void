@@ -32,5 +32,11 @@ let take_while = pred -> list ->
 let drop_while = pred -> list ->
 	fold (h -> t -> if pred h then drop_while pred t else cons h t) nil list;
 
-// let squares = map (x -> x * x) (range 1 10) ;
-// length (filter (x -> x % 2 == 0) (cons 1 (cons 2 (cons 3 nil))))
+let any = pred -> list ->
+    fold (x -> acc -> acc || pred x) false list;
+
+let contains = elem -> list ->
+	any (x -> x == elem) list;
+
+// sum (map (x -> x * 2) (range 1 3))
+// length (filter (x -> x % 2 == 0) (cons 3 (cons 1 (cons 4 nil))))
