@@ -34,6 +34,10 @@ let nil = f -> z -> z;
 let cons = h -> t -> f -> z -> f h (t f z);
 let fold = f -> z -> list -> list f z;
 
+let range = start -> end ->
+    if start > end then nil
+    else cons start (range (start + 1) end);
+
 let length = list ->
 	fold (x -> acc -> acc + 1) 0 list;
 
@@ -48,13 +52,11 @@ let filter = pred -> list ->
 ```
 
 ```haskell
-let nums = cons 1 (cons 2 (cons 3 nil));
-sum (map (x -> x * 2) nums) // 12
+sum (map (x -> x * 2) (range 1 3)) // 12
 ```
 
 ```haskell
-let nums = cons 1 (cons 2 (cons 3 nil));
-length (filter (x -> x % 2 == 0) nums) // 1
+length (filter (x -> x % 2 == 0) (cons 3 (cons 1 (cons 4 nil)))) // 1
 ```
 
 ## Type System
