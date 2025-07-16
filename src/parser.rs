@@ -158,7 +158,7 @@ impl<'a> Parser<'a> {
     fn parse_prefix(&mut self) -> Result<NodeId> {
         if let Some(op) = PrefixOp::from_token(&self.token) {
             match op {
-                PrefixOp::Neg => {
+                PrefixOp::Neg | PrefixOp::Not => {
                     let span = self.span;
                     self.advance();
                     let (_, r_bp) = op.precedence();
@@ -198,7 +198,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_expr(&mut self, min_bp: u8) -> Result<NodeId> {
-        let mut expr = if matches!(self.token, Token::Hyphen) {
+        let mut expr = if matches!(self.token, Token::Hyphen | Token::Bang) {
             self.parse_prefix()?
         } else {
             self.parse_atom()?
@@ -248,8 +248,15 @@ impl<'a> Parser<'a> {
         if matches!(
             self.token,
             Token::EqualEqual
+                | Token::AmpersandAmpersand
+                | Token::BangEqual
+                | Token::GreaterThan
+                | Token::GreaterThanEqual
                 | Token::Hyphen
+                | Token::LessThan
+                | Token::LessThanEqual
                 | Token::Percent
+                | Token::PipePipe
                 | Token::Plus
                 | Token::Slash
                 | Token::Star

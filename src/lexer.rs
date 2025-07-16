@@ -4,13 +4,21 @@ use crate::span::{Position, Span};
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
+    AmpersandAmpersand,
+    Bang,
+    BangEqual,
     Equal,
     EqualEqual,
+    GreaterThan,
+    GreaterThanEqual,
     Hyphen,
     HyphenGreaterThan,
+    LessThan,
+    LessThanEqual,
     ParenLeft,
     ParenRight,
     Percent,
+    PipePipe,
     Plus,
     Semicolon,
     Slash,
@@ -33,13 +41,21 @@ pub enum Token {
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
+            Token::AmpersandAmpersand => write!(f, "&&"),
+            Token::Bang => write!(f, "!"),
+            Token::BangEqual => write!(f, "!="),
             Token::Equal => write!(f, "="),
             Token::EqualEqual => write!(f, "=="),
+            Token::GreaterThan => write!(f, ">"),
+            Token::GreaterThanEqual => write!(f, ">="),
             Token::Hyphen => write!(f, "-"),
             Token::HyphenGreaterThan => write!(f, "->"),
+            Token::LessThan => write!(f, "<"),
+            Token::LessThanEqual => write!(f, "<="),
             Token::ParenLeft => write!(f, "("),
             Token::ParenRight => write!(f, ")"),
             Token::Percent => write!(f, "%"),
+            Token::PipePipe => write!(f, "||"),
             Token::Plus => write!(f, "+"),
             Token::Semicolon => write!(f, ";"),
             Token::Slash => write!(f, "/"),
@@ -62,8 +78,15 @@ impl fmt::Display for Token {
 }
 
 const SYMBOLS: &[(&str, Token)] = &[
+    ("!=", Token::BangEqual),
+    ("&&", Token::AmpersandAmpersand),
     ("->", Token::HyphenGreaterThan),
+    ("<=", Token::LessThanEqual),
     ("==", Token::EqualEqual),
+    (">=", Token::GreaterThanEqual),
+    ("||", Token::PipePipe),
+    //
+    ("!", Token::Bang),
     ("%", Token::Percent),
     ("(", Token::ParenLeft),
     (")", Token::ParenRight),
@@ -72,7 +95,9 @@ const SYMBOLS: &[(&str, Token)] = &[
     ("-", Token::Hyphen),
     ("/", Token::Slash),
     (";", Token::Semicolon),
+    ("<", Token::LessThan),
     ("=", Token::Equal),
+    (">", Token::GreaterThan),
 ];
 
 const KEYWORDS: &[(&str, Token)] = &[

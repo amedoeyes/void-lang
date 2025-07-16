@@ -2,6 +2,10 @@ let nil = f -> z -> z;
 let cons = h -> t -> f -> z -> f h (t f z); 
 let fold = f -> z -> list -> list f z;
 
+let range = start -> end ->
+    if start > end then nil
+    else cons start (range (start + 1) end);
+
 let length = list -> 
 	fold (x -> acc -> acc + 1) 0 list;
 
@@ -28,5 +32,5 @@ let take_while = pred -> list ->
 let drop_while = pred -> list ->
 	fold (h -> t -> if pred h then drop_while pred t else cons h t) nil list;
 
-
-length (filter (x -> x % 2 == 0) (cons 1 (cons 2 (cons 3 nil))))
+// let squares = map (x -> x * x) (range 1 10) ;
+// length (filter (x -> x % 2 == 0) (cons 1 (cons 2 (cons 3 nil))))

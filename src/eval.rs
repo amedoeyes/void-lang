@@ -108,10 +108,21 @@ fn eval_expr(ctx: &Context, env: &mut Env, expr: NodeId) -> Result<Value> {
                         .ok_or(Error::DivisionByZero(*ctx.get_span(expr))),
                     InfixOp::Mod => Ok(Value::Integer(a % b)),
                     InfixOp::Eq => Ok(Value::Boolean(a == b)),
+                    InfixOp::Neq => Ok(Value::Boolean(a != b)),
+
+                    InfixOp::Lt => Ok(Value::Boolean(a < b)),
+                    InfixOp::Lte => Ok(Value::Boolean(a <= b)),
+                    InfixOp::Gt => Ok(Value::Boolean(a > b)),
+                    InfixOp::Gte => Ok(Value::Boolean(a >= b)),
+
+                    _ => unreachable!(),
                 },
 
                 (Value::Boolean(a), Value::Boolean(b)) => match op {
                     InfixOp::Eq => Ok(Value::Boolean(a == b)),
+                    InfixOp::Neq => Ok(Value::Boolean(a != b)),
+                    InfixOp::And => Ok(Value::Boolean(a && b)),
+                    InfixOp::Or => Ok(Value::Boolean(a || b)),
                     _ => unreachable!(),
                 },
 
@@ -128,6 +139,7 @@ fn eval_expr(ctx: &Context, env: &mut Env, expr: NodeId) -> Result<Value> {
             let rhs_val = eval_expr(ctx, env, *rhs)?;
             match (op, rhs_val) {
                 (PrefixOp::Neg, Value::Integer(n)) => Ok(Value::Integer(-n)),
+                (PrefixOp::Not, Value::Boolean(b)) => Ok(Value::Boolean(!b)),
                 _ => unreachable!(),
             }
         }

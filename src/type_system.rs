@@ -284,6 +284,14 @@ fn infer_expr(ctx: &mut Context, env: &mut Env, expr: NodeId) -> Result<()> {
                     )?;
                     Type::Int
                 }
+
+                PrefixOp::Not => {
+                    env.unify(
+                        (Type::Bool, *ctx.get_span(rhs)),
+                        (rhs_ty.clone(), *ctx.get_span(rhs)),
+                    )?;
+                    Type::Bool
+                }
             }
         }
 
@@ -307,9 +315,33 @@ fn infer_expr(ctx: &mut Context, env: &mut Env, expr: NodeId) -> Result<()> {
                     Type::Int
                 }
 
-                InfixOp::Eq => {
+                InfixOp::Lt | InfixOp::Gt | InfixOp::Lte | InfixOp::Gte => {
+                    env.unify(
+                        (Type::Int, *ctx.get_span(lhs)),
+                        (lhs_ty.clone(), *ctx.get_span(lhs)),
+                    )?;
+                    env.unify(
+                        (Type::Int, *ctx.get_span(rhs)),
+                        (rhs_ty.clone(), *ctx.get_span(rhs)),
+                    )?;
+                    Type::Bool
+                }
+
+                InfixOp::Eq | InfixOp::Neq => {
                     env.unify(
                         (lhs_ty.clone(), *ctx.get_span(lhs)),
+                        (rhs_ty.clone(), *ctx.get_span(rhs)),
+                    )?;
+                    Type::Bool
+                }
+
+                InfixOp::And | InfixOp::Or => {
+                    env.unify(
+                        (Type::Bool, *ctx.get_span(lhs)),
+                        (lhs_ty.clone(), *ctx.get_span(lhs)),
+                    )?;
+                    env.unify(
+                        (Type::Bool, *ctx.get_span(rhs)),
                         (rhs_ty.clone(), *ctx.get_span(rhs)),
                     )?;
                     Type::Bool
