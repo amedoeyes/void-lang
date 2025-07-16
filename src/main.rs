@@ -31,7 +31,7 @@ fn run() -> Result<()> {
         .subcommand(Command::new("nodes").arg(Arg::new("file").required(true).help("source file")))
         .subcommand(Command::new("type").arg(Arg::new("file").required(true).help("source file")))
         .subcommand(Command::new("eval").arg(Arg::new("file").required(true).help("source file")))
-        .subcommand(Command::new("repl"));
+        .subcommand(Command::new("repl").arg(Arg::new("file").help("source file")));
 
     match cmd.try_get_matches()?.subcommand() {
         Some(("tokens", sub_matches)) => {
@@ -108,10 +108,22 @@ fn run() -> Result<()> {
             println!("{}", value.display(&ctx));
         }
 
-        Some(("repl", _)) => {
+        Some(("repl", sub_matches)) => {
             let mut rl = DefaultEditor::new().expect("could not initialize line editor");
             let mut ctx = Context::new();
             let mut nodes = Vec::new();
+
+            if let Some(file) = sub_matches.get_one::<String>("file") {
+                let contents = fs::read_to_string(file)?;
+                nodes.extend(match parse(&mut ctx, &contents) {
+                    Ok(nodes) => nodes,
+                    Err(err) => return Err(Error::Parser(file.clone(), contents, Box::new(err))),
+                });
+                if let Err(err) = infer(&mut ctx, &nodes) {
+                    return Err(Error::Type(file.clone(), contents, Box::new(err)));
+                };
+            }
+
             loop {
                 let input = match rl.readline("> ") {
                     Ok(line) => {
