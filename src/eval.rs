@@ -1,5 +1,8 @@
 use core::fmt;
-use std::{collections::HashMap, result};
+use std::{
+    collections::{HashMap, LinkedList},
+    result,
+};
 
 use crate::{
     context::{Context, Node, NodeId},
@@ -19,6 +22,7 @@ pub enum Value {
     Unit,
     Integer(i64),
     Boolean(bool),
+    List(LinkedList<Value>),
     Function {
         param: String,
         body: NodeId,
@@ -52,6 +56,18 @@ impl<'a> fmt::Display for Display<'a> {
             Value::Unit => write!(f, "()"),
             Value::Integer(n) => write!(f, "{n}"),
             Value::Boolean(b) => write!(f, "{b}"),
+            Value::List(l) => {
+                write!(f, "[")?;
+                write!(
+                    f,
+                    "{}",
+                    l.iter()
+                        .map(|e| e.display(self.context).to_string())
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                )?;
+                write!(f, "]")
+            }
             Value::Function { param, body, .. } => {
                 write!(f, "{} -> {}", param, body.display(self.context))
             }
@@ -76,6 +92,24 @@ fn eval_expr(ctx: &Context, env: &mut Env, expr: NodeId) -> Result<Value> {
         Node::Expr(Expr::Boolean(bool)) => Ok(Value::Boolean(*bool)),
 
         Node::Expr(Expr::Integer(n)) => Ok(Value::Integer(*n)),
+
+        Node::Expr(Expr::Nil) => Ok(Value::List(LinkedList::new())),
+
+        Node::Expr(Expr::Cons { head, tail }) => {
+            let mut list = LinkedList::new();
+
+            let head_val = eval_expr(ctx, env, *head)?;
+            list.push_back(head_val);
+
+            let mut tail = *tail;
+            while let Node::Expr(Expr::Cons { head, tail: t }) = ctx.get_node(tail).clone() {
+                let next_head_val = eval_expr(ctx, env, head)?;
+                list.push_back(next_head_val);
+                tail = t;
+            }
+
+            Ok(Value::List(list))
+        }
 
         Node::Expr(Expr::Identifier(name)) => {
             let val = env.get(name).unwrap().clone();

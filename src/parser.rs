@@ -111,6 +111,48 @@ impl<'a> Parser<'a> {
                 Ok(expr)
             }
 
+            Token::BracketLeft => {
+                let span = self.span;
+
+                self.advance();
+
+                if self.token == Token::BracketRight {
+                    let list = self.context.add_expr(Expr::Nil);
+                    self.context.set_span(list, span.merge(self.span));
+                    self.advance();
+
+                    Ok(list)
+                } else {
+                    let mut elems = Vec::new();
+
+                    loop {
+                        let elem = self.parse_expr(0)?;
+                        elems.push(elem);
+
+                        if self.token == Token::Comma {
+                            self.advance();
+                            continue;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    let span = span.merge(self.span);
+                    self.expect(Token::BracketRight)?;
+
+                    let mut list = self.context.add_expr(Expr::Nil);
+                    for elem in elems.into_iter().rev() {
+                        list = self.context.add_expr(Expr::Cons {
+                            head: elem,
+                            tail: list,
+                        });
+                    }
+                    self.context.set_span(list, span);
+
+                    Ok(list)
+                }
+            }
+
             Token::Identifier(id) => {
                 let expr = self.context.add_expr(Expr::Identifier(id.clone()));
                 self.context.set_span(expr, self.span);
@@ -233,6 +275,7 @@ impl<'a> Parser<'a> {
                 | Token::If
                 | Token::Integer(_)
                 | Token::ParenLeft
+                | Token::BracketLeft
         ) {
             let arg = self.parse_atom()?;
             let func = expr;

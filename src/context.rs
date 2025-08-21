@@ -58,6 +58,33 @@ impl<'a> fmt::Display for Display<'a> {
                     Display::new(*func, self.context),
                     Display::new(*arg, self.context)
                 ),
+                Expr::Nil => write!(f, "[]"),
+                Expr::Cons { head, tail } => {
+                    let mut tail = *tail;
+                    let mut elems = vec![*head];
+                    loop {
+                        match self.context.get_node(tail) {
+                            Node::Expr(Expr::Cons { head, tail: t }) => {
+                                elems.push(*head);
+                                tail = *t;
+                            }
+                            Node::Expr(Expr::Nil) => {
+                                write!(f, "[")?;
+                                write!(
+                                    f,
+                                    "{}",
+                                    elems
+                                        .iter()
+                                        .map(|elem| Display::new(*elem, self.context).to_string())
+                                        .collect::<Vec<String>>()
+                                        .join(", ")
+                                )?;
+                                return write!(f, "]");
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                }
             },
             Node::Bind(name, expr) => {
                 write!(f, "{} = {}", name, Display::new(*expr, self.context))

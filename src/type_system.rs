@@ -23,6 +23,7 @@ pub enum Type {
     Int,
     Bool,
     Var(usize),
+    List(Box<Type>),
     Fun(Box<Type>, Box<Type>),
     Poly(Vec<usize>, Box<Type>),
 }
@@ -37,6 +38,12 @@ impl Type {
             Type::Bool => write!(f, "Bool"),
 
             Type::Var(n) => write!(f, "t{}", mapping.get(n).unwrap_or(n)),
+
+            Type::List(e) => {
+                write!(f, "[")?;
+                e.fmt(f, mapping)?;
+                write!(f, "]")
+            }
 
             Type::Fun(l, r) => {
                 l.fmt(f, mapping)?;
@@ -112,6 +119,10 @@ impl Env {
                 }
             }
 
+            Type::List(e) => {
+                Self::collect_free_vars(e, free_vars, bound_vars);
+            }
+
             Type::Fun(l, r) => {
                 Self::collect_free_vars(l, free_vars, bound_vars);
                 Self::collect_free_vars(r, free_vars, bound_vars);
@@ -135,6 +146,8 @@ impl Env {
     fn instantiate_helper(&mut self, ty: Type, substitutions: &mut HashMap<usize, Type>) -> Type {
         match ty {
             Type::Var(n) => substitutions.get(&n).cloned().unwrap_or(Type::Var(n)),
+
+            Type::List(e) => Type::List(Box::new(self.instantiate_helper(*e, substitutions))),
 
             Type::Fun(l, r) => Type::Fun(
                 Box::new(self.instantiate_helper(*l, substitutions)),
@@ -161,6 +174,8 @@ impl Env {
                     ty
                 }
             }
+
+            Type::List(e) => Type::List(Box::new(self.substitute(*e))),
 
             Type::Fun(l, r) => {
                 Type::Fun(Box::new(self.substitute(*l)), Box::new(self.substitute(*r)))
@@ -194,6 +209,8 @@ impl Env {
 
             (Type::Var(a), Type::Var(b)) if a == b => Ok(()),
 
+            (Type::List(a), Type::List(b)) => self.unify((*a, s1), (*b, s2)),
+
             (Type::Fun(l1, r1), Type::Fun(l2, r2)) => {
                 self.unify((*l1, s1), (*l2, s2))?;
                 self.unify((*r1, s1), (*r2, s2))
@@ -225,6 +242,8 @@ impl Env {
                 span,
             )),
 
+            Type::List(e) => self.occurs_check(var, e, span),
+
             Type::Fun(l, r) => {
                 self.occurs_check(var, l, span)?;
                 self.occurs_check(var, r, span)
@@ -244,6 +263,28 @@ fn infer_expr(ctx: &mut Context, env: &mut Env, expr: NodeId) -> Result<()> {
         Node::Expr(Expr::Integer(_)) => Type::Int,
 
         Node::Expr(Expr::Boolean(_)) => Type::Bool,
+
+        Node::Expr(Expr::Nil) => Type::List(Box::new(env.fresh_var())),
+
+        Node::Expr(Expr::Cons { head, tail }) => {
+            infer_expr(ctx, env, head)?;
+            let head_ty = ctx.get_type(head).clone();
+            let head_span = *ctx.get_span(head);
+
+            let mut tail = tail;
+            while let Node::Expr(Expr::Cons { head, tail: t }) = ctx.get_node(tail).clone() {
+                infer_expr(ctx, env, head)?;
+                let next_head_ty = ctx.get_type(head).clone();
+                let next_head_span = *ctx.get_span(head);
+                env.unify(
+                    (head_ty.clone(), head_span),
+                    (next_head_ty.clone(), next_head_span),
+                )?;
+                tail = t;
+            }
+
+            Type::List(Box::new(head_ty.clone()))
+        }
 
         Node::Expr(Expr::Identifier(name)) => env.instantiate(
             env.vars
