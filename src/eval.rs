@@ -160,6 +160,23 @@ fn eval_expr(ctx: &Context, env: &mut Env, expr: NodeId) -> Result<Value> {
                     _ => unreachable!(),
                 },
 
+                (Value::List(a), Value::List(b)) => {
+                    let eq = || {
+                        a.len() == b.len()
+                            && a.iter().zip(b.iter()).all(|(a, b)| match (a, b) {
+                                (Value::Integer(a), Value::Integer(b)) => a == b,
+                                (Value::Boolean(a), Value::Boolean(b)) => a == b,
+                                _ => unreachable!(),
+                            })
+                    };
+
+                    match op {
+                        InfixOp::Eq => Ok(Value::Boolean(eq())),
+                        InfixOp::Neq => Ok(Value::Boolean(!eq())),
+                        _ => unreachable!(),
+                    }
+                }
+
                 (Value::Unit, Value::Unit) => match op {
                     InfixOp::Eq => Ok(Value::Boolean(true)),
                     _ => unreachable!(),
