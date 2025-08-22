@@ -1,42 +1,65 @@
-let nil = f -> z -> z;
-let cons = h -> t -> f -> z -> f h (t f z); 
-let fold = f -> z -> list -> list f z;
+// Construct a list from range
+let range = from -> to ->
+	if from > to then []
+	else from : range (from + 1) to;
 
-let range = start -> end ->
-    if start > end then nil
-    else cons start (range (start + 1) end);
+// Fold left
+let foldl = f -> acc -> l ->
+	if l == [] then acc
+	else foldl f (f acc (head l)) (tail l);
 
-let length = list -> 
-	fold (x -> acc -> acc + 1) 0 list;
+// Get the length of a list
+let length = l ->
+	foldl (acc -> _ -> acc + 1) 0 l;
 
-let sum = list -> 
-	fold (a -> b -> a + b) 0 list;
+// Reverse a List
+let reverse = l ->
+	foldl (acc -> x -> x : acc) [] l;
 
-let map = f -> list -> 
-	fold (h -> t -> cons (f h) t) nil list;
+// Map list into a new list
+let map = f -> l ->
+	foldl (acc -> x -> acc ++ [f x]) [] l;
 
-let filter = pred -> list ->
-	fold (h -> t -> if pred h then cons h t else t) nil list;
+// Filter elements that satisfy a predicate
+let filter = pred -> l ->
+	foldl (acc -> x -> if pred x then acc ++ [x] else acc) [] l;
 
-let append = list1 -> list2 ->
-	fold cons list2 list1;
+// Append two lists
+let append = l1 -> l2 ->
+	foldl (acc -> x -> acc ++ [x]) l2 l1;
 
-let concat = fold append nil;
+// Concatenate a list of lists
+let concat = ll ->
+	foldl (acc -> l -> append acc l) [] ll;
 
-let reverse = list -> 
-	fold (h -> t -> append t (cons h nil)) nil list;
+// Check if any element satisfies a predicate
+let any = pred -> l ->
+	foldl (acc -> x -> acc || pred x) false l;
 
-let take_while = pred -> list ->
-	fold (h -> t -> if pred h then cons h t else nil) nil list;
+// Check if all elements satisfy a predicate
+let all = pred -> l ->
+	foldl (acc -> x -> acc && pred x) true l;
 
-let drop_while = pred -> list ->
-	fold (h -> t -> if pred h then drop_while pred t else cons h t) nil list;
+// Check if an element exists in a list
+let elem = x -> l ->
+	any (y -> y == x) l;
 
-let any = pred -> list ->
-    fold (x -> acc -> acc || pred x) false list;
+// Map list and then flatten it
+let flat_map = f -> l ->
+	concat (map f l);
 
-let contains = elem -> list ->
-	any (x -> x == elem) list;
+// Zip two lists together with a function
+let zip_with = f -> l1 -> l2 ->
+	if l1 == [] || l2 == [] then []
+	else f (head l1) (head l2) : zip_with f (tail l1) (tail l2);
 
-// sum (map (x -> x * 2) (range 1 3))
-// length (filter (x -> x % 2 == 0) (cons 3 (cons 1 (cons 4 nil))))
+// Take first n elements
+let take = n -> l ->
+	if n <= 0 || l == [] then []
+	else head l : take (n - 1) (tail l);
+
+// Drop first n elements
+let drop = n -> l ->
+	if n <= 0 then l
+	else if l == [] then []
+	else drop (n - 1) (tail l);
