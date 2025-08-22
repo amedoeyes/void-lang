@@ -53,7 +53,7 @@ impl<'a> Parser<'a> {
                     self.advance();
                     self.expect(Token::Equal)?;
 
-                    let expr = self.parse_expr(0)?;
+                    let expr = self.parse_expr(0.0)?;
                     self.expect(Token::Semicolon)?;
 
                     let bind = self.context.add_bind(&name, expr);
@@ -64,7 +64,7 @@ impl<'a> Parser<'a> {
                 }
 
                 _ => {
-                    nodes.push(self.parse_expr(0)?);
+                    nodes.push(self.parse_expr(0.0)?);
                 }
             }
         }
@@ -126,7 +126,7 @@ impl<'a> Parser<'a> {
                     let mut elems = Vec::new();
 
                     loop {
-                        let elem = self.parse_expr(0)?;
+                        let elem = self.parse_expr(0.0)?;
                         elems.push(elem);
 
                         if self.token == Token::Comma {
@@ -163,11 +163,11 @@ impl<'a> Parser<'a> {
             Token::If => {
                 let span = self.span;
                 self.advance();
-                let cond = self.parse_expr(0)?;
+                let cond = self.parse_expr(0.0)?;
                 self.expect(Token::Then)?;
-                let then = self.parse_expr(0)?;
+                let then = self.parse_expr(0.0)?;
                 self.expect(Token::Else)?;
-                let alt = self.parse_expr(0)?;
+                let alt = self.parse_expr(0.0)?;
                 let expr = self.context.add_expr(Expr::Condition { cond, then, alt });
                 self.context
                     .set_span(expr, span.merge(*self.context.get_span(alt)));
@@ -183,7 +183,7 @@ impl<'a> Parser<'a> {
                     self.advance();
                     Ok(expr)
                 } else {
-                    let expr = self.parse_expr(0)?;
+                    let expr = self.parse_expr(0.0)?;
                     self.context.set_span(expr, span.merge(self.span));
                     self.expect(Token::ParenRight)?;
                     Ok(expr)
@@ -216,7 +216,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_infix(&mut self, lhs: NodeId, min_bp: u8) -> Result<NodeId> {
+    fn parse_infix(&mut self, lhs: NodeId, min_bp: f32) -> Result<NodeId> {
         let mut lhs = lhs;
 
         while let Some(op) = InfixOp::from_token(&self.token) {
@@ -239,7 +239,7 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
-    fn parse_expr(&mut self, min_bp: u8) -> Result<NodeId> {
+    fn parse_expr(&mut self, min_bp: f32) -> Result<NodeId> {
         let mut expr = if matches!(self.token, Token::Hyphen | Token::Bang) {
             self.parse_prefix()?
         } else {
@@ -251,7 +251,7 @@ impl<'a> Parser<'a> {
                 self.advance();
 
                 let param = expr;
-                let body = self.parse_expr(0)?;
+                let body = self.parse_expr(0.0)?;
 
                 expr = self.context.add_expr(Expr::Lambda { param, body });
                 self.context.set_span(
@@ -271,11 +271,11 @@ impl<'a> Parser<'a> {
         while matches!(
             self.token,
             Token::Boolean(_)
+                | Token::BracketLeft
                 | Token::Identifier(_)
                 | Token::If
                 | Token::Integer(_)
                 | Token::ParenLeft
-                | Token::BracketLeft
         ) {
             let arg = self.parse_atom()?;
             let func = expr;
@@ -290,9 +290,10 @@ impl<'a> Parser<'a> {
 
         if matches!(
             self.token,
-            Token::EqualEqual
-                | Token::AmpersandAmpersand
+            Token::AmpersandAmpersand
                 | Token::BangEqual
+                | Token::Colon
+                | Token::EqualEqual
                 | Token::GreaterThan
                 | Token::GreaterThanEqual
                 | Token::Hyphen
@@ -301,6 +302,7 @@ impl<'a> Parser<'a> {
                 | Token::Percent
                 | Token::PipePipe
                 | Token::Plus
+                | Token::PlusPlus
                 | Token::Slash
                 | Token::Star
         ) {

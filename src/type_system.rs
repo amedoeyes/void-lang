@@ -388,6 +388,22 @@ fn infer_expr(ctx: &mut Context, env: &mut Env, expr: NodeId) -> Result<()> {
                     )?;
                     Type::Bool
                 }
+
+                InfixOp::Cons => {
+                    env.unify(
+                        (rhs_ty.clone(), *ctx.get_span(rhs)),
+                        (Type::List(Box::new(lhs_ty.clone())), *ctx.get_span(lhs)),
+                    )?;
+                    rhs_ty.clone()
+                }
+
+                InfixOp::Append => {
+                    env.unify(
+                        (lhs_ty.clone(), *ctx.get_span(lhs)),
+                        (rhs_ty.clone(), *ctx.get_span(rhs)),
+                    )?;
+                    lhs_ty.clone()
+                }
             }
         }
 

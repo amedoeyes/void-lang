@@ -1,5 +1,4 @@
 use core::fmt;
-use std::{
 use std::{cell::RefCell, collections::HashMap, rc::Rc, result};
 
 use crate::{
@@ -253,22 +252,18 @@ pub fn eval_expr(ctx: &Context, env: &Env, expr: NodeId) -> Result<Value> {
                     _ => unreachable!(),
                 },
 
-                (Value::List(a), Value::List(b)) => {
-                    let eq = || {
-                        a.len() == b.len()
-                            && a.iter().zip(b.iter()).all(|(a, b)| match (a, b) {
-                                (Value::Integer(a), Value::Integer(b)) => a == b,
-                                (Value::Boolean(a), Value::Boolean(b)) => a == b,
-                                _ => unreachable!(),
-                            })
-                    };
+                (Value::List(a), Value::List(b)) => match op {
+                    InfixOp::Eq => Ok(Value::Boolean(a == b)),
+                    InfixOp::Neq => Ok(Value::Boolean(a != b)),
+                    InfixOp::Cons => Ok(Value::List(b.push(Value::List(a)))),
+                    InfixOp::Append => Ok(Value::List(a.append(b))),
+                    _ => unreachable!(),
+                },
 
-                    match op {
-                        InfixOp::Eq => Ok(Value::Boolean(eq())),
-                        InfixOp::Neq => Ok(Value::Boolean(!eq())),
-                        _ => unreachable!(),
-                    }
-                }
+                (a, Value::List(b)) => match op {
+                    InfixOp::Cons => Ok(Value::List(b.push(a))),
+                    _ => unreachable!(),
+                },
 
                 (Value::Unit, Value::Unit) => match op {
                     InfixOp::Eq => Ok(Value::Boolean(true)),

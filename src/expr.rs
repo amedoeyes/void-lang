@@ -17,9 +17,9 @@ impl PrefixOp {
         }
     }
 
-    pub fn precedence(&self) -> (u8, u8) {
+    pub fn precedence(&self) -> (f32, f32) {
         match self {
-            PrefixOp::Neg | PrefixOp::Not => (0, 13),
+            PrefixOp::Neg | PrefixOp::Not => (0.0, 7.0),
         }
     }
 }
@@ -51,6 +51,9 @@ pub enum InfixOp {
     Gt,
     Lte,
     Gte,
+
+    Cons,
+    Append,
 }
 
 impl InfixOp {
@@ -73,18 +76,25 @@ impl InfixOp {
             Token::LessThanEqual => Some(InfixOp::Lte),
             Token::GreaterThanEqual => Some(InfixOp::Gte),
 
+            Token::Colon => Some(InfixOp::Cons),
+            Token::PlusPlus => Some(InfixOp::Append),
             _ => None,
         }
     }
 
-    pub fn precedence(&self) -> (u8, u8) {
+    pub fn precedence(&self) -> (f32, f32) {
         match self {
-            InfixOp::Or => (1, 2),
-            InfixOp::And => (3, 4),
-            InfixOp::Eq | InfixOp::Neq => (5, 6),
-            InfixOp::Lt | InfixOp::Gt | InfixOp::Lte | InfixOp::Gte => (7, 8),
-            InfixOp::Add | InfixOp::Sub => (9, 10),
-            InfixOp::Mul | InfixOp::Div | InfixOp::Mod => (11, 12),
+            InfixOp::Or => (1.1, 1.0),
+            InfixOp::And => (2.1, 2.0),
+            InfixOp::Eq
+            | InfixOp::Neq
+            | InfixOp::Lt
+            | InfixOp::Gt
+            | InfixOp::Lte
+            | InfixOp::Gte => (3.0, 3.0),
+            InfixOp::Append | InfixOp::Cons => (4.1, 4.0),
+            InfixOp::Add | InfixOp::Sub => (5.0, 5.1),
+            InfixOp::Mul | InfixOp::Div | InfixOp::Mod => (6.0, 6.1),
         }
     }
 }
@@ -108,6 +118,9 @@ impl fmt::Display for InfixOp {
             InfixOp::Gt => write!(f, ">"),
             InfixOp::Lte => write!(f, "<="),
             InfixOp::Gte => write!(f, ">="),
+
+            InfixOp::Cons => write!(f, ":"),
+            InfixOp::Append => write!(f, "++"),
         }
     }
 }
