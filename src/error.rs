@@ -115,6 +115,11 @@ impl fmt::Display for Error {
                     write_message(f, filename, *span, "division by zero")?;
                     write_lines(f, source, *span)
                 }
+
+                eval::Error::EmptyList(span) => {
+                    write_message(f, filename, *span, "list is empty")?;
+                    write_lines(f, source, *span)
+                }
             },
         }
     }

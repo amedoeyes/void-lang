@@ -2,6 +2,7 @@ use core::fmt;
 use std::collections::HashMap;
 use std::result;
 
+use crate::builtin::Builtins;
 use crate::context::{Context, Node, NodeId};
 use crate::{
     expr::{Expr, InfixOp, PrefixOp},
@@ -425,8 +426,13 @@ fn infer_expr(ctx: &mut Context, env: &mut Env, expr: NodeId) -> Result<()> {
     Ok(())
 }
 
-pub fn infer(ctx: &mut Context, nodes: &[NodeId]) -> Result<()> {
+pub fn infer(ctx: &mut Context, builtins: &Builtins, nodes: &[NodeId]) -> Result<()> {
     let mut env = Env::new();
+
+    for (name, builtin) in builtins {
+        env.vars
+            .insert(name.clone(), env.generalize(builtin.ty.clone()));
+    }
 
     for node in nodes {
         match ctx.get_node(*node).clone() {

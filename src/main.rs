@@ -1,3 +1,4 @@
+mod builtin;
 mod context;
 mod error;
 mod eval;
@@ -12,6 +13,7 @@ use rustyline::DefaultEditor;
 use std::fs;
 
 use crate::{
+    builtin::builtins,
     context::{Context, Node},
     error::{Error, Result},
     eval::evaluate,
@@ -74,13 +76,15 @@ fn run() -> Result<()> {
                 Err(err) => return Err(Error::Parser(file.clone(), contents, Box::new(err))),
             };
 
-            if let Err(err) = infer(&mut ctx, &nodes) {
+            let builtins = builtins();
+
+            if let Err(err) = infer(&mut ctx, &builtins, &nodes) {
                 return Err(Error::Type(file.clone(), contents, Box::new(err)));
             };
 
             for node in nodes {
                 match ctx.get_node(node) {
-                    Node::Expr(_) => println!("{}", ctx.get_type(node)),
+                    Node::Expr(_) => println!("{} : {}", node.display(&ctx), ctx.get_type(node)),
                     Node::Bind(name, _) => println!("{} : {}", name, ctx.get_type(node)),
                 }
             }
@@ -96,11 +100,13 @@ fn run() -> Result<()> {
                 Err(err) => return Err(Error::Parser(file.clone(), contents, Box::new(err))),
             };
 
-            if let Err(err) = infer(&mut ctx, &nodes) {
+            let builtins = builtins();
+
+            if let Err(err) = infer(&mut ctx, &builtins, &nodes) {
                 return Err(Error::Type(file.clone(), contents, Box::new(err)));
             };
 
-            let value = match evaluate(&ctx, &nodes) {
+            let value = match evaluate(&ctx, &builtins, &nodes) {
                 Ok(value) => value,
                 Err(err) => return Err(Error::Eval(file.clone(), contents, err)),
             };
@@ -112,6 +118,7 @@ fn run() -> Result<()> {
             let mut rl = DefaultEditor::new().expect("could not initialize line editor");
             let mut ctx = Context::new();
             let mut nodes = Vec::new();
+            let builtins = builtins();
 
             if let Some(file) = sub_matches.get_one::<String>("file") {
                 let contents = fs::read_to_string(file)?;
@@ -119,7 +126,7 @@ fn run() -> Result<()> {
                     Ok(nodes) => nodes,
                     Err(err) => return Err(Error::Parser(file.clone(), contents, Box::new(err))),
                 });
-                if let Err(err) = infer(&mut ctx, &nodes) {
+                if let Err(err) = infer(&mut ctx, &builtins, &nodes) {
                     return Err(Error::Type(file.clone(), contents, Box::new(err)));
                 };
             }
@@ -155,7 +162,7 @@ fn run() -> Result<()> {
                     }
                 });
 
-                if let Err(err) = infer(&mut ctx, &nodes) {
+                if let Err(err) = infer(&mut ctx, &builtins, &nodes) {
                     match err {
                         type_system::Error::TypeMismatch((ref t1, _), (ref t2, _)) => {
                             println!("type mismatch: expected '{t1}' but found '{t2}'")
@@ -172,11 +179,12 @@ fn run() -> Result<()> {
                 };
 
                 if let Node::Expr(_) = ctx.get_node(*nodes.last().unwrap()) {
-                    let value = match evaluate(&ctx, &nodes) {
+                    let value = match evaluate(&ctx, &builtins, &nodes) {
                         Ok(value) => value,
                         Err(err) => {
                             match err {
                                 eval::Error::DivisionByZero(_) => println!("division by zero"),
+                                eval::Error::EmptyList(_) => println!("list is empty"),
                             }
                             continue;
                         }

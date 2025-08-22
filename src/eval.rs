@@ -5,6 +5,7 @@ use std::{
 };
 
 use crate::{
+    builtin::Builtins,
     context::{Context, Node, NodeId},
     expr::{Expr, InfixOp, PrefixOp},
     span::Span,
@@ -13,9 +14,10 @@ use crate::{
 #[derive(Debug)]
 pub enum Error {
     DivisionByZero(Span),
+    EmptyList(Span),
 }
 
-type Result<T> = result::Result<T, Error>;
+pub type Result<T> = result::Result<T, Error>;
 
 #[derive(Debug, Clone)]
 pub enum Value {
@@ -23,6 +25,7 @@ pub enum Value {
     Integer(i64),
     Boolean(bool),
     List(LinkedList<Value>),
+    Builtin(fn(&Context, &Value, Span) -> Result<Value>),
     Function {
         param: String,
         body: NodeId,
@@ -68,6 +71,9 @@ impl<'a> fmt::Display for Display<'a> {
                 )?;
                 write!(f, "]")
             }
+            Value::Builtin(_) => {
+                write!(f, "builtin")
+            }
             Value::Function { param, body, .. } => {
                 write!(f, "{} -> {}", param, body.display(self.context))
             }
@@ -85,7 +91,7 @@ fn force(ctx: &Context, env: &mut Env, value: Value) -> Result<Value> {
     }
 }
 
-fn eval_expr(ctx: &Context, env: &mut Env, expr: NodeId) -> Result<Value> {
+pub fn eval_expr(ctx: &Context, env: &mut Env, expr: NodeId) -> Result<Value> {
     match ctx.get_node(expr) {
         Node::Expr(Expr::Unit) => Ok(Value::Unit),
 
@@ -210,6 +216,7 @@ fn eval_expr(ctx: &Context, env: &mut Env, expr: NodeId) -> Result<Value> {
             let arg_val = eval_expr(ctx, env, *arg)?;
 
             match func_val {
+                Value::Builtin(f) => f(&ctx, &arg_val, *ctx.get_span(expr)),
                 Value::Function {
                     param,
                     body,
@@ -227,8 +234,12 @@ fn eval_expr(ctx: &Context, env: &mut Env, expr: NodeId) -> Result<Value> {
     }
 }
 
-pub fn evaluate(ctx: &Context, nodes: &[NodeId]) -> Result<Value> {
+pub fn evaluate(ctx: &Context, builtins: &Builtins, nodes: &[NodeId]) -> Result<Value> {
     let mut env = Env::new();
+
+    for (name, builtin) in builtins {
+        env.insert(name.clone(), Value::Builtin(builtin.eval));
+    }
 
     for node in nodes {
         match ctx.get_node(*node) {
