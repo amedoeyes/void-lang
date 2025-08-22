@@ -1,6 +1,7 @@
 use core::fmt;
-use std::collections::HashMap;
 use std::result;
+
+use fxhash::FxHashMap;
 
 use crate::builtin::Builtins;
 use crate::context::{Context, Node, NodeId};
@@ -30,7 +31,7 @@ pub enum Type {
 }
 
 impl Type {
-    fn fmt(&self, f: &mut fmt::Formatter, mapping: &HashMap<usize, usize>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter, mapping: &FxHashMap<usize, usize>) -> fmt::Result {
         match self {
             Type::Unit => write!(f, "Unit"),
 
@@ -70,23 +71,23 @@ impl Type {
 
 impl fmt::Display for Type {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        self.fmt(f, &HashMap::new())
+        self.fmt(f, &FxHashMap::default())
     }
 }
 
 #[derive(Debug, Clone)]
 struct Env {
-    vars: HashMap<String, Type>,
+    vars: FxHashMap<String, Type>,
     counter: usize,
-    substitutions: HashMap<usize, Type>,
+    substitutions: FxHashMap<usize, Type>,
 }
 
 impl Env {
     fn new() -> Self {
         Env {
-            vars: HashMap::new(),
+            vars: FxHashMap::default(),
             counter: 3,
-            substitutions: HashMap::new(),
+            substitutions: FxHashMap::default(),
         }
     }
 
@@ -140,11 +141,11 @@ impl Env {
     }
 
     fn instantiate(&mut self, ty: Type) -> Type {
-        let mut substitutions = HashMap::new();
+        let mut substitutions = FxHashMap::default();
         self.instantiate_helper(ty, &mut substitutions)
     }
 
-    fn instantiate_helper(&mut self, ty: Type, substitutions: &mut HashMap<usize, Type>) -> Type {
+    fn instantiate_helper(&mut self, ty: Type, substitutions: &mut FxHashMap<usize, Type>) -> Type {
         match ty {
             Type::Var(n) => substitutions.get(&n).cloned().unwrap_or(Type::Var(n)),
 

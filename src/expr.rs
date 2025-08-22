@@ -2,7 +2,7 @@ use core::fmt;
 
 use crate::{context::NodeId, lexer::Token};
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum PrefixOp {
     Neg,
     Not,
@@ -33,7 +33,7 @@ impl fmt::Display for PrefixOp {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum InfixOp {
     Add,
     Sub,

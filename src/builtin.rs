@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use fxhash::FxHashMap;
 
 use crate::{
     context::Context,
@@ -12,10 +12,10 @@ pub struct Builtin {
     pub eval: fn(&Context, Value, Span) -> eval::Result<Value>,
 }
 
-pub type Builtins = HashMap<String, Builtin>;
+pub type Builtins = FxHashMap<String, Builtin>;
 
 pub fn builtins() -> Builtins {
-    let mut builtins = HashMap::new();
+    let mut builtins = FxHashMap::default();
 
     let ty = Type::Var(0);
     builtins.insert(

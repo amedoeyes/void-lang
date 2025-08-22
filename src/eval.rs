@@ -1,5 +1,7 @@
 use core::fmt;
-use std::{cell::RefCell, collections::HashMap, rc::Rc, result};
+use std::{cell::RefCell, collections::VecDeque, rc::Rc, result};
+
+use fxhash::FxHashMap;
 
 use crate::{
     builtin::Builtins,
@@ -162,162 +164,302 @@ impl<'a> fmt::Display for Display<'a> {
     }
 }
 
-pub type Env = Rc<RefCell<HashMap<String, Value>>>;
+pub type Env = Rc<RefCell<FxHashMap<String, Value>>>;
 
 pub fn force(ctx: &Context, value: Value) -> Result<Value> {
     match value {
-        Value::Thunk { expr, env } => eval_expr(ctx, &env, expr),
+        Value::Thunk { expr, env } => eval_expr_stack(ctx, &env, expr),
         v => Ok(v),
     }
 }
 
-pub fn eval_expr(ctx: &Context, env: &Env, expr: NodeId) -> Result<Value> {
-    match ctx.get_node(expr) {
-        Node::Expr(Expr::Unit) => Ok(Value::Unit),
+#[derive(Clone)]
+enum EvalState {
+    Start,
+    Prefix(PrefixOp),
+    Infix(InfixOp),
+    Cond,
+    Func,
+    App(Value),
+}
 
-        Node::Expr(Expr::Boolean(bool)) => Ok(Value::Boolean(*bool)),
+#[derive(Clone)]
+struct EvalFrame {
+    env: Env,
+    expr: NodeId,
+    state: EvalState,
+}
 
-        Node::Expr(Expr::Integer(n)) => Ok(Value::Integer(*n)),
+pub fn eval_expr_stack(ctx: &Context, env: &Env, expr: NodeId) -> Result<Value> {
+    let mut frame_stack = VecDeque::new();
+    let mut result_stack = VecDeque::new();
 
-        Node::Expr(Expr::Nil) => Ok(Value::List(List::Nil)),
+    frame_stack.push_back(EvalFrame {
+        env: env.clone(),
+        expr,
+        state: EvalState::Start,
+    });
 
-        Node::Expr(Expr::Cons { head, tail }) => {
-            let mut elems = Vec::new();
-            let mut cur_head = *head;
-            let mut cur_tail = *tail;
+    while let Some(frame) = frame_stack.pop_back() {
+        match frame.state {
+            EvalState::Start => match ctx.get_node(frame.expr).clone() {
+                Node::Expr(Expr::Unit) => {
+                    result_stack.push_back(Value::Unit);
+                }
 
-            loop {
-                elems.push(Value::Thunk {
-                    expr: cur_head,
-                    env: env.clone(),
-                });
-                match ctx.get_node(cur_tail) {
-                    Node::Expr(Expr::Cons { head, tail }) => {
-                        cur_head = *head;
-                        cur_tail = *tail;
+                Node::Expr(Expr::Boolean(bool)) => {
+                    result_stack.push_back(Value::Boolean(bool));
+                }
+
+                Node::Expr(Expr::Integer(n)) => {
+                    result_stack.push_back(Value::Integer(n));
+                }
+
+                Node::Expr(Expr::Nil) => {
+                    result_stack.push_back(Value::List(List::Nil));
+                }
+
+                Node::Expr(Expr::Cons { head, tail }) => {
+                    let mut elems = Vec::new();
+                    let mut cur_head = head;
+                    let mut cur_tail = tail;
+
+                    loop {
+                        elems.push(Value::Thunk {
+                            expr: cur_head,
+                            env: frame.env.clone(),
+                        });
+                        match ctx.get_node(cur_tail) {
+                            Node::Expr(Expr::Cons { head, tail }) => {
+                                cur_head = *head;
+                                cur_tail = *tail;
+                            }
+                            _ => break,
+                        }
                     }
-                    _ => break,
+
+                    result_stack.push_back(Value::List(List::from(elems)));
+                }
+
+                Node::Expr(Expr::Lambda { param, body }) => match ctx.get_node(param) {
+                    Node::Expr(Expr::Identifier(id)) => result_stack.push_back(Value::Function {
+                        param: id.clone(),
+                        body,
+                        env: frame.env.clone(),
+                    }),
+                    _ => unreachable!(),
+                },
+
+                Node::Expr(Expr::Identifier(name)) => {
+                    let val = frame.env.borrow().get(&name).cloned().unwrap();
+                    let val = force(ctx, val)?;
+                    frame.env.borrow_mut().insert(name.clone(), val.clone());
+                    result_stack.push_back(val);
+                }
+
+                Node::Expr(Expr::Prefix { op, rhs }) => {
+                    frame_stack.push_back(EvalFrame {
+                        state: EvalState::Prefix(op),
+                        ..frame.clone()
+                    });
+
+                    frame_stack.push_back(EvalFrame {
+                        expr: rhs,
+                        state: EvalState::Start,
+                        ..frame.clone()
+                    });
+                }
+
+                Node::Expr(Expr::Infix { lhs, op, rhs }) => {
+                    frame_stack.push_back(EvalFrame {
+                        state: EvalState::Infix(op),
+                        ..frame.clone()
+                    });
+
+                    frame_stack.push_back(EvalFrame {
+                        expr: lhs,
+                        state: EvalState::Start,
+                        ..frame.clone()
+                    });
+
+                    frame_stack.push_back(EvalFrame {
+                        expr: rhs,
+                        state: EvalState::Start,
+                        ..frame
+                    });
+                }
+
+                Node::Expr(Expr::Condition { cond, .. }) => {
+                    frame_stack.push_back(EvalFrame {
+                        state: EvalState::Cond,
+                        ..frame.clone()
+                    });
+
+                    frame_stack.push_back(EvalFrame {
+                        expr: cond,
+                        state: EvalState::Start,
+                        ..frame
+                    });
+                }
+
+                Node::Expr(Expr::Application { func, .. }) => {
+                    frame_stack.push_back(EvalFrame {
+                        state: EvalState::Func,
+                        ..frame.clone()
+                    });
+
+                    frame_stack.push_back(EvalFrame {
+                        expr: func,
+                        state: EvalState::Start,
+                        ..frame
+                    });
+                }
+
+                _ => unreachable!(),
+            },
+
+            EvalState::Prefix(op) => {
+                let rhs = result_stack.pop_back().unwrap();
+
+                let res = match (op, rhs) {
+                    (PrefixOp::Neg, Value::Integer(n)) => Value::Integer(-n),
+                    (PrefixOp::Not, Value::Boolean(b)) => Value::Boolean(!b),
+                    _ => unreachable!(),
+                };
+
+                result_stack.push_back(res);
+            }
+
+            EvalState::Infix(op) => {
+                let lhs = result_stack.pop_back().unwrap();
+                let rhs = result_stack.pop_back().unwrap();
+
+                let res = match (lhs, rhs) {
+                    (Value::Integer(a), Value::Integer(b)) => match op {
+                        InfixOp::Add => Value::Integer(a + b),
+                        InfixOp::Sub => Value::Integer(a - b),
+                        InfixOp::Mul => Value::Integer(a * b),
+                        InfixOp::Div => a
+                            .checked_div(b)
+                            .map(Value::Integer)
+                            .ok_or(Error::DivisionByZero(*ctx.get_span(expr)))?,
+                        InfixOp::Mod => Value::Integer(a % b),
+                        InfixOp::Eq => Value::Boolean(a == b),
+                        InfixOp::Neq => Value::Boolean(a != b),
+
+                        InfixOp::Lt => Value::Boolean(a < b),
+                        InfixOp::Lte => Value::Boolean(a <= b),
+                        InfixOp::Gt => Value::Boolean(a > b),
+                        InfixOp::Gte => Value::Boolean(a >= b),
+
+                        _ => unreachable!(),
+                    },
+
+                    (Value::Boolean(a), Value::Boolean(b)) => match op {
+                        InfixOp::Eq => Value::Boolean(a == b),
+                        InfixOp::Neq => Value::Boolean(a != b),
+                        InfixOp::And => Value::Boolean(a && b),
+                        InfixOp::Or => Value::Boolean(a || b),
+                        _ => unreachable!(),
+                    },
+
+                    (Value::List(a), Value::List(b)) => match op {
+                        InfixOp::Eq => Value::Boolean(a == b),
+                        InfixOp::Neq => Value::Boolean(a != b),
+                        InfixOp::Cons => Value::List(b.push(Value::List(a))),
+                        InfixOp::Append => Value::List(b.append(a)),
+                        _ => unreachable!(),
+                    },
+
+                    (a, Value::List(b)) => match op {
+                        InfixOp::Cons => Value::List(b.push(a)),
+                        _ => unreachable!(),
+                    },
+
+                    (Value::Unit, Value::Unit) => match op {
+                        InfixOp::Eq => Value::Boolean(true),
+                        _ => unreachable!(),
+                    },
+
+                    _ => unreachable!(),
+                };
+
+                result_stack.push_back(res);
+            }
+
+            EvalState::Cond => {
+                let cond = result_stack.pop_back().unwrap();
+
+                if let Node::Expr(Expr::Condition { then, alt, .. }) = ctx.get_node(frame.expr) {
+                    match cond {
+                        Value::Boolean(true) => {
+                            frame_stack.push_back(EvalFrame {
+                                expr: *then,
+                                state: EvalState::Start,
+                                ..frame
+                            });
+                        }
+                        Value::Boolean(false) => {
+                            frame_stack.push_back(EvalFrame {
+                                expr: *alt,
+                                state: EvalState::Start,
+                                ..frame
+                            });
+                        }
+                        _ => unreachable!(),
+                    }
                 }
             }
 
-            Ok(Value::List(List::from(elems)))
-        }
+            EvalState::Func => {
+                let func = result_stack.pop_back().unwrap();
 
-        Node::Expr(Expr::Identifier(name)) => {
-            let val = env.borrow().get(name).cloned().unwrap();
-            let val = force(ctx, val)?;
-            env.borrow_mut().insert(name.clone(), val.clone());
-            Ok(val)
-        }
+                if let Node::Expr(Expr::Application { arg, .. }) = ctx.get_node(frame.expr) {
+                    frame_stack.push_back(EvalFrame {
+                        state: EvalState::App(func),
+                        ..frame.clone()
+                    });
 
-        Node::Expr(Expr::Condition { cond, then, alt }) => {
-            let cond_val = eval_expr(ctx, env, *cond)?;
-            match cond_val {
-                Value::Boolean(true) => eval_expr(ctx, env, *then),
-                Value::Boolean(false) => eval_expr(ctx, env, *alt),
-                _ => unreachable!(),
-            }
-        }
-
-        Node::Expr(Expr::Infix { lhs, op, rhs }) => {
-            let lhs_val = eval_expr(ctx, env, *lhs)?;
-            let rhs_val = eval_expr(ctx, env, *rhs)?;
-
-            match (lhs_val, rhs_val) {
-                (Value::Integer(a), Value::Integer(b)) => match op {
-                    InfixOp::Add => Ok(Value::Integer(a + b)),
-                    InfixOp::Sub => Ok(Value::Integer(a - b)),
-                    InfixOp::Mul => Ok(Value::Integer(a * b)),
-                    InfixOp::Div => a
-                        .checked_div(b)
-                        .map(Value::Integer)
-                        .ok_or(Error::DivisionByZero(*ctx.get_span(expr))),
-                    InfixOp::Mod => Ok(Value::Integer(a % b)),
-                    InfixOp::Eq => Ok(Value::Boolean(a == b)),
-                    InfixOp::Neq => Ok(Value::Boolean(a != b)),
-
-                    InfixOp::Lt => Ok(Value::Boolean(a < b)),
-                    InfixOp::Lte => Ok(Value::Boolean(a <= b)),
-                    InfixOp::Gt => Ok(Value::Boolean(a > b)),
-                    InfixOp::Gte => Ok(Value::Boolean(a >= b)),
-
-                    _ => unreachable!(),
-                },
-
-                (Value::Boolean(a), Value::Boolean(b)) => match op {
-                    InfixOp::Eq => Ok(Value::Boolean(a == b)),
-                    InfixOp::Neq => Ok(Value::Boolean(a != b)),
-                    InfixOp::And => Ok(Value::Boolean(a && b)),
-                    InfixOp::Or => Ok(Value::Boolean(a || b)),
-                    _ => unreachable!(),
-                },
-
-                (Value::List(a), Value::List(b)) => match op {
-                    InfixOp::Eq => Ok(Value::Boolean(a == b)),
-                    InfixOp::Neq => Ok(Value::Boolean(a != b)),
-                    InfixOp::Cons => Ok(Value::List(b.push(Value::List(a)))),
-                    InfixOp::Append => Ok(Value::List(a.append(b))),
-                    _ => unreachable!(),
-                },
-
-                (a, Value::List(b)) => match op {
-                    InfixOp::Cons => Ok(Value::List(b.push(a))),
-                    _ => unreachable!(),
-                },
-
-                (Value::Unit, Value::Unit) => match op {
-                    InfixOp::Eq => Ok(Value::Boolean(true)),
-                    _ => unreachable!(),
-                },
-
-                _ => unreachable!(),
-            }
-        }
-
-        Node::Expr(Expr::Prefix { op, rhs }) => {
-            let rhs_val = eval_expr(ctx, env, *rhs)?;
-            match (op, rhs_val) {
-                (PrefixOp::Neg, Value::Integer(n)) => Ok(Value::Integer(-n)),
-                (PrefixOp::Not, Value::Boolean(b)) => Ok(Value::Boolean(!b)),
-                _ => unreachable!(),
-            }
-        }
-
-        Node::Expr(Expr::Lambda { param, body }) => match ctx.get_node(*param) {
-            Node::Expr(Expr::Identifier(id)) => Ok(Value::Function {
-                param: id.clone(),
-                body: *body,
-                env: env.clone(),
-            }),
-
-            _ => unreachable!(),
-        },
-
-        Node::Expr(Expr::Application { func, arg }) => {
-            let func_val = eval_expr(ctx, env, *func)?;
-            let arg_val = eval_expr(ctx, env, *arg)?;
-
-            match func_val {
-                Value::Builtin(f) => f(ctx, arg_val, *ctx.get_span(expr)),
-                Value::Function { param, body, env } => {
-                    let mut closure_env = HashMap::new();
-                    for (k, v) in env.borrow().iter() {
-                        closure_env.insert(k.clone(), v.clone());
-                    }
-                    closure_env.insert(param, arg_val);
-                    eval_expr(ctx, &Rc::new(RefCell::new(closure_env)), body)
+                    frame_stack.push_back(EvalFrame {
+                        expr: *arg,
+                        state: EvalState::Start,
+                        ..frame
+                    });
                 }
+            }
+            EvalState::App(func) => {
+                let arg = result_stack.pop_back().unwrap();
 
-                _ => unreachable!(),
+                match func {
+                    Value::Builtin(f) => {
+                        let result = f(ctx, arg, *ctx.get_span(frame.expr))?;
+                        result_stack.push_back(result);
+                    }
+                    Value::Function { param, body, env } => {
+                        let mut closure_env = FxHashMap::default();
+                        for (k, v) in env.borrow().iter() {
+                            closure_env.insert(k.clone(), v.clone());
+                        }
+                        closure_env.insert(param, arg);
+
+                        frame_stack.push_back(EvalFrame {
+                            env: Rc::new(RefCell::new(closure_env)),
+                            expr: body,
+                            state: EvalState::Start,
+                        });
+                    }
+
+                    _ => unreachable!(),
+                }
             }
         }
-
-        _ => unreachable!(),
     }
+
+    Ok(result_stack.pop_back().unwrap())
 }
 
 pub fn evaluate(ctx: &Context, builtins: &Builtins, nodes: &[NodeId]) -> Result<Value> {
-    let env = Rc::new(RefCell::new(HashMap::new()));
+    let env = Rc::new(RefCell::new(FxHashMap::default()));
 
     for (name, builtin) in builtins {
         env.borrow_mut()
@@ -326,7 +468,7 @@ pub fn evaluate(ctx: &Context, builtins: &Builtins, nodes: &[NodeId]) -> Result<
 
     for node in nodes {
         match ctx.get_node(*node) {
-            Node::Expr(_) => return eval_expr(ctx, &env, *node),
+            Node::Expr(_) => return eval_expr_stack(ctx, &env, *node),
             Node::Bind(name, expr) => {
                 env.borrow_mut().insert(
                     name.clone(),

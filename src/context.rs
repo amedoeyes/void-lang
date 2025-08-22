@@ -3,7 +3,7 @@ use std::fmt::Formatter;
 
 use crate::{expr::Expr, span::Span, type_system::Type};
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NodeId(usize);
 
 impl NodeId {
@@ -99,7 +99,7 @@ pub enum Node {
     Bind(String, NodeId),
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Context {
     nodes: Vec<Node>,
     spans: Vec<Span>,
