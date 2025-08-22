@@ -1,63 +1,127 @@
 # Void Lang
 
-This project implements a simple functional programming language with Hindley Milner type system.
-
-## Examples
-
-Fibonacci:
+This project implements a simple expression based functional programming language with Hindley Milner type system.
 
 ```haskell
 let fib = n ->
 	if n == 0 then 0
 	else if n == 1 then 1
 	else fib (n - 1) + fib (n - 2);
-
-fib 10
 ```
 
-Fibonacci tail recursive:
+## Features
+
+Types:
+
+- Unit: `()`
+- Int: `1 2 3 4 5 6 8 9`
+- Bool: `true` | `false`
+- Lists: `[1, 2, 3, 4]`
+  - Lists can only contains elements of the same type
+- Function: `x -> x`
+
+Functions:
 
 ```haskell
-let fib_helper = a -> b -> n ->
-	if n == 0 then a
-	else fib_helper b (a + b) (n - 1);
-
-let fib = n -> fib_helper 0 1 n;
-
-fib 91
+let add = a -> b -> a + b;
 ```
 
-Lists (Church-encoded):
+Application:
 
 ```haskell
-let nil = f -> z -> z;
-let cons = h -> t -> f -> z -> f h (t f z);
-let fold = f -> z -> list -> list f z;
+add 1 2 // 3
+```
 
-let range = start -> end ->
-    if start > end then nil
-    else cons start (range (start + 1) end);
+Currying:
 
-let length = list ->
-	fold (x -> acc -> acc + 1) 0 list;
+```haskell
+let add_10 = add 10;
+add_10 1 // 11
+```
 
-let sum = list ->
-	fold add 0 list;
+Control flow:
 
-let map = f -> list ->
-	fold (h -> t -> cons (f h) t) nil list;
+```haskell
+let answer = x ->
+	if x == 11 then x + 31
+	else if x == 31 then x + 11
+	else x;
+```
 
-let filter = pred -> list ->
-	fold (h -> t -> if pred h then cons h t else t) nil list;
+Recursion:
+
+```haskell
+let sum = n ->
+	if n == 0 then 0
+	else n + sum (n - 1);
+```
+
+Lists:
+
+```haskell
+let numbers = [1, 2, 3, 4];
 ```
 
 ```haskell
-sum (map (x -> x * 2) (range 1 3)) // 12
+head numbers // 1
 ```
 
 ```haskell
-length (filter (x -> x % 2 == 0) (cons 3 (cons 1 (cons 4 nil)))) // 1
+tail numbers // [2, 3, 4]
 ```
+
+> [!NOTE] `head` and `tail` are builtin functions.
+
+List construct operator:
+
+```haskell
+1 : 2 : 3 : [1, 2, 3] // [1, 2]
+```
+
+```haskell
+0 : [1, 2, 3] // [0, 1, 2, 3]
+```
+
+List concat operator:
+
+```haskell
+[1, 2, 3] ++ [4, 5, 6] // [1, 2, 3, 4, 5, 6]
+```
+
+List examples:
+
+```haskell
+range 1 10 // [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+```
+
+```haskell
+foldl (acc -> x -> acc + x) 0 (range 1 100) // 5050
+```
+
+```haskell
+let product = foldl (acc -> x -> acc * x) 1;
+let factorial = n -> product (range 1 n);
+
+factorial 10 // 3628800
+```
+
+```haskell
+map (x -> x * 2) (range 1 5) // [2, 4, 6, 8, 10]
+```
+
+```haskell
+filter (x -> x % 2 == 0) (range 1 10) // [2, 4, 6, 8, 10]
+```
+
+```haskell
+any (x -> x % 2 == 0) [1, 3, 5, 6, 7] // true
+```
+
+```haskell
+all (x -> x % 2 == 0) [1, 3, 5, 6, 7] // false
+```
+
+> [!NOTE] You can find all of these list functions in `list.void` in the `examples` directory.
 
 ## Type System
 
