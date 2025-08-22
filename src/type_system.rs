@@ -410,9 +410,8 @@ fn infer_expr(ctx: &mut Context, env: &mut Env, expr: NodeId) -> Result<()> {
         Node::Expr(Expr::Lambda { param, body }) => match ctx.get_node(param).clone() {
             Node::Expr(Expr::Identifier(id)) => {
                 let param_ty = env.fresh_var();
-                let mut clousre_env = env.clone();
-                clousre_env.vars.insert(id.clone(), param_ty.clone());
-                infer_expr(ctx, &mut clousre_env, body)?;
+                env.vars.insert(id.clone(), param_ty.clone());
+                infer_expr(ctx, env, body)?;
                 Type::Fun(Box::new(param_ty), Box::new(ctx.get_type(body).clone()))
             }
             _ => unreachable!(),
