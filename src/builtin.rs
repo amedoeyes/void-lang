@@ -37,8 +37,9 @@ pub fn builtins() -> Builtins {
                 Box::new(Type::List(Box::new(ty.clone()))),
                 Box::new(ty.clone()),
             ),
-            eval: |_, arg, span| match arg {
-                Value::List(l) => l.front().cloned().ok_or(eval::Error::EmptyList(span)),
+            eval: |ctx, arg, span| match arg {
+                Value::Cons(h, _) => eval::force(ctx, *h.clone()),
+                Value::Nil => Err(eval::Error::EmptyList(span)),
                 _ => unreachable!(),
             },
         },
@@ -52,12 +53,9 @@ pub fn builtins() -> Builtins {
                 Box::new(Type::List(Box::new(ty.clone()))),
                 Box::new(Type::List(Box::new(ty))),
             ),
-            eval: |_, arg, _| match arg {
-                Value::List(l) => {
-                    let mut l2 = l.clone();
-                    l2.pop_front();
-                    Ok(Value::List(l2))
-                }
+            eval: |_, arg, span| match arg {
+                Value::Cons(_, t) => Ok(*t.clone()),
+                Value::Nil => Err(eval::Error::EmptyList(span)),
                 _ => unreachable!(),
             },
         },

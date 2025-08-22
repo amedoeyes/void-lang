@@ -74,7 +74,7 @@ impl fmt::Display for Type {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Env {
     vars: HashMap<String, Type>,
     counter: usize,
@@ -85,7 +85,7 @@ impl Env {
     fn new() -> Self {
         Env {
             vars: HashMap::new(),
-            counter: 0,
+            counter: 3,
             substitutions: HashMap::new(),
         }
     }
@@ -394,9 +394,9 @@ fn infer_expr(ctx: &mut Context, env: &mut Env, expr: NodeId) -> Result<()> {
         Node::Expr(Expr::Lambda { param, body }) => match ctx.get_node(param).clone() {
             Node::Expr(Expr::Identifier(id)) => {
                 let param_ty = env.fresh_var();
-                env.vars.insert(id.clone(), param_ty.clone());
-                infer_expr(ctx, env, body)?;
-                env.vars.remove(&id);
+                let mut clousre_env = env.clone();
+                clousre_env.vars.insert(id.clone(), param_ty.clone());
+                infer_expr(ctx, &mut clousre_env, body)?;
                 Type::Fun(Box::new(param_ty), Box::new(ctx.get_type(body).clone()))
             }
             _ => unreachable!(),

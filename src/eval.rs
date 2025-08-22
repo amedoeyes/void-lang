@@ -1,8 +1,6 @@
 use core::fmt;
 use std::{
-    collections::{HashMap, LinkedList},
-    result,
-};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, result};
 
 use crate::{
     builtin::Builtins,
@@ -33,6 +31,7 @@ pub enum Value {
     },
     Thunk {
         expr: NodeId,
+        env: Env,
     },
 }
 
@@ -77,16 +76,22 @@ impl<'a> fmt::Display for Display<'a> {
             Value::Function { param, body, .. } => {
                 write!(f, "{} -> {}", param, body.display(self.context))
             }
-            Value::Thunk { expr } => write!(f, "<thunk: {}>", expr.display(self.context)),
+            Value::Thunk { .. } => write!(
+                f,
+                "{}",
+                force(self.context, self.value.clone())
+                    .unwrap()
+                    .display(self.context)
+            ),
         }
     }
 }
 
-pub type Env = HashMap<String, Value>;
+pub type Env = Rc<RefCell<HashMap<String, Value>>>;
 
-fn force(ctx: &Context, env: &mut Env, value: Value) -> Result<Value> {
+pub fn force(ctx: &Context, value: Value) -> Result<Value> {
     match value {
-        Value::Thunk { expr } => eval_expr(ctx, env, expr),
+        Value::Thunk { expr, env } => eval_expr(ctx, &env, expr),
         v => Ok(v),
     }
 }
@@ -118,9 +123,9 @@ pub fn eval_expr(ctx: &Context, env: &mut Env, expr: NodeId) -> Result<Value> {
         }
 
         Node::Expr(Expr::Identifier(name)) => {
-            let val = env.get(name).unwrap().clone();
-            let val = force(ctx, env, val)?;
-            env.insert(name.clone(), val.clone());
+            let val = env.borrow().get(name).cloned().unwrap();
+            let val = force(ctx, val)?;
+            env.borrow_mut().insert(name.clone(), val.clone());
             Ok(val)
         }
 
@@ -216,14 +221,14 @@ pub fn eval_expr(ctx: &Context, env: &mut Env, expr: NodeId) -> Result<Value> {
             let arg_val = eval_expr(ctx, env, *arg)?;
 
             match func_val {
-                Value::Builtin(f) => f(&ctx, &arg_val, *ctx.get_span(expr)),
-                Value::Function {
-                    param,
-                    body,
-                    env: mut closure_env,
-                } => {
+                Value::Builtin(f) => f(ctx, &arg_val, *ctx.get_span(expr)),
+                Value::Function { param, body, env } => {
+                    let mut closure_env = HashMap::new();
+                    for (k, v) in env.borrow().iter() {
+                        closure_env.insert(k.clone(), v.clone());
+                    }
                     closure_env.insert(param, arg_val);
-                    eval_expr(ctx, &mut closure_env, body)
+                    eval_expr(ctx, &Rc::new(RefCell::new(closure_env)), body)
                 }
 
                 _ => unreachable!(),
@@ -235,17 +240,24 @@ pub fn eval_expr(ctx: &Context, env: &mut Env, expr: NodeId) -> Result<Value> {
 }
 
 pub fn evaluate(ctx: &Context, builtins: &Builtins, nodes: &[NodeId]) -> Result<Value> {
-    let mut env = Env::new();
+    let env = Rc::new(RefCell::new(HashMap::new()));
 
     for (name, builtin) in builtins {
-        env.insert(name.clone(), Value::Builtin(builtin.eval));
+        env.borrow_mut()
+            .insert(name.clone(), Value::Builtin(builtin.eval));
     }
 
     for node in nodes {
         match ctx.get_node(*node) {
-            Node::Expr(_) => return eval_expr(ctx, &mut env, *node),
+            Node::Expr(_) => return eval_expr(ctx, &env, *node),
             Node::Bind(name, expr) => {
-                env.insert(name.clone(), Value::Thunk { expr: *expr });
+                env.borrow_mut().insert(
+                    name.clone(),
+                    Value::Thunk {
+                        expr: *expr,
+                        env: env.clone(),
+                    },
+                );
             }
         }
     }
