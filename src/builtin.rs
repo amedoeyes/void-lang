@@ -9,7 +9,7 @@ use crate::{
 
 pub struct Builtin {
     pub ty: Type,
-    pub eval: fn(&Context, &Value, Span) -> eval::Result<Value>,
+    pub eval: fn(&Context, Value, Span) -> eval::Result<Value>,
 }
 
 pub type Builtins = HashMap<String, Builtin>;
@@ -24,7 +24,7 @@ pub fn builtins() -> Builtins {
             ty: Type::Fun(Box::new(ty.clone()), Box::new(ty.clone())),
             eval: |ctx, arg, _| {
                 println!("{}", arg.display(ctx));
-                Ok(arg.clone())
+                Ok(arg)
             },
         },
     );
@@ -38,8 +38,7 @@ pub fn builtins() -> Builtins {
                 Box::new(ty.clone()),
             ),
             eval: |ctx, arg, span| match arg {
-                Value::Cons(h, _) => eval::force(ctx, *h.clone()),
-                Value::Nil => Err(eval::Error::EmptyList(span)),
+                Value::List(l) => eval::force(ctx, l.head().ok_or(eval::Error::EmptyList(span))?),
                 _ => unreachable!(),
             },
         },
@@ -54,8 +53,7 @@ pub fn builtins() -> Builtins {
                 Box::new(Type::List(Box::new(ty))),
             ),
             eval: |_, arg, span| match arg {
-                Value::Cons(_, t) => Ok(*t.clone()),
-                Value::Nil => Err(eval::Error::EmptyList(span)),
+                Value::List(l) => Ok(Value::List(l.tail().ok_or(eval::Error::EmptyList(span))?)),
                 _ => unreachable!(),
             },
         },

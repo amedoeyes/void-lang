@@ -17,13 +17,89 @@ pub enum Error {
 
 pub type Result<T> = result::Result<T, Error>;
 
+#[derive(Debug, Clone, Default)]
+pub enum List {
+    #[default]
+    Nil,
+    Cons(Box<Value>, Box<List>),
+}
+
+impl List {
+    pub fn from(values: Vec<Value>) -> Self {
+        let mut list = List::default();
+        for value in values.into_iter().rev() {
+            list = list.push(value);
+        }
+        list
+    }
+
+    pub fn head(self) -> Option<Value> {
+        match self {
+            List::Nil => None,
+            List::Cons(h, _) => Some(*h),
+        }
+    }
+
+    pub fn tail(self) -> Option<List> {
+        match self {
+            List::Nil => None,
+            List::Cons(_, t) => Some(*t),
+        }
+    }
+
+    pub fn push(self, val: Value) -> Self {
+        match self {
+            List::Nil => Self::Cons(Box::new(val), Box::new(List::Nil)),
+            List::Cons(_, _) => Self::Cons(Box::new(val), Box::new(self)),
+        }
+    }
+
+    pub fn append(self, other: Self) -> Self {
+        match self {
+            List::Nil => other,
+            List::Cons(h, t) => List::Cons(h, Box::new(t.append(other))),
+        }
+    }
+}
+
+impl PartialEq for List {
+    fn eq(&self, other: &Self) -> bool {
+        let mut a = self;
+        let mut b = other;
+        loop {
+            match (a, b) {
+                (Self::Nil, Self::Cons(_, _)) => return false,
+                (Self::Cons(_, _), Self::Nil) => return false,
+                (Self::Nil, Self::Nil) => return true,
+                (Self::Cons(h1, t1), Self::Cons(h2, t2)) => {
+                    match (h1.as_ref(), h2.as_ref()) {
+                        (Value::Integer(x), Value::Integer(y)) => {
+                            if x != y {
+                                return false;
+                            }
+                        }
+                        (Value::Boolean(x), Value::Boolean(y)) => {
+                            if x != y {
+                                return false;
+                            }
+                        }
+                        _ => unreachable!(),
+                    };
+                    a = t1.as_ref();
+                    b = t2.as_ref();
+                }
+            };
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum Value {
     Unit,
     Integer(i64),
     Boolean(bool),
-    List(LinkedList<Value>),
-    Builtin(fn(&Context, &Value, Span) -> Result<Value>),
+    List(List),
+    Builtin(fn(&Context, Value, Span) -> Result<Value>),
     Function {
         param: String,
         body: NodeId,
@@ -58,18 +134,18 @@ impl<'a> fmt::Display for Display<'a> {
             Value::Unit => write!(f, "()"),
             Value::Integer(n) => write!(f, "{n}"),
             Value::Boolean(b) => write!(f, "{b}"),
-            Value::List(l) => {
-                write!(f, "[")?;
-                write!(
-                    f,
-                    "{}",
-                    l.iter()
-                        .map(|e| e.display(self.context).to_string())
-                        .collect::<Vec<String>>()
-                        .join(", ")
-                )?;
-                write!(f, "]")
-            }
+            Value::List(l) => match l {
+                List::Nil => write!(f, "[]"),
+                List::Cons(h, t) => {
+                    write!(f, "[{}", h.display(self.context))?;
+                    let mut tail = t.as_ref();
+                    while let List::Cons(h, t) = tail {
+                        write!(f, ", {}", h.display(self.context))?;
+                        tail = t.as_ref();
+                    }
+                    write!(f, "]")
+                }
+            },
             Value::Builtin(_) => {
                 write!(f, "builtin")
             }
@@ -96,7 +172,7 @@ pub fn force(ctx: &Context, value: Value) -> Result<Value> {
     }
 }
 
-pub fn eval_expr(ctx: &Context, env: &mut Env, expr: NodeId) -> Result<Value> {
+pub fn eval_expr(ctx: &Context, env: &Env, expr: NodeId) -> Result<Value> {
     match ctx.get_node(expr) {
         Node::Expr(Expr::Unit) => Ok(Value::Unit),
 
@@ -104,22 +180,28 @@ pub fn eval_expr(ctx: &Context, env: &mut Env, expr: NodeId) -> Result<Value> {
 
         Node::Expr(Expr::Integer(n)) => Ok(Value::Integer(*n)),
 
-        Node::Expr(Expr::Nil) => Ok(Value::List(LinkedList::new())),
+        Node::Expr(Expr::Nil) => Ok(Value::List(List::Nil)),
 
         Node::Expr(Expr::Cons { head, tail }) => {
-            let mut list = LinkedList::new();
+            let mut elems = Vec::new();
+            let mut cur_head = *head;
+            let mut cur_tail = *tail;
 
-            let head_val = eval_expr(ctx, env, *head)?;
-            list.push_back(head_val);
-
-            let mut tail = *tail;
-            while let Node::Expr(Expr::Cons { head, tail: t }) = ctx.get_node(tail).clone() {
-                let next_head_val = eval_expr(ctx, env, head)?;
-                list.push_back(next_head_val);
-                tail = t;
+            loop {
+                elems.push(Value::Thunk {
+                    expr: cur_head,
+                    env: env.clone(),
+                });
+                match ctx.get_node(cur_tail) {
+                    Node::Expr(Expr::Cons { head, tail }) => {
+                        cur_head = *head;
+                        cur_tail = *tail;
+                    }
+                    _ => break,
+                }
             }
 
-            Ok(Value::List(list))
+            Ok(Value::List(List::from(elems)))
         }
 
         Node::Expr(Expr::Identifier(name)) => {
@@ -221,7 +303,7 @@ pub fn eval_expr(ctx: &Context, env: &mut Env, expr: NodeId) -> Result<Value> {
             let arg_val = eval_expr(ctx, env, *arg)?;
 
             match func_val {
-                Value::Builtin(f) => f(ctx, &arg_val, *ctx.get_span(expr)),
+                Value::Builtin(f) => f(ctx, arg_val, *ctx.get_span(expr)),
                 Value::Function { param, body, env } => {
                     let mut closure_env = HashMap::new();
                     for (k, v) in env.borrow().iter() {
