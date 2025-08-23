@@ -168,7 +168,14 @@ pub type Env = Rc<RefCell<FxHashMap<String, Value>>>;
 
 pub fn force(ctx: &Context, value: Value) -> Result<Value> {
     match value {
-        Value::Thunk { expr, env } => eval_expr_stack(ctx, &env, expr),
+        Value::Thunk { expr, env } => eval_expr_stack(
+            ctx,
+            EvalFrame {
+                env: env.clone(),
+                expr,
+                state: EvalState::Start,
+            },
+        ),
         v => Ok(v),
     }
 }
@@ -180,7 +187,7 @@ enum EvalState {
     Infix(InfixOp),
     Cond,
     Func,
-    App(Value),
+    App,
 }
 
 #[derive(Clone)]
@@ -190,15 +197,9 @@ struct EvalFrame {
     state: EvalState,
 }
 
-pub fn eval_expr_stack(ctx: &Context, env: &Env, expr: NodeId) -> Result<Value> {
-    let mut frame_stack = VecDeque::new();
+fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<Value> {
+    let mut frame_stack = VecDeque::from([frame]);
     let mut result_stack = VecDeque::new();
-
-    frame_stack.push_back(EvalFrame {
-        env: env.clone(),
-        expr,
-        state: EvalState::Start,
-    });
 
     while let Some(frame) = frame_stack.pop_back() {
         match frame.state {
@@ -241,14 +242,22 @@ pub fn eval_expr_stack(ctx: &Context, env: &Env, expr: NodeId) -> Result<Value> 
                     result_stack.push_back(Value::List(List::from(elems)));
                 }
 
-                Node::Expr(Expr::Lambda { param, body }) => match ctx.get_node(param) {
-                    Node::Expr(Expr::Identifier(id)) => result_stack.push_back(Value::Function {
-                        param: id.clone(),
-                        body,
-                        env: frame.env.clone(),
-                    }),
-                    _ => unreachable!(),
-                },
+                Node::Expr(Expr::Lambda { param, body }) => {
+                    let mut closure_env = FxHashMap::default();
+                    for (k, v) in frame.env.borrow().iter() {
+                        closure_env.insert(k.clone(), v.clone());
+                    }
+                    match ctx.get_node(param) {
+                        Node::Expr(Expr::Identifier(id)) => {
+                            result_stack.push_back(Value::Function {
+                                param: id.clone(),
+                                body,
+                                env: Rc::new(RefCell::new(closure_env)),
+                            })
+                        }
+                        _ => unreachable!(),
+                    }
+                }
 
                 Node::Expr(Expr::Identifier(name)) => {
                     let val = frame.env.borrow().get(&name).cloned().unwrap();
@@ -342,7 +351,7 @@ pub fn eval_expr_stack(ctx: &Context, env: &Env, expr: NodeId) -> Result<Value> 
                         InfixOp::Div => a
                             .checked_div(b)
                             .map(Value::Integer)
-                            .ok_or(Error::DivisionByZero(*ctx.get_span(expr)))?,
+                            .ok_or(Error::DivisionByZero(*ctx.get_span(frame.expr)))?,
                         InfixOp::Mod => Value::Integer(a % b),
                         InfixOp::Eq => Value::Boolean(a == b),
                         InfixOp::Neq => Value::Boolean(a != b),
@@ -412,11 +421,9 @@ pub fn eval_expr_stack(ctx: &Context, env: &Env, expr: NodeId) -> Result<Value> 
             }
 
             EvalState::Func => {
-                let func = result_stack.pop_back().unwrap();
-
                 if let Node::Expr(Expr::Application { arg, .. }) = ctx.get_node(frame.expr) {
                     frame_stack.push_back(EvalFrame {
-                        state: EvalState::App(func),
+                        state: EvalState::App,
                         ..frame.clone()
                     });
 
@@ -427,23 +434,20 @@ pub fn eval_expr_stack(ctx: &Context, env: &Env, expr: NodeId) -> Result<Value> 
                     });
                 }
             }
-            EvalState::App(func) => {
+
+            EvalState::App => {
                 let arg = result_stack.pop_back().unwrap();
+                let func = result_stack.pop_back().unwrap();
 
                 match func {
                     Value::Builtin(f) => {
-                        let result = f(ctx, arg, *ctx.get_span(frame.expr))?;
-                        result_stack.push_back(result);
+                        result_stack.push_back(f(ctx, arg, *ctx.get_span(frame.expr))?);
                     }
-                    Value::Function { param, body, env } => {
-                        let mut closure_env = FxHashMap::default();
-                        for (k, v) in env.borrow().iter() {
-                            closure_env.insert(k.clone(), v.clone());
-                        }
-                        closure_env.insert(param, arg);
 
+                    Value::Function { param, body, env } => {
+                        env.borrow_mut().insert(param, arg);
                         frame_stack.push_back(EvalFrame {
-                            env: Rc::new(RefCell::new(closure_env)),
+                            env,
                             expr: body,
                             state: EvalState::Start,
                         });
@@ -468,13 +472,34 @@ pub fn evaluate(ctx: &Context, builtins: &Builtins, nodes: &[NodeId]) -> Result<
 
     for node in nodes {
         match ctx.get_node(*node) {
-            Node::Expr(_) => return eval_expr_stack(ctx, &env, *node),
+            Node::Expr(_) => {
+                return eval_expr_stack(
+                    ctx,
+                    EvalFrame {
+                        env: env.clone(),
+                        expr: *node,
+                        state: EvalState::Start,
+                    },
+                );
+            }
             Node::Bind(name, expr) => {
+                let mut closure_env = FxHashMap::default();
+                for (k, v) in env.borrow().iter() {
+                    closure_env.insert(k.clone(), v.clone());
+                }
+                let closure_env = Rc::new(RefCell::new(closure_env));
+                closure_env.borrow_mut().insert(
+                    name.clone(),
+                    Value::Thunk {
+                        expr: *expr,
+                        env: closure_env.clone(),
+                    },
+                );
                 env.borrow_mut().insert(
                     name.clone(),
                     Value::Thunk {
                         expr: *expr,
-                        env: env.clone(),
+                        env: closure_env,
                     },
                 );
             }
