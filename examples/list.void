@@ -1,7 +1,11 @@
+let range_helper = acc -> current -> from ->
+	if current < from then acc
+	else range_helper (current : acc) (current - 1) from;
+
 // Construct a list from range
 let range = from -> to ->
 	if from > to then []
-	else from : range (from + 1) to;
+	else range_helper [] to from;
 
 // Fold left
 let foldl = f -> acc -> l ->
@@ -63,3 +67,25 @@ let drop = n -> l ->
 	if n <= 0 then l
 	else if l == [] then []
 	else drop (n - 1) (tail l);
+
+// Take while predicate holds
+let take_while = pred -> l ->
+	if l == [] || !(pred (head l)) then []
+	else head l : take_while pred (tail l);
+
+// Drop while predicate holds
+let drop_while = pred -> l ->
+	if l == [] || !(pred (head l)) then l
+	else drop_while pred (tail l);
+
+// Sum of a list
+let sum = l ->
+	foldl (acc -> x -> acc + x) 0 l;
+
+// Product of a list
+let product = l ->
+	foldl (acc -> x -> acc * x) 1 l;
+
+// Avarage of a list
+let avg = l ->
+	(sum l) / (length l);

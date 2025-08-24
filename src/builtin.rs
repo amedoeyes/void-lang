@@ -1,3 +1,5 @@
+use std::{cell::RefCell, rc::Rc};
+
 use fxhash::FxHashMap;
 
 use crate::{
@@ -7,9 +9,11 @@ use crate::{
     type_system::Type,
 };
 
+pub type BuiltinEvalFn = fn(&Context, Rc<RefCell<Value>>, Span) -> eval::Result<Rc<RefCell<Value>>>;
+
 pub struct Builtin {
     pub ty: Type,
-    pub eval: fn(&Context, Value, Span) -> eval::Result<Value>,
+    pub eval: BuiltinEvalFn,
 }
 
 pub type Builtins = FxHashMap<String, Builtin>;
@@ -23,7 +27,7 @@ pub fn builtins() -> Builtins {
         Builtin {
             ty: Type::Fun(Box::new(ty.clone()), Box::new(ty.clone())),
             eval: |ctx, arg, _| {
-                println!("{}", arg.display(ctx));
+                println!("{}", arg.borrow().display(ctx));
                 Ok(arg)
             },
         },
@@ -37,9 +41,14 @@ pub fn builtins() -> Builtins {
                 Box::new(Type::List(Box::new(ty.clone()))),
                 Box::new(ty.clone()),
             ),
-            eval: |ctx, arg, span| match arg {
-                Value::List(l) => eval::force(ctx, l.head().ok_or(eval::Error::EmptyList(span))?),
-                _ => unreachable!(),
+            eval: |ctx, arg, span| {
+                let arg = arg.borrow();
+                match &*arg {
+                    Value::List(l) => Ok(Rc::new(RefCell::new(
+                        l.head().ok_or(eval::Error::EmptyList(span))?.force(ctx)?,
+                    ))),
+                    _ => unreachable!(),
+                }
             },
         },
     );
@@ -52,9 +61,14 @@ pub fn builtins() -> Builtins {
                 Box::new(Type::List(Box::new(ty.clone()))),
                 Box::new(Type::List(Box::new(ty))),
             ),
-            eval: |_, arg, span| match arg {
-                Value::List(l) => Ok(Value::List(l.tail().ok_or(eval::Error::EmptyList(span))?)),
-                _ => unreachable!(),
+            eval: |_, arg, span| {
+                let arg = arg.borrow();
+                match &*arg {
+                    Value::List(l) => Ok(Rc::new(RefCell::new(Value::List(
+                        l.tail().ok_or(eval::Error::EmptyList(span))?,
+                    )))),
+                    _ => unreachable!(),
+                }
             },
         },
     );

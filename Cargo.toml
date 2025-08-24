@@ -5,5 +5,7 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4", features = ["cargo"] }
-fxhash = "0.2.1"
-rustyline = "16.0.0"
+fxhash = "0.2"
+itertools = "0.14"
+rustyline = "16"
+string_cache = "0.8"
