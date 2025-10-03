@@ -47,7 +47,10 @@ fn run() -> Result<()> {
                 println!(
                     "{}:{}:{}: {:?}",
                     file, span.start.line, span.start.column, token
-                )
+                );
+                if token == Token::Invalid {
+                    break;
+                }
             }
         }
 
