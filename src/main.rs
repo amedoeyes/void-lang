@@ -160,13 +160,6 @@ fn run() -> Result<()> {
                     Ok(nodes) => nodes,
                     Err(err) => {
                         match err {
-                            SyntaxError::UnexpectedToken(expect, (token, span)) => {
-                                println!(
-                                    "{}:{}: expected '{expect}' but got '{token}'",
-                                    span.start.line, span.start.column
-                                );
-                            }
-
                             SyntaxError::InvalidToken(span) => {
                                 println!(
                                     "{}:{}: invalid token",
@@ -174,11 +167,41 @@ fn run() -> Result<()> {
                                 );
                             }
 
-                            SyntaxError::UnterminatedChar(span) => todo!(),
-                            SyntaxError::UnterminatedString(span) => todo!(),
-                            SyntaxError::EmptyChar(span) => todo!(),
-                            SyntaxError::InvalidChar(span) => todo!(),
-                            SyntaxError::InvalidEscapeChar(span) => todo!(),
+                            SyntaxError::UnterminatedChar(span) => {
+                                println!(
+                                    "{}:{}: unterminated char",
+                                    span.start.line, span.start.column
+                                )
+                            }
+
+                            SyntaxError::UnterminatedString(span) => {
+                                println!(
+                                    "{}:{}: unterminated string",
+                                    span.start.line, span.start.column
+                                )
+                            }
+
+                            SyntaxError::EmptyChar(span) => {
+                                println!("{}:{}: empty char", span.start.line, span.start.column)
+                            }
+
+                            SyntaxError::InvalidChar(span) => {
+                                println!("{}:{}: invalid char", span.start.line, span.start.column)
+                            }
+
+                            SyntaxError::InvalidEscapeChar(span) => {
+                                println!(
+                                    "{}:{}: invalid escape char",
+                                    span.start.line, span.start.column
+                                )
+                            }
+
+                            SyntaxError::UnexpectedToken(expect, (token, span)) => {
+                                println!(
+                                    "{}:{}: expected '{expect}' but got '{token}'",
+                                    span.start.line, span.start.column
+                                );
+                            }
                         }
                         continue;
                     }
