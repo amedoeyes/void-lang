@@ -28,10 +28,56 @@ pub enum Type {
     Var(usize),
     List(Box<Type>),
     Fun(Box<Type>, Box<Type>),
-    Poly(Vec<usize>, Box<Type>),
+    Poly(FxHashSet<usize>, Box<Type>),
 }
 
 impl Type {
+    fn type_vars(&self) -> FxHashSet<usize> {
+        let mut vars = FxHashSet::default();
+        self.collect_type_vars(&mut vars);
+        vars
+    }
+
+    fn collect_type_vars(&self, vars: &mut FxHashSet<usize>) {
+        match self {
+            Type::Var(n) => {
+                vars.insert(*n);
+            }
+            Type::List(ty) => ty.collect_type_vars(vars),
+            Type::Fun(l, r) => {
+                l.collect_type_vars(vars);
+                r.collect_type_vars(vars);
+            }
+            Type::Poly(_, body) => body.collect_type_vars(vars),
+            _ => {}
+        }
+    }
+
+    fn instantiate(self) -> Type {
+        match self {
+            Type::Poly(vars, body) => {
+                let mut substitutions = FxHashMap::default();
+                for (i, var) in vars.iter().enumerate() {
+                    substitutions.insert(*var, Type::Var(i));
+                }
+                Type::substitute_with(*body, &substitutions)
+            }
+            _ => self,
+        }
+    }
+
+    fn substitute_with(ty: Type, substitutions: &FxHashMap<usize, Type>) -> Type {
+        match ty {
+            Type::Var(n) => substitutions.get(&n).cloned().unwrap_or(ty),
+            Type::List(e) => Type::List(Box::new(Type::substitute_with(*e, substitutions))),
+            Type::Fun(l, r) => Type::Fun(
+                Box::new(Type::substitute_with(*l, substitutions)),
+                Box::new(Type::substitute_with(*r, substitutions)),
+            ),
+            _ => ty,
+        }
+    }
+
     fn fmt(&self, f: &mut fmt::Formatter, mapping: &FxHashMap<usize, usize>) -> fmt::Result {
         match self {
             Type::Unit => write!(f, "Unit"),
@@ -51,7 +97,14 @@ impl Type {
             }
 
             Type::Fun(l, r) => {
-                l.fmt(f, mapping)?;
+                match l.as_ref() {
+                    Type::Fun(_, _) => {
+                        write!(f, "(")?;
+                        l.fmt(f, mapping)?;
+                        write!(f, ")")?;
+                    }
+                    _ => l.fmt(f, mapping)?,
+                }
                 write!(f, " -> ")?;
                 r.fmt(f, mapping)
             }
@@ -61,12 +114,21 @@ impl Type {
                     f,
                     "forall {} . ",
                     vars.iter()
+                        .sorted()
                         .enumerate()
                         .map(|(i, _)| format!("t{i}"))
                         .collect::<Vec<String>>()
                         .join(" ")
                 )?;
-                body.fmt(f, &vars.iter().enumerate().map(|(i, &v)| (v, i)).collect())
+                body.fmt(
+                    f,
+                    &vars
+                        .iter()
+                        .sorted()
+                        .enumerate()
+                        .map(|(i, &v)| (v, i))
+                        .collect(),
+                )
             }
         }
     }
@@ -101,45 +163,11 @@ impl Env {
     }
 
     fn generalize(&self, ty: Type) -> Type {
-        let mut free_vars = Vec::new();
-        Self::collect_free_vars(&ty, &mut free_vars, &mut Vec::new());
-
-        free_vars.retain(|v| !self.substitutions.contains_key(v));
-
-        if free_vars.is_empty() {
-            return ty;
-        }
-
-        free_vars.sort();
-        free_vars.dedup();
-
-        Type::Poly(free_vars, Box::new(ty))
-    }
-
-    fn collect_free_vars(ty: &Type, free_vars: &mut Vec<usize>, bound_vars: &mut Vec<usize>) {
-        match &ty {
-            Type::Var(n) => {
-                if !bound_vars.contains(n) {
-                    free_vars.push(*n);
-                }
-            }
-
-            Type::List(e) => {
-                Self::collect_free_vars(e, free_vars, bound_vars);
-            }
-
-            Type::Fun(l, r) => {
-                Self::collect_free_vars(l, free_vars, bound_vars);
-                Self::collect_free_vars(r, free_vars, bound_vars);
-            }
-
-            Type::Poly(vars, body) => {
-                let mut new_bound = bound_vars.clone();
-                new_bound.extend(vars);
-                Self::collect_free_vars(body, free_vars, &mut new_bound);
-            }
-
-            _ => {}
+        let type_vars = ty.type_vars();
+        if type_vars.is_empty() {
+            ty
+        } else {
+            Type::Poly(type_vars, Box::new(ty))
         }
     }
 
@@ -150,53 +178,32 @@ impl Env {
 
     fn instantiate_helper(&mut self, ty: Type, substitutions: &mut FxHashMap<usize, Type>) -> Type {
         match ty {
-            Type::Var(n) => substitutions.get(&n).cloned().unwrap_or(ty),
-
-            Type::List(e) => Type::List(Box::new(self.instantiate_helper(*e, substitutions))),
-
-            Type::Fun(l, r) => Type::Fun(
-                Box::new(self.instantiate_helper(*l, substitutions)),
-                Box::new(self.instantiate_helper(*r, substitutions)),
-            ),
-
             Type::Poly(vars, body) => {
                 for var in vars {
                     substitutions.insert(var, self.fresh_var());
                 }
                 self.instantiate_helper(*body, substitutions)
             }
-
+            Type::Var(n) => substitutions.get(&n).cloned().unwrap_or(ty),
+            Type::List(e) => Type::List(Box::new(self.instantiate_helper(*e, substitutions))),
+            Type::Fun(l, r) => Type::Fun(
+                Box::new(self.instantiate_helper(*l, substitutions)),
+                Box::new(self.instantiate_helper(*r, substitutions)),
+            ),
             _ => ty,
         }
     }
 
     fn substitute(&self, ty: Type) -> Type {
         match ty {
-            Type::Var(n) => {
-                if let Some(sub) = self.substitutions.get(&n) {
-                    self.substitute(sub.clone())
-                } else {
-                    ty
-                }
-            }
-
+            Type::Var(n) => self
+                .substitutions
+                .get(&n)
+                .map(|ty| self.substitute(ty.clone()))
+                .unwrap_or(ty),
             Type::List(e) => Type::List(Box::new(self.substitute(*e))),
-
             Type::Fun(l, r) => {
                 Type::Fun(Box::new(self.substitute(*l)), Box::new(self.substitute(*r)))
-            }
-
-            Type::Poly(vars, body) => {
-                let mut new_subs = self.substitutions.clone();
-                for var in &vars {
-                    new_subs.remove(var);
-                }
-                let new_env = Env {
-                    vars: self.vars.clone(),
-                    counter: self.counter,
-                    substitutions: new_subs,
-                };
-                Type::Poly(vars, Box::new(new_env.substitute(*body)))
             }
             _ => ty,
         }
@@ -302,7 +309,6 @@ fn infer_expr(ctx: &mut Context, env: &mut Env, expr: NodeId) -> Result<()> {
                 .cloned()
                 .ok_or(Error::UnknownIdentifier(name, *ctx.get_span(expr)))?,
         ),
-
         Node::Expr(Expr::Condition { cond, then, alt }) => {
             infer_expr(ctx, env, cond)?;
             let cond_ty = ctx.get_type(cond);
@@ -368,13 +374,10 @@ fn infer_expr(ctx: &mut Context, env: &mut Env, expr: NodeId) -> Result<()> {
 
                 InfixOp::Lt | InfixOp::Gt | InfixOp::Lte | InfixOp::Gte => {
                     env.unify(
-                        (Type::Int, *ctx.get_span(rhs)),
                         (lhs_ty.clone(), *ctx.get_span(lhs)),
-                    )?;
-                    env.unify(
-                        (Type::Int, *ctx.get_span(lhs)),
                         (rhs_ty.clone(), *ctx.get_span(rhs)),
                     )?;
+
                     Type::Bool
                 }
 
