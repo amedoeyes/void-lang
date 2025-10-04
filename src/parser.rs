@@ -291,10 +291,12 @@ impl<'a> Parser<'a> {
             self.token,
             Token::Boolean(_)
                 | Token::BracketLeft
+                | Token::Char(_)
                 | Token::Identifier(_)
                 | Token::If
                 | Token::Integer(_)
                 | Token::ParenLeft
+                | Token::String(_)
         ) {
             let arg = self.parse_atom()?;
             let func = expr;
