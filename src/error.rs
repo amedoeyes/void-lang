@@ -1,16 +1,29 @@
 use core::fmt;
 use std::io;
 
-use crate::{eval, lexer::Token, parser, span::Span, type_system};
+use crate::{eval, lexer::Token, span::Span, type_system};
+
+#[derive(Debug)]
+pub enum SyntaxError {
+    InvalidToken(Span),
+    UnterminatedChar(Span),
+    UnterminatedString(Span),
+    EmptyChar(Span),
+    InvalidChar(Span),
+    InvalidEscapeChar(Span),
+    UnexpectedToken(String, (Token, Span)),
+}
 
 #[derive(Debug)]
 pub enum Error {
     Clap(clap::Error),
     Io(io::Error),
-    Parser(String, String, Box<parser::Error>),
+    Syntax(String, String, Box<SyntaxError>),
     Type(String, String, Box<type_system::Error>),
     Eval(String, String, eval::Error),
 }
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 impl From<std::io::Error> for Error {
     fn from(value: std::io::Error) -> Self {
@@ -21,6 +34,93 @@ impl From<std::io::Error> for Error {
 impl From<clap::Error> for Error {
     fn from(value: clap::Error) -> Self {
         Error::Clap(value)
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Error::Clap(err) => err.fmt(f),
+            Error::Io(err) => err.fmt(f),
+
+            Error::Syntax(filename, source, err) => match err.as_ref() {
+                SyntaxError::InvalidToken(span) => {
+                    write_message_and_lines(f, filename, source, *span, "invalid token")
+                }
+
+                SyntaxError::UnexpectedToken(expected, (token, span)) => {
+                    write_message(
+                        f,
+                        filename,
+                        *span,
+                        &format!("expected '{}' but got '{}'", expected, *token),
+                    )?;
+                    if *token != Token::Eof {
+                        write_lines(f, source, *span)?;
+                    }
+                    Ok(())
+                }
+
+                SyntaxError::UnterminatedChar(span) => {
+                    write_message_and_lines(f, filename, source, *span, "unterminated char")
+                }
+
+                SyntaxError::UnterminatedString(span) => {
+                    write_message_and_lines(f, filename, source, *span, "unterminated string")
+                }
+
+                SyntaxError::EmptyChar(span) => {
+                    write_message_and_lines(f, filename, source, *span, "empty char")
+                }
+
+                SyntaxError::InvalidChar(span) => {
+                    write_message_and_lines(f, filename, source, *span, "invalid char")
+                }
+
+                SyntaxError::InvalidEscapeChar(span) => {
+                    write_message_and_lines(f, filename, source, *span, "invalid escape char")
+                }
+            },
+
+            Error::Type(filename, source, err) => match err.as_ref() {
+                type_system::Error::TypeMismatch((t1, s1), (t2, s2)) => {
+                    write_message_and_lines(
+                        f,
+                        filename,
+                        source,
+                        *s1,
+                        &format!("type mismatch: expected '{t1}'"),
+                    )?;
+                    write_message_and_lines(f, filename, source, *s2, &format!("found '{t2}'"))
+                }
+
+                type_system::Error::InfiniteType(ty, span) => write_message_and_lines(
+                    f,
+                    filename,
+                    source,
+                    *span,
+                    &format!("infinite type '{ty}'"),
+                ),
+
+                type_system::Error::UnknownIdentifier(id, span) => write_message_and_lines(
+                    f,
+                    filename,
+                    source,
+                    *span,
+                    &format!("unknown identifier '{id}'"),
+                ),
+            },
+
+            Error::Eval(filename, source, err) => match err {
+                eval::Error::DivisionByZero(span) => {
+                    write_message_and_lines(f, filename, source, *span, "division by zero")
+                }
+
+                eval::Error::EmptyList(span) => {
+                    write_message_and_lines(f, filename, source, *span, "list is empty")
+                }
+            },
+        }
     }
 }
 
@@ -70,59 +170,13 @@ fn write_lines(f: &mut fmt::Formatter, source: &str, span: Span) -> fmt::Result 
     Ok(())
 }
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            Error::Clap(err) => err.fmt(f),
-            Error::Io(err) => err.fmt(f),
-
-            Error::Parser(filename, source, err) => match err.as_ref() {
-                parser::Error::UnexpectedToken(expected, (token, span)) => {
-                    write_message(
-                        f,
-                        filename,
-                        *span,
-                        &format!("expected '{}' but got '{}'", expected, *token),
-                    )?;
-                    if *token != Token::Eof {
-                        write_lines(f, source, *span)?;
-                    }
-                    Ok(())
-                }
-            },
-
-            Error::Type(filename, source, err) => match err.as_ref() {
-                type_system::Error::TypeMismatch((t1, s1), (t2, s2)) => {
-                    write_message(f, filename, *s1, &format!("type mismatch: expected '{t1}'"))?;
-                    write_lines(f, source, *s1)?;
-                    write_message(f, filename, *s2, &format!("found '{t2}'"))?;
-                    write_lines(f, source, *s2)
-                }
-
-                type_system::Error::InfiniteType(ty, span) => {
-                    write_message(f, filename, *span, &format!("infinite type '{ty}'"))?;
-                    write_lines(f, source, *span)
-                }
-
-                type_system::Error::UnknownIdentifier(id, span) => {
-                    write_message(f, filename, *span, &format!("unknown identifier '{id}'"))?;
-                    write_lines(f, source, *span)
-                }
-            },
-
-            Error::Eval(filename, source, err) => match err {
-                eval::Error::DivisionByZero(span) => {
-                    write_message(f, filename, *span, "division by zero")?;
-                    write_lines(f, source, *span)
-                }
-
-                eval::Error::EmptyList(span) => {
-                    write_message(f, filename, *span, "list is empty")?;
-                    write_lines(f, source, *span)
-                }
-            },
-        }
-    }
+fn write_message_and_lines(
+    f: &mut fmt::Formatter,
+    filename: &str,
+    source: &str,
+    span: Span,
+    message: &str,
+) -> fmt::Result {
+    write_message(f, filename, span, message)?;
+    write_lines(f, source, span)
 }
-
-pub type Result<T> = std::result::Result<T, Error>;

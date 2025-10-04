@@ -15,7 +15,7 @@ use std::fs;
 use crate::{
     builtin::builtins,
     context::{Context, Node},
-    error::{Error, Result},
+    error::{Error, Result, SyntaxError},
     eval::evaluate,
     lexer::{Lexer, Token},
     parser::parse,
@@ -41,15 +41,18 @@ fn run() -> Result<()> {
             let contents = fs::read_to_string(file)?;
 
             let mut lexer = Lexer::new(&contents);
-            while let (token, span) = lexer.next_token()
-                && token != Token::Eof
-            {
-                println!(
-                    "{}:{}:{}: {:?}",
-                    file, span.start.line, span.start.column, token
-                );
-                if token == Token::Invalid {
-                    break;
+            loop {
+                match lexer.next_token() {
+                    Ok((token, span)) => {
+                        if token == Token::Eof {
+                            break;
+                        };
+                        println!(
+                            "{}:{}:{}: {:?}",
+                            file, span.start.line, span.end.column, token
+                        );
+                    }
+                    Err(err) => return Err(Error::Syntax(file.clone(), contents, Box::new(err))),
                 }
             }
         }
@@ -61,7 +64,7 @@ fn run() -> Result<()> {
             let mut ctx = Context::new();
             let nodes = match parse(&mut ctx, &contents) {
                 Ok(nodes) => nodes,
-                Err(err) => return Err(Error::Parser(file.clone(), contents, Box::new(err))),
+                Err(err) => return Err(Error::Syntax(file.clone(), contents, Box::new(err))),
             };
 
             for node in nodes {
@@ -76,7 +79,7 @@ fn run() -> Result<()> {
             let mut ctx = Context::new();
             let nodes = match parse(&mut ctx, &contents) {
                 Ok(nodes) => nodes,
-                Err(err) => return Err(Error::Parser(file.clone(), contents, Box::new(err))),
+                Err(err) => return Err(Error::Syntax(file.clone(), contents, Box::new(err))),
             };
 
             let builtins = builtins();
@@ -100,7 +103,7 @@ fn run() -> Result<()> {
             let mut ctx = Context::new();
             let nodes = match parse(&mut ctx, &contents) {
                 Ok(nodes) => nodes,
-                Err(err) => return Err(Error::Parser(file.clone(), contents, Box::new(err))),
+                Err(err) => return Err(Error::Syntax(file.clone(), contents, Box::new(err))),
             };
 
             let builtins = builtins();
@@ -127,7 +130,7 @@ fn run() -> Result<()> {
                 let contents = fs::read_to_string(file)?;
                 nodes.extend(match parse(&mut ctx, &contents) {
                     Ok(nodes) => nodes,
-                    Err(err) => return Err(Error::Parser(file.clone(), contents, Box::new(err))),
+                    Err(err) => return Err(Error::Syntax(file.clone(), contents, Box::new(err))),
                 });
                 if let Err(err) = infer(&mut ctx, &builtins, &nodes) {
                     return Err(Error::Type(file.clone(), contents, Box::new(err)));
@@ -157,9 +160,25 @@ fn run() -> Result<()> {
                     Ok(nodes) => nodes,
                     Err(err) => {
                         match err {
-                            parser::Error::UnexpectedToken(ref expect, (token, _)) => {
-                                println!("expected '{expect}' but got '{token}'")
+                            SyntaxError::UnexpectedToken(expect, (token, span)) => {
+                                println!(
+                                    "{}:{}: expected '{expect}' but got '{token}'",
+                                    span.start.line, span.start.column
+                                );
                             }
+
+                            SyntaxError::InvalidToken(span) => {
+                                println!(
+                                    "{}:{}: invalid token",
+                                    span.start.line, span.start.column
+                                );
+                            }
+
+                            SyntaxError::UnterminatedChar(span) => todo!(),
+                            SyntaxError::UnterminatedString(span) => todo!(),
+                            SyntaxError::EmptyChar(span) => todo!(),
+                            SyntaxError::InvalidChar(span) => todo!(),
+                            SyntaxError::InvalidEscapeChar(span) => todo!(),
                         }
                         continue;
                     }
@@ -167,14 +186,24 @@ fn run() -> Result<()> {
 
                 if let Err(err) = infer(&mut ctx, &builtins, &nodes) {
                     match err {
-                        type_system::Error::TypeMismatch((ref t1, _), (ref t2, _)) => {
-                            println!("type mismatch: expected '{t1}' but found '{t2}'")
+                        type_system::Error::TypeMismatch((t1, s1), (t2, s2)) => {
+                            println!(
+                                "{}:{}: type mismatch: expected '{t1}'",
+                                s1.start.line, s1.start.column
+                            );
+                            println!("{}:{}: but found '{t2}'", s2.start.line, s2.start.column);
                         }
-                        type_system::Error::InfiniteType(ref ty, _) => {
-                            println!("infinite type '{ty}'")
+                        type_system::Error::InfiniteType(ty, span) => {
+                            println!(
+                                "{}:{}: infinite type '{ty}'",
+                                span.start.line, span.start.column
+                            );
                         }
-                        type_system::Error::UnknownIdentifier(ref id, _) => {
-                            println!("unknown identifier '{id}'")
+                        type_system::Error::UnknownIdentifier(id, span) => {
+                            println!(
+                                "{}:{}: unknown identifier '{id}'",
+                                span.start.line, span.start.column
+                            );
                         }
                     }
                     nodes.pop();

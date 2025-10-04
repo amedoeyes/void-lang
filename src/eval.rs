@@ -95,6 +95,7 @@ impl List {
 pub enum Value {
     Unit,
     Integer(i64),
+    Char(char),
     Boolean(bool),
     List(List),
     Builtin(BuiltinEvalFn),
@@ -162,24 +163,47 @@ impl<'a> fmt::Display for Display<'a> {
 
             Value::Integer(n) => write!(f, "{n}"),
 
+            Value::Char(c) => write!(f, "'{}'", c.escape_default()),
+
             Value::Boolean(b) => write!(f, "{b}"),
 
             Value::List(l) => match l {
                 List::Nil => write!(f, "[]"),
                 List::Cons(_, _) => {
                     let mut list = l.clone();
-                    let mut vec = Vec::new();
-                    while let Some(h) = list.head() {
-                        vec.push(h);
+                    let mut values = Vec::new();
+
+                    while let Some(mut h) = list.head() {
+                        values.push(h.force(self.context).unwrap());
                         list = list.tail().unwrap_or_default();
                     }
-                    write!(
-                        f,
-                        "[{}]",
-                        vec.iter_mut()
-                            .map(|i| i.display(self.context).to_string())
-                            .join(", ")
-                    )
+
+                    if values.is_empty() {
+                        return write!(f, "[]");
+                    }
+
+                    match &values[0] {
+                        Value::Char(_) => {
+                            let str = values
+                                .into_iter()
+                                .map(|v| {
+                                    if let Value::Char(c) = v {
+                                        c
+                                    } else {
+                                        unreachable!()
+                                    }
+                                })
+                                .collect::<String>();
+                            write!(f, "\"{}\"", str)
+                        }
+                        _ => {
+                            let list = values
+                                .into_iter()
+                                .map(|v| v.display(self.context).to_string())
+                                .join(", ");
+                            write!(f, "[{}]", list)
+                        }
+                    }
                 }
             },
 
@@ -240,6 +264,10 @@ fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<Rc<RefCell<Value>>
 
                 Node::Expr(Expr::Integer(n)) => {
                     result_stack.push_back(Rc::new(RefCell::new(Value::Integer(n))));
+                }
+
+                Node::Expr(Expr::Char(c)) => {
+                    result_stack.push_back(Rc::new(RefCell::new(Value::Char(c))));
                 }
 
                 Node::Expr(Expr::Nil) => {

@@ -29,6 +29,7 @@ impl<'a> fmt::Display for Display<'a> {
             Node::Expr(expr) => match expr {
                 Expr::Unit => write!(f, "()"),
                 Expr::Boolean(val) => write!(f, "{val}"),
+                Expr::Char(val) => write!(f, "'{}'", val.escape_default()),
                 Expr::Integer(val) => write!(f, "{val}"),
                 Expr::Identifier(id) => write!(f, "{id}"),
                 Expr::Condition { cond, then, alt } => write!(

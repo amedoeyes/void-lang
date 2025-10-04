@@ -129,6 +129,7 @@ impl fmt::Display for InfixOp {
 pub enum Expr {
     Unit,
     Boolean(bool),
+    Char(char),
     Integer(i64),
     Identifier(String),
     Condition {

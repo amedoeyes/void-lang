@@ -1,6 +1,11 @@
 use core::fmt;
 
-use crate::span::{Position, Span};
+use crate::{
+    error::SyntaxError,
+    span::{Position, Span},
+};
+
+type Result<T> = std::result::Result<T, SyntaxError>;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
@@ -31,6 +36,8 @@ pub enum Token {
 
     Boolean(String),
     Integer(String),
+    Char(char),
+    String(String),
     Identifier(String),
 
     Let,
@@ -39,8 +46,6 @@ pub enum Token {
     Else,
 
     Eof,
-
-    Invalid,
 }
 
 impl fmt::Display for Token {
@@ -73,6 +78,8 @@ impl fmt::Display for Token {
 
             Token::Boolean(val) => write!(f, "{val}"),
             Token::Integer(val) => write!(f, "{val}"),
+            Token::Char(val) => write!(f, "'{val}'"),
+            Token::String(val) => write!(f, "\"{val}\""),
             Token::Identifier(val) => write!(f, "{val}"),
 
             Token::Let => write!(f, "let"),
@@ -81,8 +88,6 @@ impl fmt::Display for Token {
             Token::Else => write!(f, "else"),
 
             Token::Eof => write!(f, "EOF"),
-
-            Token::Invalid => write!(f, "invalid token"),
         }
     }
 }
@@ -138,7 +143,7 @@ impl Lexer {
         }
     }
 
-    pub fn next_token(&mut self) -> (Token, Span) {
+    pub fn next_token(&mut self) -> Result<(Token, Span)> {
         self.advance(self.slice_buffer_while(|c| c.is_whitespace()).len());
 
         while self.remaining_buffer().starts_with("//") {
@@ -147,12 +152,12 @@ impl Lexer {
         }
 
         if self.remaining_buffer().is_empty() {
-            return (Token::Eof, Span::new(self.position, self.position));
+            return Ok((Token::Eof, Span::new(self.position, self.position)));
         }
 
         for symbol in SYMBOLS {
             if self.remaining_buffer().starts_with(symbol.0) {
-                return (symbol.1.clone(), self.advance_with_span(symbol.0.len()));
+                return Ok((symbol.1.clone(), self.advance_with_span(symbol.0.len())));
             }
         }
 
@@ -166,7 +171,7 @@ impl Lexer {
                     .next()
                     .is_none_or(|c| !c.is_alphanumeric() && c != '_')
             {
-                return (keyword.1.clone(), self.advance_with_span(keyword.0.len()));
+                return Ok((keyword.1.clone(), self.advance_with_span(keyword.0.len())));
             }
         }
 
@@ -183,31 +188,107 @@ impl Lexer {
                         .next()
                         .is_none_or(|c| !c.is_alphanumeric())
                 {
-                    return (
+                    return Ok((
                         Token::Boolean(pattern.to_string()),
                         self.advance_with_span(pattern.len()),
-                    );
+                    ));
                 }
             }
         }
 
         if current_char.is_ascii_digit() {
             let slice = self.slice_buffer_while(|c| c.is_ascii_digit());
-            return (
+            return Ok((
                 Token::Integer(slice.to_string()),
                 self.advance_with_span(slice.len()),
-            );
+            ));
         }
 
         if current_char.is_alphabetic() || current_char == '_' {
             let slice = self.slice_buffer_while(|c| c.is_alphanumeric() || c == '_');
-            return (
+            return Ok((
                 Token::Identifier(slice.to_string()),
                 self.advance_with_span(slice.len()),
-            );
+            ));
         }
 
-        (Token::Invalid, Span::new(self.position, self.position))
+        if current_char == '\'' {
+            let slice =
+                self.slice_buffer_between('\'', false)
+                    .ok_or(SyntaxError::UnterminatedChar(Span::new(
+                        self.position,
+                        self.position,
+                    )))?;
+            let mut chars = slice.chars();
+
+            let ch = match chars.next() {
+                Some('\\') => match chars.next() {
+                    Some('n') => '\n',
+                    Some('r') => '\r',
+                    Some('t') => '\t',
+                    Some('\\') => '\\',
+                    Some('\'') => '\'',
+                    Some('"') => '"',
+                    Some('0') => '\0',
+                    _ => {
+                        return Err(SyntaxError::InvalidEscapeChar(self.span_from_range(1, 2)));
+                    }
+                },
+                Some(char) => char,
+                None => {
+                    return Err(SyntaxError::EmptyChar(self.span_from_range(0, 1)));
+                }
+            };
+
+            if chars.next().is_some() {
+                return Err(SyntaxError::InvalidChar(
+                    self.span_from_range(0, slice.len() + 1),
+                ));
+            }
+
+            return Ok((Token::Char(ch), self.advance_with_span(slice.len() + 2)));
+        }
+
+        if current_char == '\"' {
+            let slice =
+                self.slice_buffer_between('\"', false)
+                    .ok_or(SyntaxError::UnterminatedString(Span::new(
+                        self.position,
+                        self.position,
+                    )))?;
+            let mut str = String::new();
+
+            let mut chars = slice.chars();
+            while let Some(ch) = chars.next() {
+                if ch == '\\' {
+                    str.push(match chars.next() {
+                        Some('n') => '\n',
+                        Some('r') => '\r',
+                        Some('t') => '\t',
+                        Some('\\') => '\\',
+                        Some('\'') => '\'',
+                        Some('"') => '"',
+                        Some('0') => '\0',
+                        _ => {
+                            return Err(SyntaxError::InvalidEscapeChar(
+                                self.span_from_range(str.len() + 1, str.len() + 2),
+                            ));
+                        }
+                    });
+                } else {
+                    str.push(ch);
+                }
+            }
+            return Ok((
+                Token::String(slice.to_string()),
+                self.advance_with_span(slice.len() + 2),
+            ));
+        }
+
+        Err(SyntaxError::InvalidToken(Span::new(
+            self.position,
+            self.position,
+        )))
     }
 
     fn current_char(&self) -> Option<char> {
@@ -216,6 +297,23 @@ impl Lexer {
 
     fn remaining_buffer(&self) -> &str {
         &self.buffer[self.index..]
+    }
+
+    fn slice_buffer_between(&self, surr: char, include_newlines: bool) -> Option<&str> {
+        let buffer = self.remaining_buffer();
+
+        if !buffer.starts_with(surr) {
+            return None;
+        }
+
+        let end = buffer
+            .char_indices()
+            .skip(1)
+            .take_while(|&(_, c)| include_newlines || c != '\n')
+            .find(|&(_, c)| c == surr)?
+            .0;
+
+        Some(&buffer[1..end])
     }
 
     fn slice_buffer_while<P: Fn(char) -> bool>(&self, predicate: P) -> &str {
@@ -239,6 +337,25 @@ impl Lexer {
                 self.index += c.len_utf8();
             }
         }
+    }
+
+    fn span_from_range(&self, start: usize, end: usize) -> Span {
+        Span::new(self.position_after(start), self.position_after(end))
+    }
+
+    fn position_after(&self, n: usize) -> Position {
+        let mut pos = self.position;
+        for _ in 0..n {
+            if let Some(c) = self.current_char() {
+                if c == '\n' {
+                    pos.line += 1;
+                    pos.column = 1;
+                } else {
+                    pos.column += 1;
+                }
+            }
+        }
+        pos
     }
 
     fn advance_with_span(&mut self, n: usize) -> Span {

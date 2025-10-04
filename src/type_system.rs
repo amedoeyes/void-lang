@@ -23,6 +23,7 @@ type Result<T> = result::Result<T, Error>;
 pub enum Type {
     Unit,
     Int,
+    Char,
     Bool,
     Var(usize),
     List(Box<Type>),
@@ -36,6 +37,8 @@ impl Type {
             Type::Unit => write!(f, "Unit"),
 
             Type::Int => write!(f, "Int"),
+
+            Type::Char => write!(f, "Char"),
 
             Type::Bool => write!(f, "Bool"),
 
@@ -147,7 +150,7 @@ impl Env {
 
     fn instantiate_helper(&mut self, ty: Type, substitutions: &mut FxHashMap<usize, Type>) -> Type {
         match ty {
-            Type::Var(n) => substitutions.get(&n).cloned().unwrap_or(Type::Var(n)),
+            Type::Var(n) => substitutions.get(&n).cloned().unwrap_or(ty),
 
             Type::List(e) => Type::List(Box::new(self.instantiate_helper(*e, substitutions))),
 
@@ -207,7 +210,10 @@ impl Env {
         let t2 = self.substitute(t2);
 
         match (t1, t2) {
-            (Type::Int, Type::Int) | (Type::Bool, Type::Bool) | (Type::Unit, Type::Unit) => Ok(()),
+            (Type::Int, Type::Int)
+            | (Type::Bool, Type::Bool)
+            | (Type::Unit, Type::Unit)
+            | (Type::Char, Type::Char) => Ok(()),
 
             (Type::Var(a), Type::Var(b)) if a == b => Ok(()),
 
@@ -263,6 +269,8 @@ fn infer_expr(ctx: &mut Context, env: &mut Env, expr: NodeId) -> Result<()> {
         Node::Expr(Expr::Unit) => Type::Unit,
 
         Node::Expr(Expr::Integer(_)) => Type::Int,
+
+        Node::Expr(Expr::Char(_)) => Type::Char,
 
         Node::Expr(Expr::Boolean(_)) => Type::Bool,
 

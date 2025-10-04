@@ -1,16 +1,12 @@
 use crate::{
     context::{Context, Node, NodeId},
+    error::SyntaxError,
     expr::{Expr, InfixOp, PrefixOp},
     lexer::{Lexer, Token},
     span::Span,
 };
 
-#[derive(Debug)]
-pub enum Error {
-    UnexpectedToken(String, (Token, Span)),
-}
-
-type Result<T> = std::result::Result<T, Error>;
+type Result<T> = std::result::Result<T, SyntaxError>;
 
 #[derive(Debug)]
 pub struct Parser<'a> {
@@ -22,35 +18,35 @@ pub struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     pub fn new(context: &'a mut Context, input: &str) -> Self {
-        let mut lexer = Lexer::new(input);
-        let (token, span) = lexer.next_token();
         Parser {
             context,
-            lexer,
-            token,
-            span,
+            lexer: Lexer::new(input),
+            token: Token::Eof,
+            span: Span::default(),
         }
     }
 
     pub fn parse(mut self) -> Result<Vec<NodeId>> {
         let mut nodes = Vec::new();
 
+        self.advance()?;
+
         while self.token != Token::Eof {
             match self.token {
                 Token::Let => {
                     let span = self.span;
 
-                    self.advance();
+                    self.advance()?;
                     let name = if let Token::Identifier(id) = &self.token {
                         id.clone()
                     } else {
-                        return Err(Error::UnexpectedToken(
+                        return Err(SyntaxError::UnexpectedToken(
                             "Identifier".to_string(),
                             (self.token, self.span),
                         ));
                     };
 
-                    self.advance();
+                    self.advance()?;
                     self.expect(Token::Equal)?;
 
                     let expr = self.parse_expr(0.0)?;
@@ -72,20 +68,21 @@ impl<'a> Parser<'a> {
         Ok(nodes)
     }
 
-    fn advance(&mut self) {
-        let (token, span) = self.lexer.next_token();
+    fn advance(&mut self) -> Result<()> {
+        let (token, span) = self.lexer.next_token()?;
         self.token = token;
         self.span = span;
+        Ok(())
     }
 
     fn expect(&mut self, token: Token) -> Result<()> {
         if self.token != token {
-            return Err(Error::UnexpectedToken(
+            return Err(SyntaxError::UnexpectedToken(
                 token.to_string(),
                 (self.token.clone(), self.span),
             ));
         }
-        self.advance();
+        self.advance()?;
         Ok(())
     }
 
@@ -98,7 +95,7 @@ impl<'a> Parser<'a> {
                     _ => unreachable!(),
                 }));
                 self.context.set_span(expr, self.span);
-                self.advance();
+                self.advance()?;
                 Ok(expr)
             }
 
@@ -107,19 +104,41 @@ impl<'a> Parser<'a> {
                     .context
                     .add_expr(Expr::Integer(int.parse::<i64>().unwrap()));
                 self.context.set_span(expr, self.span);
-                self.advance();
+                self.advance()?;
                 Ok(expr)
+            }
+
+            Token::Char(char) => {
+                let expr = self.context.add_expr(Expr::Char(*char));
+                self.context.set_span(expr, self.span);
+                self.advance()?;
+                Ok(expr)
+            }
+
+            Token::String(str) => {
+                let span = self.span;
+                let mut list = self.context.add_expr(Expr::Nil);
+                for char in str.chars().rev() {
+                    let expr = self.context.add_expr(Expr::Char(char));
+                    list = self.context.add_expr(Expr::Cons {
+                        head: expr,
+                        tail: list,
+                    });
+                }
+                self.context.set_span(list, span);
+                self.advance()?;
+                Ok(list)
             }
 
             Token::BracketLeft => {
                 let span = self.span;
 
-                self.advance();
+                self.advance()?;
 
                 if self.token == Token::BracketRight {
                     let list = self.context.add_expr(Expr::Nil);
                     self.context.set_span(list, span.merge(self.span));
-                    self.advance();
+                    self.advance()?;
 
                     Ok(list)
                 } else {
@@ -130,7 +149,7 @@ impl<'a> Parser<'a> {
                         elems.push(elem);
 
                         if self.token == Token::Comma {
-                            self.advance();
+                            self.advance()?;
                             continue;
                         } else {
                             break;
@@ -156,13 +175,13 @@ impl<'a> Parser<'a> {
             Token::Identifier(id) => {
                 let expr = self.context.add_expr(Expr::Identifier(id.clone()));
                 self.context.set_span(expr, self.span);
-                self.advance();
+                self.advance()?;
                 Ok(expr)
             }
 
             Token::If => {
                 let span = self.span;
-                self.advance();
+                self.advance()?;
                 let cond = self.parse_expr(0.0)?;
                 self.expect(Token::Then)?;
                 let then = self.parse_expr(0.0)?;
@@ -176,11 +195,11 @@ impl<'a> Parser<'a> {
 
             Token::ParenLeft => {
                 let span = self.span;
-                self.advance();
+                self.advance()?;
                 if self.token == Token::ParenRight {
                     let expr = self.context.add_expr(Expr::Unit);
                     self.context.set_span(expr, span.merge(self.span));
-                    self.advance();
+                    self.advance()?;
                     Ok(expr)
                 } else {
                     let expr = self.parse_expr(0.0)?;
@@ -190,7 +209,7 @@ impl<'a> Parser<'a> {
                 }
             }
 
-            _ => Err(Error::UnexpectedToken(
+            _ => Err(SyntaxError::UnexpectedToken(
                 "expression".to_string(),
                 (self.token.clone(), self.span),
             )),
@@ -202,7 +221,7 @@ impl<'a> Parser<'a> {
             match op {
                 PrefixOp::Neg | PrefixOp::Not => {
                     let span = self.span;
-                    self.advance();
+                    self.advance()?;
                     let (_, r_bp) = op.precedence();
                     let rhs = self.parse_expr(r_bp)?;
                     let expr = self.context.add_expr(Expr::Prefix { op, rhs });
@@ -224,7 +243,7 @@ impl<'a> Parser<'a> {
             if l_bp < min_bp {
                 break;
             }
-            self.advance();
+            self.advance()?;
             let rhs = self.parse_expr(r_bp)?;
             let expr = self.context.add_expr(Expr::Infix { lhs, op, rhs });
             self.context.set_span(
@@ -248,7 +267,7 @@ impl<'a> Parser<'a> {
 
         if self.token == Token::HyphenGreaterThan {
             if let Node::Expr(Expr::Identifier(_)) = self.context.get_node(expr) {
-                self.advance();
+                self.advance()?;
 
                 let param = expr;
                 let body = self.parse_expr(0.0)?;
@@ -261,7 +280,7 @@ impl<'a> Parser<'a> {
                         .merge(*self.context.get_span(body)),
                 );
             } else {
-                return Err(Error::UnexpectedToken(
+                return Err(SyntaxError::UnexpectedToken(
                     "identifier".to_string(),
                     (self.token.clone(), self.span),
                 ));
