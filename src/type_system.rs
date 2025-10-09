@@ -434,17 +434,17 @@ fn infer_expr(
             match op {
                 InfixOp::Add | InfixOp::Sub | InfixOp::Mul | InfixOp::Div | InfixOp::Mod => {
                     env.unify((&lhs_ty, *ctx.get_span(lhs)), (&rhs_ty, *ctx.get_span(rhs)))?;
-                    env.add_constraint(TypeClass::Num, rhs_ty.clone(), *ctx.get_span(rhs));
+                    env.add_constraint(TypeClass::Num, lhs_ty.clone(), *ctx.get_span(lhs));
                     rhs_ty
                 }
                 InfixOp::Lt | InfixOp::Gt | InfixOp::Lte | InfixOp::Gte => {
                     env.unify((&lhs_ty, *ctx.get_span(lhs)), (&rhs_ty, *ctx.get_span(rhs)))?;
-                    env.add_constraint(TypeClass::Ord, rhs_ty, *ctx.get_span(rhs));
+                    env.add_constraint(TypeClass::Ord, lhs_ty, *ctx.get_span(lhs));
                     Type::Bool
                 }
                 InfixOp::Eq | InfixOp::Neq => {
                     env.unify((&lhs_ty, *ctx.get_span(lhs)), (&rhs_ty, *ctx.get_span(rhs)))?;
-                    env.add_constraint(TypeClass::Eq, rhs_ty, *ctx.get_span(rhs));
+                    env.add_constraint(TypeClass::Eq, lhs_ty, *ctx.get_span(lhs));
                     Type::Bool
                 }
                 InfixOp::And | InfixOp::Or => {
