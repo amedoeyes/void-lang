@@ -157,6 +157,19 @@ let sort = l ->
 sort [6, 3, 1, 5, 1, 4, 2, 0] // [0, 1, 1, 2, 3, 4, 5, 6]
 ```
 
+Input:
+
+Input can be accessed by either command line arguments using the `args` builtin bind, or by using the `read` builtin function supplied with a path. `read` can read from stdin when given `"-"` as an argument.
+
+```fsharp
+let filename = if tail args == [] then "examples/hello.void" else head (tail args);
+"File: " ++ filename ++ " | " ++ "Contents: " ++ read filename
+```
+
+```fsharp
+"Hello, " ++ read "-"
+```
+
 ## Type System
 
 The type system uses the Hindley Milner algorithm to infer and check types. For example from the examples above `fib` will be inferred as `fib : Int -> Int` because `n` is being compared with `0`. While for example something like `let id = x -> x;` will be inferred as `id : forall t1 . t1 -> t1` because it's a polymorphic type.
