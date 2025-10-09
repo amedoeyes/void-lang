@@ -137,6 +137,11 @@ pub enum Expr {
         then: NodeId,
         alt: NodeId,
     },
+    // In {
+    //     lhs: NodeId,
+    //     op: String,
+    //     rhs: NodeId,
+    // },
     Infix {
         lhs: NodeId,
         op: InfixOp,

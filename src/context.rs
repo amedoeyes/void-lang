@@ -1,7 +1,14 @@
 use core::fmt;
-use std::fmt::Formatter;
+use std::{cell::RefCell, fmt::Formatter, rc::Rc};
 
-use crate::{expr::Expr, span::Span, type_system::Type};
+use fxhash::FxHashMap;
+
+use crate::{
+    eval::{self, List, Value},
+    expr::Expr,
+    span::Span,
+    type_system::Type,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NodeId(usize);
@@ -18,20 +25,40 @@ pub enum Node {
     Bind(String, NodeId),
 }
 
+pub type BuiltinEvalFn = fn(&Context, Rc<RefCell<Value>>, Span) -> eval::Result<Rc<RefCell<Value>>>;
+
+#[derive(Debug, Clone)]
+pub enum BuiltinKind {
+    Function(BuiltinEvalFn),
+    Value(Rc<RefCell<Value>>),
+}
+
+#[derive(Debug, Clone)]
+pub struct Builtin {
+    pub ty: Type,
+    pub kind: BuiltinKind,
+}
+
 #[derive(Debug, Clone)]
 pub struct Context {
     nodes: Vec<Node>,
     spans: Vec<Span>,
     types: Vec<Type>,
+    builtins: FxHashMap<String, Builtin>,
 }
 
 impl Context {
     pub fn new() -> Self {
-        Self {
+        let mut ctx = Self {
             nodes: Vec::new(),
             spans: Vec::new(),
             types: Vec::new(),
-        }
+            builtins: FxHashMap::default(),
+        };
+
+        ctx.add_builtins();
+
+        ctx
     }
 
     pub fn add(&mut self, node: Node) -> NodeId {
@@ -68,6 +95,126 @@ impl Context {
 
     pub fn get_type(&self, id: NodeId) -> &Type {
         &self.types[id.0]
+    }
+
+    pub fn builtins(&self) -> &FxHashMap<String, Builtin> {
+        &self.builtins
+    }
+
+    fn add_builtins(&mut self) {
+        self.builtins.insert(
+            "args".into(),
+            Builtin {
+                ty: Type::List(Box::new(Type::List(Box::new(Type::Char)))),
+                kind: BuiltinKind::Value({
+                    let args = std::env::args().skip(2).collect::<Vec<_>>();
+                    let mut arg_list = List::Nil;
+
+                    for arg in args.iter().rev() {
+                        let mut string_list = List::Nil;
+                        for ch in arg.chars().rev() {
+                            string_list = string_list.push(Value::Char(ch));
+                        }
+                        arg_list = arg_list.push(Value::List(string_list));
+                    }
+
+                    Rc::new(RefCell::new(Value::List(arg_list)))
+                }),
+            },
+        );
+
+        self.builtins.insert(
+            "read".into(),
+            Builtin {
+                ty: Type::Fun(
+                    Box::new(Type::List(Box::new(Type::Char))),
+                    Box::new(Type::List(Box::new(Type::Char))),
+                ),
+                kind: BuiltinKind::Function(|ctx, arg, span| {
+                    let path = match &*arg.borrow() {
+                        Value::List(l) => {
+                            let mut list = l.clone();
+                            let mut chars = Vec::new();
+                            while let Some(mut h) = list.head() {
+                                match h.force(ctx).unwrap() {
+                                    Value::Char(ch) => chars.push(ch),
+                                    _ => unreachable!(),
+                                }
+                                list = list.tail().unwrap_or_default();
+                            }
+                            chars.into_iter().collect::<String>()
+                        }
+                        _ => unreachable!(),
+                    };
+
+                    let contents = if path == "-" {
+                        use std::io::Read;
+                        let mut input = String::new();
+                        std::io::stdin().read_to_string(&mut input).map_err(|e| {
+                            eval::Error::IOError(format!("Failed to read from stdin: {}", e), span)
+                        })?;
+                        input
+                    } else {
+                        std::fs::read_to_string(&path).map_err(|e| {
+                            eval::Error::IOError(
+                                format!("Failed to read file '{}': {}", path, e),
+                                span,
+                            )
+                        })?
+                    };
+
+                    let mut list = List::default();
+                    for ch in contents.chars().rev() {
+                        list = list.push(Value::Char(ch))
+                    }
+
+                    Ok(Rc::new(RefCell::new(Value::List(list))))
+                }),
+            },
+        );
+
+        self.builtins.insert(
+            "print".into(),
+            Builtin {
+                ty: Type::Fun(Box::new(Type::Var(1)), Box::new(Type::Var(1))),
+                kind: BuiltinKind::Function(|ctx, arg, _| {
+                    println!("{}", arg.borrow().display(ctx));
+                    Ok(arg)
+                }),
+            },
+        );
+
+        self.builtins.insert(
+            "head".into(),
+            Builtin {
+                ty: Type::Fun(
+                    Box::new(Type::List(Box::new(Type::Var(2)))),
+                    Box::new(Type::Var(2)),
+                ),
+                kind: BuiltinKind::Function(|ctx, arg, span| match &*arg.borrow() {
+                    Value::List(l) => Ok(Rc::new(RefCell::new(
+                        l.head().ok_or(eval::Error::EmptyList(span))?.force(ctx)?,
+                    ))),
+                    _ => unreachable!(),
+                }),
+            },
+        );
+
+        self.builtins.insert(
+            "tail".into(),
+            Builtin {
+                ty: Type::Fun(
+                    Box::new(Type::List(Box::new(Type::Var(3)))),
+                    Box::new(Type::List(Box::new(Type::Var(3)))),
+                ),
+                kind: BuiltinKind::Function(|_, arg, span| match &*arg.borrow() {
+                    Value::List(l) => Ok(Rc::new(RefCell::new(Value::List(
+                        l.tail().ok_or(eval::Error::EmptyList(span))?,
+                    )))),
+                    _ => unreachable!(),
+                }),
+            },
+        );
     }
 }
 

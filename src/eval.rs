@@ -6,8 +6,7 @@ use itertools::Itertools;
 use string_cache::DefaultAtom;
 
 use crate::{
-    builtin::{BuiltinKind, Builtins},
-    context::{Context, Node, NodeId},
+    context::{BuiltinKind, Context, Node, NodeId},
     expr::{Expr, InfixOp, PrefixOp},
     span::Span,
 };
@@ -625,10 +624,10 @@ fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<Rc<RefCell<Value>>
     Ok(result_stack.pop_back().unwrap())
 }
 
-pub fn evaluate(ctx: &Context, builtins: &Builtins, nodes: &[NodeId]) -> Result<Value> {
+pub fn evaluate(ctx: &Context, nodes: &[NodeId]) -> Result<Value> {
     let env = Rc::new(RefCell::new(FxHashMap::default()));
 
-    for (name, builtin) in builtins {
+    for (name, builtin) in ctx.builtins() {
         env.borrow_mut().insert(
             DefaultAtom::from(name.as_str()),
             Rc::new(RefCell::new(Value::Builtin(builtin.kind.clone()))),

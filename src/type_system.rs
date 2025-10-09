@@ -5,7 +5,6 @@ use std::result;
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 
-use crate::builtin::Builtins;
 use crate::context::{Context, Node, NodeId};
 use crate::{
     expr::{Expr, InfixOp, PrefixOp},
@@ -486,11 +485,11 @@ fn infer_expr(
             let arg_ty = infer_expr(ctx, env, env_vars, arg)?;
             let ret_ty = env.fresh_var();
             env.unify(
+                (&func_ty, *ctx.get_span(func)),
                 (
                     &Type::Fun(Box::new(arg_ty), Box::new(ret_ty.clone())),
                     *ctx.get_span(expr),
                 ),
-                (&func_ty, *ctx.get_span(func)),
             )?;
             ret_ty
         }
@@ -502,11 +501,11 @@ fn infer_expr(
     Ok(ty)
 }
 
-pub fn infer(ctx: &mut Context, builtins: &Builtins, nodes: &[NodeId]) -> Result<()> {
+pub fn infer(ctx: &mut Context, nodes: &[NodeId]) -> Result<()> {
     let mut env = Env::new();
     let mut env_vars = FxHashMap::default();
 
-    for (name, builtin) in builtins {
+    for (name, builtin) in ctx.builtins() {
         env_vars.insert(name.clone(), env.generalize(&builtin.ty));
     }
 
