@@ -1,5 +1,5 @@
 use core::fmt;
-use std::{cell::RefCell, collections::VecDeque, ops::Deref, rc::Rc, result};
+use std::{cell::RefCell, cmp::Ordering, collections::VecDeque, ops::Deref, rc::Rc, result};
 
 use fxhash::FxHashMap;
 use itertools::Itertools;
@@ -62,33 +62,160 @@ impl List {
             }
         }
     }
+}
 
-    fn eq(&self, ctx: &Context, other: &Self) -> Result<bool> {
-        let mut l1 = self.clone();
-        let mut l2 = other.clone();
+pub fn add_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
+    let v1 = v1.force(ctx)?;
+    let v2 = v2.force(ctx)?;
 
-        while let Some(mut h1) = l1.head()
-            && let Some(mut h2) = l2.head()
-        {
-            match (h1.force(ctx)?, h2.force(ctx)?) {
-                (Value::Integer(a), Value::Integer(b)) => {
-                    if a != b {
-                        break;
-                    }
-                }
-                (Value::Boolean(a), Value::Boolean(b)) => {
-                    if a != b {
-                        break;
-                    }
-                }
-                _ => unreachable!(),
-            }
-            l1 = l1.tail().unwrap_or_default();
-            l2 = l2.tail().unwrap_or_default();
-        }
-
-        Ok(matches!((l1, l2), (List::Nil, List::Nil)))
+    match (v1, v2) {
+        (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a + b)),
+        _ => unreachable!(),
     }
+}
+
+pub fn sub_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
+    let v1 = v1.force(ctx)?;
+    let v2 = v2.force(ctx)?;
+
+    match (v1, v2) {
+        (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a - b)),
+        _ => unreachable!(),
+    }
+}
+
+pub fn div_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
+    let v1 = v1.force(ctx)?;
+    let v2 = v2.force(ctx)?;
+
+    match (v1, v2) {
+        (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a / b)),
+        _ => unreachable!(),
+    }
+}
+
+pub fn mul_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
+    let v1 = v1.force(ctx)?;
+    let v2 = v2.force(ctx)?;
+
+    match (v1, v2) {
+        (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a * b)),
+        _ => unreachable!(),
+    }
+}
+
+pub fn mod_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
+    let v1 = v1.force(ctx)?;
+    let v2 = v2.force(ctx)?;
+
+    match (v1, v2) {
+        (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a & b)),
+        _ => unreachable!(),
+    }
+}
+
+pub fn and_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
+    let v1 = v1.force(ctx)?;
+    let v2 = v2.force(ctx)?;
+
+    match (v1, v2) {
+        (Value::Boolean(a), Value::Boolean(b)) => Ok(Value::Boolean(a && b)),
+        _ => unreachable!(),
+    }
+}
+
+pub fn or_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
+    let v1 = v1.force(ctx)?;
+    let v2 = v2.force(ctx)?;
+
+    match (v1, v2) {
+        (Value::Boolean(a), Value::Boolean(b)) => Ok(Value::Boolean(a || b)),
+        _ => unreachable!(),
+    }
+}
+
+pub fn cons_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
+    let v1 = v1.force(ctx)?;
+    let v2 = v2.force(ctx)?;
+
+    match (v1, v2) {
+        (Value::List(a), Value::List(b)) => Ok(Value::List(b.clone().push(Value::List(a.clone())))),
+        (a, Value::List(b)) => Ok(Value::List(b.clone().push(a.clone()))),
+        _ => unreachable!(),
+    }
+}
+
+pub fn append_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
+    let v1 = v1.force(ctx)?;
+    let v2 = v2.force(ctx)?;
+
+    match (v1, v2) {
+        (Value::List(a), Value::List(b)) => Ok(Value::List(a.clone().append(b.clone()))),
+        _ => unreachable!(),
+    }
+}
+
+pub fn cmp_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Ordering> {
+    let v1 = v1.force(ctx)?;
+    let v2 = v2.force(ctx)?;
+
+    match (v1, v2) {
+        (Value::Integer(a), Value::Integer(b)) => Ok(a.cmp(&b)),
+        (Value::Boolean(a), Value::Boolean(b)) => Ok(a.cmp(&b)),
+        (Value::Char(a), Value::Char(b)) => Ok(a.cmp(&b)),
+        (Value::List(a), Value::List(b)) => {
+            let mut l1 = a;
+            let mut l2 = b;
+            loop {
+                match (l1.head(), l2.head()) {
+                    (None, None) => return Ok(Ordering::Equal),
+                    (None, Some(_)) => return Ok(Ordering::Less),
+                    (Some(_), None) => return Ok(Ordering::Greater),
+                    (Some(mut a), Some(mut b)) => match cmp_values(ctx, &mut a, &mut b)? {
+                        Ordering::Equal => {
+                            l1 = l1.tail().unwrap_or_default();
+                            l2 = l2.tail().unwrap_or_default();
+                        }
+                        ordering => return Ok(ordering),
+                    },
+                }
+            }
+        }
+        (Value::Unit, Value::Unit) => Ok(Ordering::Equal),
+        _ => unreachable!(),
+    }
+}
+
+pub fn eq_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
+    Ok(Value::Boolean(cmp_values(ctx, v1, v2)? == Ordering::Equal))
+}
+
+pub fn neq_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
+    Ok(Value::Boolean(cmp_values(ctx, v1, v2)? != Ordering::Equal))
+}
+
+pub fn lt_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
+    Ok(Value::Boolean(cmp_values(ctx, v1, v2)? == Ordering::Less))
+}
+
+pub fn le_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
+    Ok(Value::Boolean(matches!(
+        cmp_values(ctx, v1, v2)?,
+        Ordering::Less | Ordering::Equal
+    )))
+}
+
+pub fn gt_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
+    Ok(Value::Boolean(
+        cmp_values(ctx, v1, v2)? == Ordering::Greater,
+    ))
+}
+
+pub fn ge_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
+    Ok(Value::Boolean(matches!(
+        cmp_values(ctx, v1, v2)?,
+        Ordering::Greater | Ordering::Equal
+    )))
 }
 
 #[derive(Debug, Clone)]
@@ -402,58 +529,26 @@ fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<Rc<RefCell<Value>>
 
             EvalState::Infix(op) => {
                 let lhs = result_stack.pop_back().unwrap();
-                let lhs = lhs.borrow();
+                let mut lhs = lhs.borrow_mut();
                 let rhs = result_stack.pop_back().unwrap();
-                let rhs = rhs.borrow();
+                let mut rhs = rhs.borrow_mut();
 
-                let res = match (&*lhs, &*rhs) {
-                    (Value::Integer(a), Value::Integer(b)) => match op {
-                        InfixOp::Add => Value::Integer(a + b),
-                        InfixOp::Sub => Value::Integer(a - b),
-                        InfixOp::Mul => Value::Integer(a * b),
-                        InfixOp::Div => a
-                            .checked_div(*b)
-                            .map(Value::Integer)
-                            .ok_or(Error::DivisionByZero(*ctx.get_span(frame.expr)))?,
-                        InfixOp::Mod => Value::Integer(a % b),
-                        InfixOp::Eq => Value::Boolean(a == b),
-                        InfixOp::Neq => Value::Boolean(a != b),
-
-                        InfixOp::Lt => Value::Boolean(a < b),
-                        InfixOp::Lte => Value::Boolean(a <= b),
-                        InfixOp::Gt => Value::Boolean(a > b),
-                        InfixOp::Gte => Value::Boolean(a >= b),
-
-                        _ => unreachable!(),
-                    },
-
-                    (Value::Boolean(a), Value::Boolean(b)) => match op {
-                        InfixOp::Eq => Value::Boolean(a == b),
-                        InfixOp::Neq => Value::Boolean(a != b),
-                        InfixOp::And => Value::Boolean(*a && *b),
-                        InfixOp::Or => Value::Boolean(*a || *b),
-                        _ => unreachable!(),
-                    },
-
-                    (Value::List(a), Value::List(b)) => match op {
-                        InfixOp::Eq => Value::Boolean(a.eq(ctx, b)?),
-                        InfixOp::Neq => Value::Boolean(!a.eq(ctx, b)?),
-                        InfixOp::Cons => Value::List(b.clone().push(Value::List(a.clone()))),
-                        InfixOp::Append => Value::List(a.clone().append(b.clone())),
-                        _ => unreachable!(),
-                    },
-
-                    (a, Value::List(b)) => match op {
-                        InfixOp::Cons => Value::List(b.clone().push(a.clone())),
-                        _ => unreachable!(),
-                    },
-
-                    (Value::Unit, Value::Unit) => match op {
-                        InfixOp::Eq => Value::Boolean(true),
-                        _ => unreachable!(),
-                    },
-
-                    _ => unreachable!(),
+                let res = match op {
+                    InfixOp::Add => add_values(ctx, &mut lhs, &mut rhs)?,
+                    InfixOp::Sub => sub_values(ctx, &mut lhs, &mut rhs)?,
+                    InfixOp::Mul => mul_values(ctx, &mut lhs, &mut rhs)?,
+                    InfixOp::Div => div_values(ctx, &mut lhs, &mut rhs)?,
+                    InfixOp::Mod => mod_values(ctx, &mut lhs, &mut rhs)?,
+                    InfixOp::Eq => eq_values(ctx, &mut lhs, &mut rhs)?,
+                    InfixOp::Neq => neq_values(ctx, &mut lhs, &mut rhs)?,
+                    InfixOp::Lt => lt_values(ctx, &mut lhs, &mut rhs)?,
+                    InfixOp::Lte => le_values(ctx, &mut lhs, &mut rhs)?,
+                    InfixOp::Gt => gt_values(ctx, &mut lhs, &mut rhs)?,
+                    InfixOp::Gte => ge_values(ctx, &mut lhs, &mut rhs)?,
+                    InfixOp::And => and_values(ctx, &mut lhs, &mut rhs)?,
+                    InfixOp::Or => or_values(ctx, &mut lhs, &mut rhs)?,
+                    InfixOp::Cons => cons_values(ctx, &mut lhs, &mut rhs)?,
+                    InfixOp::Append => append_values(ctx, &mut lhs, &mut rhs)?,
                 };
 
                 result_stack.push_back(Rc::new(RefCell::new(res)));
