@@ -6,7 +6,7 @@ use itertools::Itertools;
 use string_cache::DefaultAtom;
 
 use crate::{
-    builtin::{BuiltinEvalFn, Builtins},
+    builtin::{BuiltinKind, Builtins},
     context::{Context, Node, NodeId},
     expr::{Expr, InfixOp, PrefixOp},
     span::Span,
@@ -16,6 +16,7 @@ use crate::{
 pub enum Error {
     DivisionByZero(Span),
     EmptyList(Span),
+    IOError(String, Span),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -225,7 +226,7 @@ pub enum Value {
     Char(char),
     Boolean(bool),
     List(List),
-    Builtin(BuiltinEvalFn),
+    Builtin(BuiltinKind),
     Function {
         param: String,
         body: NodeId,
@@ -263,6 +264,7 @@ impl Value {
                     }
                 }
             }
+            Value::Builtin(BuiltinKind::Value(v)) => Ok(v.borrow().clone()),
             v => Ok(v.clone()),
         }
     }
@@ -600,7 +602,7 @@ fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<Rc<RefCell<Value>>
                 let func = func.borrow();
 
                 match &*func {
-                    Value::Builtin(f) => {
+                    Value::Builtin(BuiltinKind::Function(f)) => {
                         result_stack.push_back(f(ctx, arg.clone(), *ctx.get_span(frame.expr))?);
                     }
 
@@ -629,7 +631,7 @@ pub fn evaluate(ctx: &Context, builtins: &Builtins, nodes: &[NodeId]) -> Result<
     for (name, builtin) in builtins {
         env.borrow_mut().insert(
             DefaultAtom::from(name.as_str()),
-            Rc::new(RefCell::new(Value::Builtin(builtin.eval))),
+            Rc::new(RefCell::new(Value::Builtin(builtin.kind.clone()))),
         );
     }
 

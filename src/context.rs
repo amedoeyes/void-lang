@@ -12,6 +12,65 @@ impl NodeId {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum Node {
+    Expr(Expr),
+    Bind(String, NodeId),
+}
+
+#[derive(Debug, Clone)]
+pub struct Context {
+    nodes: Vec<Node>,
+    spans: Vec<Span>,
+    types: Vec<Type>,
+}
+
+impl Context {
+    pub fn new() -> Self {
+        Self {
+            nodes: Vec::new(),
+            spans: Vec::new(),
+            types: Vec::new(),
+        }
+    }
+
+    pub fn add(&mut self, node: Node) -> NodeId {
+        let id = NodeId(self.nodes.len());
+        self.nodes.push(node);
+        self.spans.push(Span::default());
+        self.types.push(Type::Unit);
+        id
+    }
+
+    pub fn add_expr(&mut self, expr: Expr) -> NodeId {
+        self.add(Node::Expr(expr))
+    }
+
+    pub fn add_bind(&mut self, name: &str, expr: NodeId) -> NodeId {
+        self.add(Node::Bind(name.to_string(), expr))
+    }
+
+    pub fn set_span(&mut self, id: NodeId, span: Span) {
+        self.spans[id.0] = span;
+    }
+
+    pub fn set_type(&mut self, id: NodeId, ty: Type) {
+        self.types[id.0] = ty;
+    }
+
+    pub fn get_node(&self, id: NodeId) -> &Node {
+        &self.nodes[id.0]
+    }
+
+    pub fn get_span(&self, id: NodeId) -> &Span {
+        &self.spans[id.0]
+    }
+
+    pub fn get_type(&self, id: NodeId) -> &Type {
+        &self.types[id.0]
+    }
+}
+
 pub struct Display<'a> {
     id: NodeId,
     context: &'a Context,
@@ -91,64 +150,5 @@ impl<'a> fmt::Display for Display<'a> {
                 write!(f, "{} = {}", name, Display::new(*expr, self.context))
             }
         }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum Node {
-    Expr(Expr),
-    Bind(String, NodeId),
-}
-
-#[derive(Debug, Clone)]
-pub struct Context {
-    nodes: Vec<Node>,
-    spans: Vec<Span>,
-    types: Vec<Type>,
-}
-
-impl Context {
-    pub fn new() -> Self {
-        Self {
-            nodes: Vec::new(),
-            spans: Vec::new(),
-            types: Vec::new(),
-        }
-    }
-
-    pub fn add(&mut self, node: Node) -> NodeId {
-        let id = NodeId(self.nodes.len());
-        self.nodes.push(node);
-        self.spans.push(Span::default());
-        self.types.push(Type::Unit);
-        id
-    }
-
-    pub fn add_expr(&mut self, expr: Expr) -> NodeId {
-        self.add(Node::Expr(expr))
-    }
-
-    pub fn add_bind(&mut self, name: &str, expr: NodeId) -> NodeId {
-        self.add(Node::Bind(name.to_string(), expr))
-    }
-
-    pub fn set_span(&mut self, id: NodeId, span: Span) {
-        self.spans[id.0] = span;
-    }
-
-    pub fn set_type(&mut self, id: NodeId, ty: Type) {
-        self.types[id.0] = ty;
-    }
-
-    pub fn get_node(&self, id: NodeId) -> &Node {
-        &self.nodes[id.0]
-    }
-
-    pub fn get_span(&self, id: NodeId) -> &Span {
-        &self.spans[id.0]
-    }
-
-    pub fn get_type(&self, id: NodeId) -> &Type {
-        &self.types[id.0]
     }
 }

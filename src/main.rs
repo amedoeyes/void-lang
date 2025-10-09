@@ -32,7 +32,11 @@ fn run() -> Result<()> {
         .subcommand(Command::new("tokens").arg(Arg::new("file").required(true).help("source file")))
         .subcommand(Command::new("nodes").arg(Arg::new("file").required(true).help("source file")))
         .subcommand(Command::new("type").arg(Arg::new("file").required(true).help("source file")))
-        .subcommand(Command::new("eval").arg(Arg::new("file").required(true).help("source file")))
+        .subcommand(
+            Command::new("eval")
+                .arg(Arg::new("file").required(true).help("source file"))
+                .arg(Arg::new("args").num_args(0..)),
+        )
         .subcommand(Command::new("repl").arg(Arg::new("file").help("source file")));
 
     match cmd.try_get_matches()?.subcommand() {
@@ -238,8 +242,17 @@ fn run() -> Result<()> {
                         Ok(value) => value,
                         Err(err) => {
                             match err {
-                                eval::Error::DivisionByZero(_) => println!("division by zero"),
-                                eval::Error::EmptyList(_) => println!("list is empty"),
+                                eval::Error::DivisionByZero(span) => println!(
+                                    "{}:{}: division by zero",
+                                    span.start.line, span.start.column
+                                ),
+                                eval::Error::EmptyList(span) => println!(
+                                    "{}:{}: list is empty",
+                                    span.start.line, span.start.column
+                                ),
+                                eval::Error::IOError(message, span) => {
+                                    println!("{}:{}: {message}", span.start.line, span.start.column)
+                                }
                             }
                             continue;
                         }
