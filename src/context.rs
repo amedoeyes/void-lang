@@ -1,10 +1,10 @@
 use core::fmt;
-use std::{cell::RefCell, fmt::Formatter, rc::Rc};
+use std::fmt::Formatter;
 
 use fxhash::FxHashMap;
 
 use crate::{
-    eval::{self, List, Value},
+    eval::{self, List, SharedValue, Value},
     expr::Expr,
     span::Span,
     type_system::Type,
@@ -13,24 +13,21 @@ use crate::{
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct NodeId(usize);
 
-impl NodeId {
-    pub fn display<'a>(&self, context: &'a Context) -> Display<'a> {
-        Display::new(*self, context)
-    }
-}
-
 #[derive(Debug, Clone)]
 pub enum Node {
     Expr(Expr),
     Bind(String, NodeId),
 }
 
-pub type BuiltinEvalFn = fn(&Context, Rc<RefCell<Value>>, Span) -> eval::Result<Rc<RefCell<Value>>>;
+pub struct Display<'a> {
+    id: NodeId,
+    context: &'a Context,
+}
 
 #[derive(Debug, Clone)]
 pub enum BuiltinKind {
-    Function(BuiltinEvalFn),
-    Value(Rc<RefCell<Value>>),
+    Function(fn(&Context, SharedValue, Span) -> eval::Result<SharedValue>),
+    Value(SharedValue),
 }
 
 #[derive(Debug, Clone)]
@@ -118,7 +115,7 @@ impl Context {
                         arg_list = arg_list.push(Value::List(string_list));
                     }
 
-                    Rc::new(RefCell::new(Value::List(arg_list)))
+                    SharedValue::new(Value::List(arg_list))
                 }),
             },
         );
@@ -168,7 +165,7 @@ impl Context {
                         list = list.push(Value::Char(ch))
                     }
 
-                    Ok(Rc::new(RefCell::new(Value::List(list))))
+                    Ok(SharedValue::new(Value::List(list)))
                 }),
             },
         );
@@ -192,9 +189,9 @@ impl Context {
                     Box::new(Type::Var(2)),
                 ),
                 kind: BuiltinKind::Function(|ctx, arg, span| match &*arg.borrow() {
-                    Value::List(l) => Ok(Rc::new(RefCell::new(
+                    Value::List(l) => Ok(SharedValue::new(
                         l.head().ok_or(eval::Error::EmptyList(span))?.force(ctx)?,
-                    ))),
+                    )),
                     _ => unreachable!(),
                 }),
             },
@@ -208,9 +205,9 @@ impl Context {
                     Box::new(Type::List(Box::new(Type::Var(3)))),
                 ),
                 kind: BuiltinKind::Function(|_, arg, span| match &*arg.borrow() {
-                    Value::List(l) => Ok(Rc::new(RefCell::new(Value::List(
+                    Value::List(l) => Ok(SharedValue::new(Value::List(
                         l.tail().ok_or(eval::Error::EmptyList(span))?,
-                    )))),
+                    ))),
                     _ => unreachable!(),
                 }),
             },
@@ -218,9 +215,10 @@ impl Context {
     }
 }
 
-pub struct Display<'a> {
-    id: NodeId,
-    context: &'a Context,
+impl NodeId {
+    pub fn display<'a>(&self, context: &'a Context) -> Display<'a> {
+        Display::new(*self, context)
+    }
 }
 
 impl<'a> Display<'a> {

@@ -238,6 +238,23 @@ pub enum Value {
     },
 }
 
+#[derive(Debug, Clone)]
+pub struct SharedValue(Rc<RefCell<Value>>);
+
+impl SharedValue {
+    pub fn new(value: Value) -> Self {
+        Self(Rc::new(RefCell::new(value)))
+    }
+}
+
+impl Deref for SharedValue {
+    type Target = Rc<RefCell<Value>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl Value {
     pub fn force(&mut self, ctx: &Context) -> Result<Value> {
         match self {
@@ -356,7 +373,7 @@ impl<'a> fmt::Display for Display<'a> {
     }
 }
 
-pub type Env = Rc<RefCell<FxHashMap<DefaultAtom, Rc<RefCell<Value>>>>>;
+pub type Env = Rc<RefCell<FxHashMap<DefaultAtom, SharedValue>>>;
 
 #[derive(Clone)]
 enum EvalState {
@@ -375,7 +392,7 @@ struct EvalFrame {
     state: EvalState,
 }
 
-fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<Rc<RefCell<Value>>> {
+fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<SharedValue> {
     let mut frame_stack = VecDeque::from([frame]);
     let mut result_stack = VecDeque::new();
 
@@ -383,23 +400,23 @@ fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<Rc<RefCell<Value>>
         match frame.state {
             EvalState::Start => match ctx.get_node(frame.expr).clone() {
                 Node::Expr(Expr::Unit) => {
-                    result_stack.push_back(Rc::new(RefCell::new(Value::Unit)));
+                    result_stack.push_back(SharedValue::new(Value::Unit));
                 }
 
                 Node::Expr(Expr::Boolean(bool)) => {
-                    result_stack.push_back(Rc::new(RefCell::new(Value::Boolean(bool))));
+                    result_stack.push_back(SharedValue::new(Value::Boolean(bool)));
                 }
 
                 Node::Expr(Expr::Integer(n)) => {
-                    result_stack.push_back(Rc::new(RefCell::new(Value::Integer(n))));
+                    result_stack.push_back(SharedValue::new(Value::Integer(n)));
                 }
 
                 Node::Expr(Expr::Char(c)) => {
-                    result_stack.push_back(Rc::new(RefCell::new(Value::Char(c))));
+                    result_stack.push_back(SharedValue::new(Value::Char(c)));
                 }
 
                 Node::Expr(Expr::Nil) => {
-                    result_stack.push_back(Rc::new(RefCell::new(Value::List(List::Nil))));
+                    result_stack.push_back(SharedValue::new(Value::List(List::Nil)));
                 }
 
                 Node::Expr(Expr::Cons { head, tail }) => {
@@ -422,7 +439,7 @@ fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<Rc<RefCell<Value>>
                         }
                     }
 
-                    result_stack.push_back(Rc::new(RefCell::new(Value::List(List::from(elems)))));
+                    result_stack.push_back(SharedValue::new(Value::List(List::from(elems))));
                 }
 
                 Node::Expr(Expr::Lambda { param, body }) => {
@@ -432,18 +449,18 @@ fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<Rc<RefCell<Value>>
                     }
                     match ctx.get_node(param) {
                         Node::Expr(Expr::Identifier(id)) => {
-                            result_stack.push_back(Rc::new(RefCell::new(Value::Function {
+                            result_stack.push_back(SharedValue::new(Value::Function {
                                 param: id.clone(),
                                 body,
                                 env: Rc::new(RefCell::new(closure_env)),
-                            })))
+                            }))
                         }
                         _ => unreachable!(),
                     }
                 }
 
                 Node::Expr(Expr::Identifier(name)) => {
-                    result_stack.push_back(Rc::new(RefCell::new(
+                    result_stack.push_back(SharedValue::new(
                         frame
                             .env
                             .borrow()
@@ -451,7 +468,7 @@ fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<Rc<RefCell<Value>>
                             .unwrap()
                             .borrow_mut()
                             .force(ctx)?,
-                    )));
+                    ));
                 }
 
                 Node::Expr(Expr::Prefix { op, rhs }) => {
@@ -525,7 +542,7 @@ fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<Rc<RefCell<Value>>
                     _ => unreachable!(),
                 };
 
-                result_stack.push_back(Rc::new(RefCell::new(res)));
+                result_stack.push_back(SharedValue::new(res));
             }
 
             EvalState::Infix(op) => {
@@ -552,7 +569,7 @@ fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<Rc<RefCell<Value>>
                     InfixOp::Append => append_values(ctx, &mut lhs, &mut rhs)?,
                 };
 
-                result_stack.push_back(Rc::new(RefCell::new(res)));
+                result_stack.push_back(SharedValue::new(res));
             }
 
             EvalState::Cond => {
@@ -630,7 +647,7 @@ pub fn evaluate(ctx: &Context, nodes: &[NodeId]) -> Result<Value> {
     for (name, builtin) in ctx.builtins() {
         env.borrow_mut().insert(
             DefaultAtom::from(name.as_str()),
-            Rc::new(RefCell::new(Value::Builtin(builtin.kind.clone()))),
+            SharedValue::new(Value::Builtin(builtin.kind.clone())),
         );
     }
 
@@ -670,7 +687,7 @@ pub fn evaluate(ctx: &Context, nodes: &[NodeId]) -> Result<Value> {
 
                         closure_env.borrow_mut().insert(
                             DefaultAtom::from(name.as_str()),
-                            Rc::new(RefCell::new(func.clone())),
+                            SharedValue::new(func.clone()),
                         );
 
                         func
@@ -684,7 +701,7 @@ pub fn evaluate(ctx: &Context, nodes: &[NodeId]) -> Result<Value> {
                 };
 
                 env.borrow_mut()
-                    .insert(DefaultAtom::from(name.as_str()), Rc::new(RefCell::new(val)));
+                    .insert(DefaultAtom::from(name.as_str()), SharedValue::new(val));
             }
         }
     }
