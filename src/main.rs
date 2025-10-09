@@ -166,36 +166,30 @@ fn run() -> Result<()> {
                                     span.start.line, span.start.column
                                 );
                             }
-
                             SyntaxError::UnterminatedChar(span) => {
                                 println!(
                                     "{}:{}: unterminated char",
                                     span.start.line, span.start.column
                                 )
                             }
-
                             SyntaxError::UnterminatedString(span) => {
                                 println!(
                                     "{}:{}: unterminated string",
                                     span.start.line, span.start.column
                                 )
                             }
-
                             SyntaxError::EmptyChar(span) => {
                                 println!("{}:{}: empty char", span.start.line, span.start.column)
                             }
-
                             SyntaxError::InvalidChar(span) => {
                                 println!("{}:{}: invalid char", span.start.line, span.start.column)
                             }
-
                             SyntaxError::InvalidEscapeChar(span) => {
                                 println!(
                                     "{}:{}: invalid escape char",
                                     span.start.line, span.start.column
                                 )
                             }
-
                             SyntaxError::UnexpectedToken(expect, (token, span)) => {
                                 println!(
                                     "{}:{}: expected '{expect}' but got '{token}'",
@@ -225,6 +219,12 @@ fn run() -> Result<()> {
                         type_system::Error::UnknownIdentifier(id, span) => {
                             println!(
                                 "{}:{}: unknown identifier '{id}'",
+                                span.start.line, span.start.column
+                            );
+                        }
+                        type_system::Error::NoInstance(cons, ty, span) => {
+                            println!(
+                                "{}:{}: No '{cons}' instance for type '{ty}'",
                                 span.start.line, span.start.column
                             );
                         }

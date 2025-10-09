@@ -1,12 +1,12 @@
 use std::fmt::Debug;
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Position {
     pub line: usize,
     pub column: usize,
 }
 
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Span {
     pub start: Position,
     pub end: Position,

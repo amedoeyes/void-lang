@@ -48,19 +48,6 @@ impl fmt::Display for Error {
                     write_message_and_lines(f, filename, source, *span, "invalid token")
                 }
 
-                SyntaxError::UnexpectedToken(expected, (token, span)) => {
-                    write_message(
-                        f,
-                        filename,
-                        *span,
-                        &format!("expected '{}' but got '{}'", expected, *token),
-                    )?;
-                    if *token != Token::Eof {
-                        write_lines(f, source, *span)?;
-                    }
-                    Ok(())
-                }
-
                 SyntaxError::UnterminatedChar(span) => {
                     write_message_and_lines(f, filename, source, *span, "unterminated char")
                 }
@@ -79,6 +66,19 @@ impl fmt::Display for Error {
 
                 SyntaxError::InvalidEscapeChar(span) => {
                     write_message_and_lines(f, filename, source, *span, "invalid escape char")
+                }
+
+                SyntaxError::UnexpectedToken(expected, (token, span)) => {
+                    write_message(
+                        f,
+                        filename,
+                        *span,
+                        &format!("expected '{}' but got '{}'", expected, *token),
+                    )?;
+                    if *token != Token::Eof {
+                        write_lines(f, source, *span)?;
+                    }
+                    Ok(())
                 }
             },
 
@@ -108,6 +108,14 @@ impl fmt::Display for Error {
                     source,
                     *span,
                     &format!("unknown identifier '{id}'"),
+                ),
+
+                type_system::Error::NoInstance(cons, ty, span) => write_message_and_lines(
+                    f,
+                    filename,
+                    source,
+                    *span,
+                    &format!("No '{cons}' instance for type '{ty}'"),
                 ),
             },
 
