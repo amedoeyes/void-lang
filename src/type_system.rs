@@ -465,7 +465,15 @@ fn infer_expr(
                     rhs_ty
                 }
                 InfixOp::Append => {
-                    env.unify((&lhs_ty, *ctx.get_span(lhs)), (&rhs_ty, *ctx.get_span(rhs)))?;
+                    let ty = env.fresh_var();
+                    env.unify(
+                        (&Type::List(Box::new(ty.clone())), Span::default()),
+                        (&lhs_ty, *ctx.get_span(lhs)),
+                    )?;
+                    env.unify(
+                        (&Type::List(Box::new(ty)), Span::default()),
+                        (&rhs_ty, *ctx.get_span(rhs)),
+                    )?;
                     rhs_ty
                 }
             }
