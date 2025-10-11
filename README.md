@@ -17,7 +17,7 @@ Types:
 - Int: `1 2 3 4 5 6 8 9 ..`
 - Char: `'a' 'b' '\n' ..`
 - Bool: `true` | `false`
-- Lists: `[1, 2, 3, 4]`
+- Lists: `[1, 2, 3, 4]` | `"Hello"`
   - Lists can only contains elements of the same type
 - Function: `x -> x`
 
