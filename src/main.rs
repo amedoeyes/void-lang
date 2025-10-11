@@ -202,12 +202,11 @@ fn run() -> Result<()> {
 
                 if let Err(err) = infer(&mut ctx, &nodes) {
                     match err {
-                        type_system::Error::TypeMismatch((t1, s1), (t2, s2)) => {
+                        type_system::Error::TypeMismatch(ty1, ty2, span) => {
                             println!(
-                                "{}:{}: type mismatch: expected '{t1}'",
-                                s1.start.line, s1.start.column
+                                "{}:{}: expected type '{ty1}', but found '{ty2}'",
+                                span.start.line, span.start.column
                             );
-                            println!("{}:{}: but found '{t2}'", s2.start.line, s2.start.column);
                         }
                         type_system::Error::InfiniteType(ty, span) => {
                             println!(

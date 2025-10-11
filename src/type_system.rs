@@ -54,7 +54,7 @@ macro_rules! ty  {
 
 #[derive(Debug)]
 pub enum Error {
-    TypeMismatch((String, Span), (String, Span)),
+    TypeMismatch(String, String, Span),
     InfiniteType(String, Span),
     UnknownIdentifier(String, Span),
     UnknownOperator(String, Span),
@@ -367,37 +367,32 @@ impl Env {
         }
     }
 
-    fn unify(&mut self, t1: (&Type, Span), t2: (&Type, Span)) -> Result<()> {
-        let (t1, s1) = t1;
-        let (t2, s2) = t2;
-
-        let t1 = self.substitute(t1);
-        let t2 = self.substitute(t2);
-
-        match (t1, t2) {
+    fn unify(&mut self, ty1: &Type, ty2: &Type, span: Span) -> Result<()> {
+        match (self.substitute(ty1), self.substitute(ty2)) {
             (Type::Int, Type::Int)
             | (Type::Bool, Type::Bool)
             | (Type::Unit, Type::Unit)
             | (Type::Char, Type::Char) => Ok(()),
             (Type::Var(a), Type::Var(b)) if a == b => Ok(()),
-            (Type::List(a), Type::List(b)) => self.unify((a.as_ref(), s1), (b.as_ref(), s2)),
+            (Type::List(a), Type::List(b)) => self.unify(a.as_ref(), b.as_ref(), span),
             (Type::Fun(p1, b1), Type::Fun(p2, b2)) => {
-                self.unify((p1.as_ref(), s1), (p2.as_ref(), s2))?;
-                self.unify((b1.as_ref(), s1), (b2.as_ref(), s2))
+                self.unify(p1.as_ref(), p2.as_ref(), span)?;
+                self.unify(b1.as_ref(), b2.as_ref(), span)
             }
             (Type::Var(a), b) => {
-                self.occurs_check(a, &b, s2)?;
+                self.occurs_check(a, &b, span)?;
                 self.substitutions.insert(a, b);
                 Ok(())
             }
             (a, Type::Var(b)) => {
-                self.occurs_check(b, &a, s1)?;
+                self.occurs_check(b, &a, span)?;
                 self.substitutions.insert(b, a);
                 Ok(())
             }
             (a, b) => Err(Error::TypeMismatch(
-                (self.generalize(&a).to_string(), s1),
-                (self.generalize(&b).to_string(), s2),
+                self.generalize(&a).to_string(),
+                self.generalize(&b).to_string(),
+                span,
             )),
         }
     }
@@ -440,10 +435,7 @@ fn infer_expr(
             }) = ctx.get_node(tail).clone()
             {
                 let next_head_ty = infer_expr(ctx, env, env_vars, next_head)?;
-                env.unify(
-                    (&head_ty, ctx.get_span(next_head)),
-                    (&next_head_ty, ctx.get_span(next_head)),
-                )?;
+                env.unify(&head_ty, &next_head_ty, ctx.get_span(next_head))?;
                 tail = next_tail;
             }
 
@@ -458,17 +450,10 @@ fn infer_expr(
         ),
         Node::Expr(Expr::Condition { cond, then, alt }) => {
             let cond_ty = infer_expr(ctx, env, env_vars, cond)?;
-
-            env.unify(
-                (&Type::Bool, ctx.get_span(cond)),
-                (&cond_ty, ctx.get_span(cond)),
-            )?;
-
             let then_ty = infer_expr(ctx, env, env_vars, then)?;
             let alt_ty = infer_expr(ctx, env, env_vars, alt)?;
-
-            env.unify((&then_ty, ctx.get_span(then)), (&alt_ty, ctx.get_span(alt)))?;
-
+            env.unify(&Type::Bool, &cond_ty, ctx.get_span(cond))?;
+            env.unify(&then_ty, &alt_ty, ctx.get_span(alt))?;
             alt_ty
         }
         Node::Expr(Expr::Infix { lhs, op, rhs }) => {
@@ -497,8 +482,8 @@ fn infer_expr(
                 ));
             };
 
-            env.unify((lhs_param, ctx.get_span(lhs)), (&lhs_ty, ctx.get_span(lhs)))?;
-            env.unify((rhs_param, ctx.get_span(rhs)), (&rhs_ty, ctx.get_span(rhs)))?;
+            env.unify(lhs_param, &lhs_ty, ctx.get_span(lhs))?;
+            env.unify(rhs_param, &rhs_ty, ctx.get_span(rhs))?;
 
             *std::mem::take(result_body)
         }
@@ -514,11 +499,9 @@ fn infer_expr(
             let arg_ty = infer_expr(ctx, env, env_vars, arg)?;
             let ret_ty = env.fresh_var();
             env.unify(
-                (&func_ty, ctx.get_span(func)),
-                (
-                    &Type::Fun(Box::new(arg_ty), Box::new(ret_ty.clone())),
-                    ctx.get_span(expr),
-                ),
+                &func_ty,
+                &Type::Fun(Box::new(arg_ty), Box::new(ret_ty.clone())),
+                ctx.get_span(arg),
             )?;
             ret_ty
         }

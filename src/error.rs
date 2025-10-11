@@ -83,16 +83,13 @@ impl fmt::Display for Error {
             },
 
             Error::Type(filename, source, err) => match err.as_ref() {
-                type_system::Error::TypeMismatch((t1, s1), (t2, s2)) => {
-                    write_message_and_lines(
-                        f,
-                        filename,
-                        source,
-                        *s1,
-                        &format!("type mismatch: expected '{t1}'"),
-                    )?;
-                    write_message_and_lines(f, filename, source, *s2, &format!("found '{t2}'"))
-                }
+                type_system::Error::TypeMismatch(ty1, ty2, span) => write_message_and_lines(
+                    f,
+                    filename,
+                    source,
+                    *span,
+                    &format!("expected type '{ty1}' but found '{ty2}'"),
+                ),
                 type_system::Error::InfiniteType(ty, span) => write_message_and_lines(
                     f,
                     filename,
@@ -120,7 +117,7 @@ impl fmt::Display for Error {
                     source,
                     *span,
                     &format!(
-                        "operator '({op})' has type '{ty}', but expected a binary function type 'a -> b -> c'"
+                        "operator '({op})' has type '{ty}' but expected a binary function type 'a -> b -> c'"
                     ),
                 ),
                 type_system::Error::NoInstance(cons, ty, span) => write_message_and_lines(
