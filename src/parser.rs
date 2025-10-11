@@ -1,7 +1,7 @@
 use crate::{
     context::{Context, Node, NodeId},
     error::SyntaxError,
-    expr::{Expr, InfixOp, PrefixOp},
+    expr::Expr,
     lexer::{Lexer, Token},
     span::Span,
 };
@@ -49,18 +49,18 @@ impl<'a> Parser<'a> {
                     self.advance()?;
                     self.expect(Token::Equal)?;
 
-                    let expr = self.parse_expr(0.0)?;
+                    let expr = self.parse_expr(0)?;
                     self.expect(Token::Semicolon)?;
 
                     let bind = self.context.add_bind(&name, expr);
                     self.context
-                        .set_span(bind, span.merge(*self.context.get_span(expr)));
+                        .set_span(bind, span.merge(self.context.get_span(expr)));
 
                     nodes.push(bind);
                 }
 
                 _ => {
-                    nodes.push(self.parse_expr(0.0)?);
+                    nodes.push(self.parse_expr(0)?);
                 }
             }
         }
@@ -145,7 +145,7 @@ impl<'a> Parser<'a> {
                     let mut elems = Vec::new();
 
                     loop {
-                        let elem = self.parse_expr(0.0)?;
+                        let elem = self.parse_expr(0)?;
                         elems.push(elem);
 
                         if self.token == Token::Comma {
@@ -182,14 +182,14 @@ impl<'a> Parser<'a> {
             Token::If => {
                 let span = self.span;
                 self.advance()?;
-                let cond = self.parse_expr(0.0)?;
+                let cond = self.parse_expr(0)?;
                 self.expect(Token::Then)?;
-                let then = self.parse_expr(0.0)?;
+                let then = self.parse_expr(0)?;
                 self.expect(Token::Else)?;
-                let alt = self.parse_expr(0.0)?;
+                let alt = self.parse_expr(0)?;
                 let expr = self.context.add_expr(Expr::Condition { cond, then, alt });
                 self.context
-                    .set_span(expr, span.merge(*self.context.get_span(alt)));
+                    .set_span(expr, span.merge(self.context.get_span(alt)));
                 Ok(expr)
             }
 
@@ -202,7 +202,7 @@ impl<'a> Parser<'a> {
                     self.advance()?;
                     Ok(expr)
                 } else {
-                    let expr = self.parse_expr(0.0)?;
+                    let expr = self.parse_expr(0)?;
                     self.context.set_span(expr, span.merge(self.span));
                     self.expect(Token::ParenRight)?;
                     Ok(expr)
@@ -216,30 +216,14 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_prefix(&mut self) -> Result<NodeId> {
-        if let Some(op) = PrefixOp::from_token(&self.token) {
-            match op {
-                PrefixOp::Neg | PrefixOp::Not => {
-                    let span = self.span;
-                    self.advance()?;
-                    let (_, r_bp) = op.precedence();
-                    let rhs = self.parse_expr(r_bp)?;
-                    let expr = self.context.add_expr(Expr::Prefix { op, rhs });
-                    self.context
-                        .set_span(expr, span.merge(*self.context.get_span(rhs)));
-                    Ok(expr)
-                }
-            }
-        } else {
-            unreachable!()
-        }
-    }
-
-    fn parse_infix(&mut self, lhs: NodeId, min_bp: f32) -> Result<NodeId> {
-        let mut lhs = lhs;
-
-        while let Some(op) = InfixOp::from_token(&self.token) {
-            let (l_bp, r_bp) = op.precedence();
+    fn parse_in(&mut self, mut lhs: NodeId, min_bp: i32) -> Result<NodeId> {
+        while let Token::Operator(op) = self.token.clone() {
+            let (l_bp, r_bp) = self
+                .context
+                .get_operator(&op)
+                .cloned()
+                .unwrap_or_default()
+                .binding_power();
             if l_bp < min_bp {
                 break;
             }
@@ -248,9 +232,7 @@ impl<'a> Parser<'a> {
             let expr = self.context.add_expr(Expr::Infix { lhs, op, rhs });
             self.context.set_span(
                 expr,
-                self.context
-                    .get_span(lhs)
-                    .merge(*self.context.get_span(rhs)),
+                self.context.get_span(lhs).merge(self.context.get_span(rhs)),
             );
             lhs = expr;
         }
@@ -258,26 +240,21 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
-    fn parse_expr(&mut self, min_bp: f32) -> Result<NodeId> {
-        let mut expr = if matches!(self.token, Token::Hyphen | Token::Bang) {
-            self.parse_prefix()?
-        } else {
-            self.parse_atom()?
-        };
+    fn parse_expr(&mut self, min_bp: i32) -> Result<NodeId> {
+        let mut expr = self.parse_atom()?;
 
         if self.token == Token::HyphenGreaterThan {
-            if let Node::Expr(Expr::Identifier(_)) = self.context.get_node(expr) {
+            if let Node::Expr(Expr::Identifier(param)) = self.context.get_node(expr).clone() {
                 self.advance()?;
 
-                let param = expr;
-                let body = self.parse_expr(0.0)?;
+                let body = self.parse_expr(0)?;
 
                 expr = self.context.add_expr(Expr::Lambda { param, body });
                 self.context.set_span(
                     expr,
                     self.context
-                        .get_span(param)
-                        .merge(*self.context.get_span(body)),
+                        .get_span(expr)
+                        .merge(self.context.get_span(body)),
                 );
             } else {
                 return Err(SyntaxError::UnexpectedToken(
@@ -305,29 +282,12 @@ impl<'a> Parser<'a> {
                 expr,
                 self.context
                     .get_span(func)
-                    .merge(*self.context.get_span(arg)),
+                    .merge(self.context.get_span(arg)),
             );
         }
 
-        if matches!(
-            self.token,
-            Token::AmpersandAmpersand
-                | Token::BangEqual
-                | Token::Colon
-                | Token::EqualEqual
-                | Token::GreaterThan
-                | Token::GreaterThanEqual
-                | Token::Hyphen
-                | Token::LessThan
-                | Token::LessThanEqual
-                | Token::Percent
-                | Token::PipePipe
-                | Token::Plus
-                | Token::PlusPlus
-                | Token::Slash
-                | Token::Star
-        ) {
-            expr = self.parse_infix(expr, min_bp)?
+        if matches!(self.token, Token::Operator(_)) {
+            expr = self.parse_in(expr, min_bp)?
         }
 
         Ok(expr)

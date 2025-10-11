@@ -1,3 +1,5 @@
+#![allow(clippy::type_complexity)]
+
 mod context;
 mod error;
 mod eval;
@@ -219,6 +221,18 @@ fn run() -> Result<()> {
                                 span.start.line, span.start.column
                             );
                         }
+                        type_system::Error::UnknownOperator(op, span) => {
+                            println!(
+                                "{}:{}: unknown operator '({op})'",
+                                span.start.line, span.start.column
+                            );
+                        }
+                        type_system::Error::InvalidOperator(op, ty, span) => {
+                            println!(
+                                "{}:{}: invalid operator '({op})' with type '{ty}' it should be '_ -> _ -> _'",
+                                span.start.line, span.start.column
+                            );
+                        }
                         type_system::Error::NoInstance(cons, ty, span) => {
                             println!(
                                 "{}:{}: No '{cons}' instance for type '{ty}'",
@@ -243,7 +257,7 @@ fn run() -> Result<()> {
                                     "{}:{}: list is empty",
                                     span.start.line, span.start.column
                                 ),
-                                eval::Error::IOError(message, span) => {
+                                eval::Error::IO(message, span) => {
                                     println!("{}:{}: {message}", span.start.line, span.start.column)
                                 }
                             }

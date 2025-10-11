@@ -30,7 +30,7 @@ let filter = pred -> l ->
 
 // Append two lists
 let append = l1 -> l2 ->
-	foldl (acc -> x -> acc ++ [x]) l2 l1;
+	foldl (acc -> x -> acc ++ [x]) l1 l2;
 
 // Concatenate a list of lists
 let concat = ll ->
@@ -70,12 +70,12 @@ let drop = n -> l ->
 
 // Take while predicate holds
 let take_while = pred -> l ->
-	if l == [] || !(pred (head l)) then []
+	if l == [] || not (pred (head l)) then []
 	else head l : take_while pred (tail l);
 
 // Drop while predicate holds
 let drop_while = pred -> l ->
-	if l == [] || !(pred (head l)) then l
+	if l == [] || not (pred (head l)) then l
 	else drop_while pred (tail l);
 
 // Sum of a list

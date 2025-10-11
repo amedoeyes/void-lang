@@ -6,16 +6,59 @@ use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 
 use crate::context::{Context, Node, NodeId};
-use crate::{
-    expr::{Expr, InfixOp, PrefixOp},
-    span::Span,
-};
+use crate::{expr::Expr, span::Span};
+
+#[macro_export]
+macro_rules! ty  {
+    (Int) => { Type::Int };
+    (Char) => { Type::Char };
+    (Bool) => { Type::Bool };
+    (()) => { Type::Unit };
+
+    ([$inner:tt]) => {
+        Type::List(Box::new(ty!($inner)))
+    };
+
+    ($param:tt -> $body:tt) => {
+        Type::Fun(Box::new(ty!($param)), Box::new(ty!($body)))
+    };
+
+    ($param:tt -> $body:tt -> $($rest:tt)*) => {
+        Type::Fun(Box::new(ty!($param)), Box::new(ty!($body -> $($rest)*)))
+    };
+
+    ($var:literal) => {
+        Type::Var($var)
+    };
+
+    (($($inner:tt)*)) => {
+        ty!($($inner)*)
+    };
+
+    (forall $($vars:literal)* . ($($class:tt $var:literal),*) => $($body:tt)*) => {
+        Type::Poly(
+            [$($vars),*].into_iter().collect::<FxHashSet<usize>>(),
+            Vec::from([$(Constraint { class: TypeClass::$class, ty: Type::Var($var), span: Span::default() }),*]),
+            Box::new(ty!($($body)*))
+        )
+    };
+
+    (forall $($vars:literal)* . $($body:tt)*) => {
+        Type::Poly(
+            [$($vars),*].into_iter().collect::<FxHashSet<usize>>(),
+            Vec::new(),
+            Box::new(ty!($($body)*))
+        )
+    };
+}
 
 #[derive(Debug)]
 pub enum Error {
     TypeMismatch((String, Span), (String, Span)),
     InfiniteType(String, Span),
     UnknownIdentifier(String, Span),
+    UnknownOperator(String, Span),
+    InvalidOperator(String, String, Span),
     NoInstance(String, String, Span),
 }
 
@@ -45,8 +88,9 @@ pub struct Constraint {
     pub span: Span,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub enum Type {
+    #[default]
     Unit,
     Int,
     Char,
@@ -176,16 +220,32 @@ impl Env {
         let mut instances = FxHashMap::default();
         instances.insert(
             TypeClass::Eq,
-            Vec::from([Type::Int, Type::Bool, Type::Char, Type::Unit]),
+            Vec::from([
+                ty!(Int),
+                ty!(Bool),
+                ty!(Char),
+                ty!(()),
+                ty!([Int]),
+                ty!([Bool]),
+                ty!([Char]),
+                ty!([()]),
+            ]),
         );
         instances.insert(
             TypeClass::Ord,
-            Vec::from([Type::Int, Type::Bool, Type::Char]),
+            Vec::from([
+                ty!(Int),
+                ty!(Bool),
+                ty!(Char),
+                ty!([Int]),
+                ty!([Bool]),
+                ty!([Char]),
+            ]),
         );
-        instances.insert(TypeClass::Num, Vec::from([Type::Int]));
+        instances.insert(TypeClass::Num, Vec::from([ty!(Int)]));
 
         Env {
-            counter: 1000,
+            counter: 0,
             substitutions: FxHashMap::default(),
             instances,
             constraints: Vec::new(),
@@ -198,35 +258,28 @@ impl Env {
         var
     }
 
-    fn add_constraint(&mut self, class: TypeClass, ty: Type, span: Span) {
-        self.constraints.push(Constraint { class, ty, span });
-    }
-
-    fn solve_constraints(&mut self) -> Result<()> {
-        self.constraints.iter().try_for_each(|constraint| {
-            let cons_ty = self.substitute(&constraint.ty);
-            if self.check_instance(&constraint.class, &cons_ty) {
+    fn solve_constraints(&self) -> Result<()> {
+        self.constraints.iter().try_for_each(|cons| {
+            let cons_ty = self.substitute(&cons.ty);
+            if self.check_instance(cons.class, &cons_ty) {
                 Ok(())
             } else {
                 Err(Error::NoInstance(
-                    constraint.class.to_string(),
+                    cons.class.to_string(),
                     cons_ty.to_string(),
-                    constraint.span,
+                    cons.span,
                 ))
             }
         })
     }
 
-    fn check_instance(&self, class: &TypeClass, ty: &Type) -> bool {
+    fn check_instance(&self, class: TypeClass, ty: &Type) -> bool {
         match ty {
             Type::Var(_) => true,
-            Type::List(item) => match class {
-                TypeClass::Eq | TypeClass::Ord => self.check_instance(class, item),
-                _ => false,
-            },
+            Type::List(inner) => self.check_instance(class, inner),
             _ => self
                 .instances
-                .get(class)
+                .get(&class)
                 .is_some_and(|instances| instances.contains(ty)),
         }
     }
@@ -256,30 +309,43 @@ impl Env {
         }
     }
 
-    fn instantiate(&mut self, ty: Type) -> Type {
+    fn instantiate(&mut self, ty: Type, span: Span) -> Type {
         let mut substitutions = FxHashMap::default();
-        self.instantiate_helper(ty, &mut substitutions)
+        self.instantiate_helper(ty, span, &mut substitutions)
     }
 
-    fn instantiate_helper(&mut self, ty: Type, substitutions: &mut FxHashMap<usize, Type>) -> Type {
+    fn instantiate_helper(
+        &mut self,
+        ty: Type,
+        span: Span,
+        substitutions: &mut FxHashMap<usize, Type>,
+    ) -> Type {
         match ty {
             Type::Poly(vars, constraints, body) => {
                 for var in vars {
                     substitutions.insert(var, self.fresh_var());
                 }
 
-                for constraint in constraints {
-                    let constrained_ty = self.instantiate_helper(constraint.ty, substitutions);
-                    self.add_constraint(constraint.class, constrained_ty, constraint.span);
+                for cons in constraints {
+                    let cons_ty = self.instantiate_helper(cons.ty, span, substitutions);
+                    self.constraints.push(Constraint {
+                        class: cons.class,
+                        ty: cons_ty,
+                        span,
+                    });
                 }
 
-                self.instantiate_helper(*body, substitutions)
+                self.instantiate_helper(*body, span, substitutions)
             }
             Type::Var(n) => substitutions.get(&n).cloned().unwrap_or(ty),
-            Type::List(item) => Type::List(Box::new(self.instantiate_helper(*item, substitutions))),
+            Type::List(item) => Type::List(Box::new(self.instantiate_helper(
+                *item,
+                span,
+                substitutions,
+            ))),
             Type::Fun(param, body) => Type::Fun(
-                Box::new(self.instantiate_helper(*param, substitutions)),
-                Box::new(self.instantiate_helper(*body, substitutions)),
+                Box::new(self.instantiate_helper(*param, span, substitutions)),
+                Box::new(self.instantiate_helper(*body, span, substitutions)),
             ),
             _ => ty,
         }
@@ -375,8 +441,8 @@ fn infer_expr(
             {
                 let next_head_ty = infer_expr(ctx, env, env_vars, next_head)?;
                 env.unify(
-                    (&head_ty, *ctx.get_span(next_head)),
-                    (&next_head_ty, *ctx.get_span(next_head)),
+                    (&head_ty, ctx.get_span(next_head)),
+                    (&next_head_ty, ctx.get_span(next_head)),
                 )?;
                 tail = next_tail;
             }
@@ -386,117 +452,72 @@ fn infer_expr(
         Node::Expr(Expr::Identifier(name)) => env.instantiate(
             env_vars
                 .get(&name)
-                .ok_or(Error::UnknownIdentifier(name, *ctx.get_span(expr)))?
+                .ok_or(Error::UnknownIdentifier(name, ctx.get_span(expr)))?
                 .clone(),
+            ctx.get_span(expr),
         ),
         Node::Expr(Expr::Condition { cond, then, alt }) => {
             let cond_ty = infer_expr(ctx, env, env_vars, cond)?;
 
             env.unify(
-                (&Type::Bool, *ctx.get_span(cond)),
-                (&cond_ty, *ctx.get_span(cond)),
+                (&Type::Bool, ctx.get_span(cond)),
+                (&cond_ty, ctx.get_span(cond)),
             )?;
 
             let then_ty = infer_expr(ctx, env, env_vars, then)?;
             let alt_ty = infer_expr(ctx, env, env_vars, alt)?;
 
-            env.unify(
-                (&then_ty, *ctx.get_span(then)),
-                (&alt_ty, *ctx.get_span(alt)),
-            )?;
+            env.unify((&then_ty, ctx.get_span(then)), (&alt_ty, ctx.get_span(alt)))?;
 
             alt_ty
-        }
-        Node::Expr(Expr::Prefix { op, rhs }) => {
-            let rhs_ty = infer_expr(ctx, env, env_vars, rhs)?;
-            match op {
-                PrefixOp::Neg => {
-                    env.unify(
-                        (&Type::Int, *ctx.get_span(rhs)),
-                        (&rhs_ty, *ctx.get_span(rhs)),
-                    )?;
-                    Type::Int
-                }
-                PrefixOp::Not => {
-                    env.unify(
-                        (&Type::Bool, *ctx.get_span(rhs)),
-                        (&rhs_ty, *ctx.get_span(rhs)),
-                    )?;
-                    Type::Bool
-                }
-            }
         }
         Node::Expr(Expr::Infix { lhs, op, rhs }) => {
             let lhs_ty = infer_expr(ctx, env, env_vars, lhs)?;
             let rhs_ty = infer_expr(ctx, env, env_vars, rhs)?;
 
-            match op {
-                InfixOp::Add | InfixOp::Sub | InfixOp::Mul | InfixOp::Div | InfixOp::Mod => {
-                    env.unify((&lhs_ty, *ctx.get_span(lhs)), (&rhs_ty, *ctx.get_span(rhs)))?;
-                    env.add_constraint(TypeClass::Num, lhs_ty.clone(), *ctx.get_span(lhs));
-                    rhs_ty
-                }
-                InfixOp::Lt | InfixOp::Gt | InfixOp::Lte | InfixOp::Gte => {
-                    env.unify((&lhs_ty, *ctx.get_span(lhs)), (&rhs_ty, *ctx.get_span(rhs)))?;
-                    env.add_constraint(TypeClass::Ord, lhs_ty, *ctx.get_span(lhs));
-                    Type::Bool
-                }
-                InfixOp::Eq | InfixOp::Neq => {
-                    env.unify((&lhs_ty, *ctx.get_span(lhs)), (&rhs_ty, *ctx.get_span(rhs)))?;
-                    env.add_constraint(TypeClass::Eq, lhs_ty, *ctx.get_span(lhs));
-                    Type::Bool
-                }
-                InfixOp::And | InfixOp::Or => {
-                    env.unify(
-                        (&Type::Bool, *ctx.get_span(rhs)),
-                        (&lhs_ty, *ctx.get_span(lhs)),
-                    )?;
-                    env.unify(
-                        (&Type::Bool, *ctx.get_span(lhs)),
-                        (&rhs_ty, *ctx.get_span(rhs)),
-                    )?;
-                    Type::Bool
-                }
-                InfixOp::Cons => {
-                    env.unify(
-                        (&Type::List(Box::new(lhs_ty)), *ctx.get_span(lhs)),
-                        (&rhs_ty, *ctx.get_span(rhs)),
-                    )?;
-                    rhs_ty
-                }
-                InfixOp::Append => {
-                    let ty = env.fresh_var();
-                    env.unify(
-                        (&Type::List(Box::new(ty.clone())), Span::default()),
-                        (&lhs_ty, *ctx.get_span(lhs)),
-                    )?;
-                    env.unify(
-                        (&Type::List(Box::new(ty)), Span::default()),
-                        (&rhs_ty, *ctx.get_span(rhs)),
-                    )?;
-                    rhs_ty
-                }
-            }
+            let mut op_ty = env.instantiate(
+                env_vars
+                    .get(&op)
+                    .ok_or(Error::UnknownOperator(op.clone(), ctx.get_span(expr)))?
+                    .clone(),
+                ctx.get_span(expr),
+            );
+
+            let Some((lhs_param, rhs_param, result_body)) = (match op_ty {
+                Type::Fun(ref lhs_param, ref mut body) => match body.as_mut() {
+                    Type::Fun(rhs_param, result_body) => Some((lhs_param, rhs_param, result_body)),
+                    _ => None,
+                },
+                _ => None,
+            }) else {
+                return Err(Error::InvalidOperator(
+                    op,
+                    op_ty.to_string(),
+                    ctx.get_span(expr),
+                ));
+            };
+
+            env.unify((lhs_param, ctx.get_span(lhs)), (&lhs_ty, ctx.get_span(lhs)))?;
+            env.unify((rhs_param, ctx.get_span(rhs)), (&rhs_ty, ctx.get_span(rhs)))?;
+
+            *std::mem::take(result_body)
         }
-        Node::Expr(Expr::Lambda { param, body }) => match ctx.get_node(param) {
-            Node::Expr(Expr::Identifier(id)) => {
-                let param_ty = env.fresh_var();
-                let mut new_env_vars = env_vars.clone();
-                new_env_vars.insert(id.clone(), param_ty.clone());
-                let body_ty = infer_expr(ctx, env, &new_env_vars, body)?;
-                Type::Fun(Box::new(param_ty), Box::new(body_ty))
-            }
-            _ => unreachable!(),
-        },
+        Node::Expr(Expr::Lambda { param, body }) => {
+            let param_ty = env.fresh_var();
+            let mut new_env_vars = env_vars.clone();
+            new_env_vars.insert(param, param_ty.clone());
+            let body_ty = infer_expr(ctx, env, &new_env_vars, body)?;
+            Type::Fun(Box::new(param_ty), Box::new(body_ty))
+        }
         Node::Expr(Expr::Application { func, arg }) => {
             let func_ty = infer_expr(ctx, env, env_vars, func)?;
             let arg_ty = infer_expr(ctx, env, env_vars, arg)?;
             let ret_ty = env.fresh_var();
             env.unify(
-                (&func_ty, *ctx.get_span(func)),
+                (&func_ty, ctx.get_span(func)),
                 (
                     &Type::Fun(Box::new(arg_ty), Box::new(ret_ty.clone())),
-                    *ctx.get_span(expr),
+                    ctx.get_span(expr),
                 ),
             )?;
             ret_ty

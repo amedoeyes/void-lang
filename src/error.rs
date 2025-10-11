@@ -93,7 +93,6 @@ impl fmt::Display for Error {
                     )?;
                     write_message_and_lines(f, filename, source, *s2, &format!("found '{t2}'"))
                 }
-
                 type_system::Error::InfiniteType(ty, span) => write_message_and_lines(
                     f,
                     filename,
@@ -101,7 +100,6 @@ impl fmt::Display for Error {
                     *span,
                     &format!("infinite type '{ty}'"),
                 ),
-
                 type_system::Error::UnknownIdentifier(id, span) => write_message_and_lines(
                     f,
                     filename,
@@ -109,13 +107,28 @@ impl fmt::Display for Error {
                     *span,
                     &format!("unknown identifier '{id}'"),
                 ),
-
+                type_system::Error::UnknownOperator(op, span) => write_message_and_lines(
+                    f,
+                    filename,
+                    source,
+                    *span,
+                    &format!("unknown operator '({op})'"),
+                ),
+                type_system::Error::InvalidOperator(op, ty, span) => write_message_and_lines(
+                    f,
+                    filename,
+                    source,
+                    *span,
+                    &format!(
+                        "operator '({op})' has type '{ty}', but expected a binary function type 'a -> b -> c'"
+                    ),
+                ),
                 type_system::Error::NoInstance(cons, ty, span) => write_message_and_lines(
                     f,
                     filename,
                     source,
                     *span,
-                    &format!("No '{cons}' instance for type '{ty}'"),
+                    &format!("no '{cons}' instance for type '{ty}'"),
                 ),
             },
 
@@ -126,7 +139,7 @@ impl fmt::Display for Error {
                 eval::Error::EmptyList(span) => {
                     write_message_and_lines(f, filename, source, *span, "list is empty")
                 }
-                eval::Error::IOError(message, span) => {
+                eval::Error::IO(message, span) => {
                     write_message_and_lines(f, filename, source, *span, message)
                 }
             },

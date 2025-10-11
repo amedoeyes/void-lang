@@ -1,5 +1,5 @@
 use core::fmt;
-use std::{cell::RefCell, cmp::Ordering, collections::VecDeque, ops::Deref, rc::Rc, result};
+use std::{cell::RefCell, collections::VecDeque, ops::Deref, rc::Rc, result};
 
 use fxhash::FxHashMap;
 use itertools::Itertools;
@@ -7,7 +7,7 @@ use string_cache::DefaultAtom;
 
 use crate::{
     context::{BuiltinKind, Context, Node, NodeId},
-    expr::{Expr, InfixOp, PrefixOp},
+    expr::Expr,
     span::Span,
 };
 
@@ -15,7 +15,7 @@ use crate::{
 pub enum Error {
     DivisionByZero(Span),
     EmptyList(Span),
-    IOError(String, Span),
+    IO(String, Span),
 }
 
 pub type Result<T> = result::Result<T, Error>;
@@ -62,160 +62,6 @@ impl List {
             }
         }
     }
-}
-
-pub fn add_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
-    let v1 = v1.force(ctx)?;
-    let v2 = v2.force(ctx)?;
-
-    match (v1, v2) {
-        (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a + b)),
-        _ => unreachable!(),
-    }
-}
-
-pub fn sub_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
-    let v1 = v1.force(ctx)?;
-    let v2 = v2.force(ctx)?;
-
-    match (v1, v2) {
-        (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a - b)),
-        _ => unreachable!(),
-    }
-}
-
-pub fn div_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
-    let v1 = v1.force(ctx)?;
-    let v2 = v2.force(ctx)?;
-
-    match (v1, v2) {
-        (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a / b)),
-        _ => unreachable!(),
-    }
-}
-
-pub fn mul_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
-    let v1 = v1.force(ctx)?;
-    let v2 = v2.force(ctx)?;
-
-    match (v1, v2) {
-        (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a * b)),
-        _ => unreachable!(),
-    }
-}
-
-pub fn mod_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
-    let v1 = v1.force(ctx)?;
-    let v2 = v2.force(ctx)?;
-
-    match (v1, v2) {
-        (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a & b)),
-        _ => unreachable!(),
-    }
-}
-
-pub fn and_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
-    let v1 = v1.force(ctx)?;
-    let v2 = v2.force(ctx)?;
-
-    match (v1, v2) {
-        (Value::Boolean(a), Value::Boolean(b)) => Ok(Value::Boolean(a && b)),
-        _ => unreachable!(),
-    }
-}
-
-pub fn or_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
-    let v1 = v1.force(ctx)?;
-    let v2 = v2.force(ctx)?;
-
-    match (v1, v2) {
-        (Value::Boolean(a), Value::Boolean(b)) => Ok(Value::Boolean(a || b)),
-        _ => unreachable!(),
-    }
-}
-
-pub fn cons_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
-    let v1 = v1.force(ctx)?;
-    let v2 = v2.force(ctx)?;
-
-    match (v1, v2) {
-        (Value::List(a), Value::List(b)) => Ok(Value::List(b.clone().push(Value::List(a.clone())))),
-        (a, Value::List(b)) => Ok(Value::List(b.clone().push(a.clone()))),
-        _ => unreachable!(),
-    }
-}
-
-pub fn append_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
-    let v1 = v1.force(ctx)?;
-    let v2 = v2.force(ctx)?;
-
-    match (v1, v2) {
-        (Value::List(a), Value::List(b)) => Ok(Value::List(a.clone().append(b.clone()))),
-        _ => unreachable!(),
-    }
-}
-
-pub fn cmp_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Ordering> {
-    let v1 = v1.force(ctx)?;
-    let v2 = v2.force(ctx)?;
-
-    match (v1, v2) {
-        (Value::Integer(a), Value::Integer(b)) => Ok(a.cmp(&b)),
-        (Value::Boolean(a), Value::Boolean(b)) => Ok(a.cmp(&b)),
-        (Value::Char(a), Value::Char(b)) => Ok(a.cmp(&b)),
-        (Value::List(a), Value::List(b)) => {
-            let mut l1 = a;
-            let mut l2 = b;
-            loop {
-                match (l1.head(), l2.head()) {
-                    (None, None) => return Ok(Ordering::Equal),
-                    (None, Some(_)) => return Ok(Ordering::Less),
-                    (Some(_), None) => return Ok(Ordering::Greater),
-                    (Some(mut a), Some(mut b)) => match cmp_values(ctx, &mut a, &mut b)? {
-                        Ordering::Equal => {
-                            l1 = l1.tail().unwrap_or_default();
-                            l2 = l2.tail().unwrap_or_default();
-                        }
-                        ordering => return Ok(ordering),
-                    },
-                }
-            }
-        }
-        (Value::Unit, Value::Unit) => Ok(Ordering::Equal),
-        _ => unreachable!(),
-    }
-}
-
-pub fn eq_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
-    Ok(Value::Boolean(cmp_values(ctx, v1, v2)? == Ordering::Equal))
-}
-
-pub fn neq_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
-    Ok(Value::Boolean(cmp_values(ctx, v1, v2)? != Ordering::Equal))
-}
-
-pub fn lt_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
-    Ok(Value::Boolean(cmp_values(ctx, v1, v2)? == Ordering::Less))
-}
-
-pub fn le_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
-    Ok(Value::Boolean(matches!(
-        cmp_values(ctx, v1, v2)?,
-        Ordering::Less | Ordering::Equal
-    )))
-}
-
-pub fn gt_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
-    Ok(Value::Boolean(
-        cmp_values(ctx, v1, v2)? == Ordering::Greater,
-    ))
-}
-
-pub fn ge_values(ctx: &Context, v1: &mut Value, v2: &mut Value) -> Result<Value> {
-    Ok(Value::Boolean(matches!(
-        cmp_values(ctx, v1, v2)?,
-        Ordering::Greater | Ordering::Equal
-    )))
 }
 
 #[derive(Debug, Clone)]
@@ -280,7 +126,7 @@ impl Value {
                     }
                 }
             }
-            Value::Builtin(BuiltinKind::Value(v)) => Ok(v.borrow().clone()),
+            Value::Builtin(BuiltinKind::Value(v)) => Ok(*v.clone()),
             v => Ok(v.clone()),
         }
     }
@@ -378,8 +224,7 @@ pub type Env = Rc<RefCell<FxHashMap<DefaultAtom, SharedValue>>>;
 #[derive(Clone)]
 enum EvalState {
     Start,
-    Prefix(PrefixOp),
-    Infix(InfixOp),
+    Infix(String),
     Cond,
     Func,
     App,
@@ -447,16 +292,11 @@ fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<SharedValue> {
                     for (k, v) in frame.env.borrow().iter() {
                         closure_env.insert(k.clone(), v.clone());
                     }
-                    match ctx.get_node(param) {
-                        Node::Expr(Expr::Identifier(id)) => {
-                            result_stack.push_back(SharedValue::new(Value::Function {
-                                param: id.clone(),
-                                body,
-                                env: Rc::new(RefCell::new(closure_env)),
-                            }))
-                        }
-                        _ => unreachable!(),
-                    }
+                    result_stack.push_back(SharedValue::new(Value::Function {
+                        param,
+                        body,
+                        env: Rc::new(RefCell::new(closure_env)),
+                    }))
                 }
 
                 Node::Expr(Expr::Identifier(name)) => {
@@ -469,19 +309,6 @@ fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<SharedValue> {
                             .borrow_mut()
                             .force(ctx)?,
                     ));
-                }
-
-                Node::Expr(Expr::Prefix { op, rhs }) => {
-                    frame_stack.push_back(EvalFrame {
-                        state: EvalState::Prefix(op),
-                        ..frame.clone()
-                    });
-
-                    frame_stack.push_back(EvalFrame {
-                        expr: rhs,
-                        state: EvalState::Start,
-                        ..frame
-                    });
                 }
 
                 Node::Expr(Expr::Infix { lhs, op, rhs }) => {
@@ -532,44 +359,45 @@ fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<SharedValue> {
                 _ => unreachable!(),
             },
 
-            EvalState::Prefix(op) => {
-                let rhs = result_stack.pop_back().unwrap();
-                let rhs = rhs.borrow();
-
-                let res = match (op, &*rhs) {
-                    (PrefixOp::Neg, Value::Integer(n)) => Value::Integer(-n),
-                    (PrefixOp::Not, Value::Boolean(b)) => Value::Boolean(!b),
-                    _ => unreachable!(),
-                };
-
-                result_stack.push_back(SharedValue::new(res));
-            }
-
             EvalState::Infix(op) => {
                 let lhs = result_stack.pop_back().unwrap();
-                let mut lhs = lhs.borrow_mut();
                 let rhs = result_stack.pop_back().unwrap();
-                let mut rhs = rhs.borrow_mut();
 
-                let res = match op {
-                    InfixOp::Add => add_values(ctx, &mut lhs, &mut rhs)?,
-                    InfixOp::Sub => sub_values(ctx, &mut lhs, &mut rhs)?,
-                    InfixOp::Mul => mul_values(ctx, &mut lhs, &mut rhs)?,
-                    InfixOp::Div => div_values(ctx, &mut lhs, &mut rhs)?,
-                    InfixOp::Mod => mod_values(ctx, &mut lhs, &mut rhs)?,
-                    InfixOp::Eq => eq_values(ctx, &mut lhs, &mut rhs)?,
-                    InfixOp::Neq => neq_values(ctx, &mut lhs, &mut rhs)?,
-                    InfixOp::Lt => lt_values(ctx, &mut lhs, &mut rhs)?,
-                    InfixOp::Lte => le_values(ctx, &mut lhs, &mut rhs)?,
-                    InfixOp::Gt => gt_values(ctx, &mut lhs, &mut rhs)?,
-                    InfixOp::Gte => ge_values(ctx, &mut lhs, &mut rhs)?,
-                    InfixOp::And => and_values(ctx, &mut lhs, &mut rhs)?,
-                    InfixOp::Or => or_values(ctx, &mut lhs, &mut rhs)?,
-                    InfixOp::Cons => cons_values(ctx, &mut lhs, &mut rhs)?,
-                    InfixOp::Append => append_values(ctx, &mut lhs, &mut rhs)?,
+                match frame
+                    .env
+                    .borrow()
+                    .get(&op.into())
+                    .unwrap()
+                    .borrow_mut()
+                    .force(ctx)?
+                {
+                    Value::Builtin(BuiltinKind::Operator(f)) => {
+                        let res = f(
+                            ctx,
+                            (&lhs.borrow_mut().force(ctx)?, ctx.get_span(frame.expr)),
+                            (&rhs.borrow_mut().force(ctx)?, ctx.get_span(frame.expr)),
+                        )?;
+                        result_stack.push_back(SharedValue::new(res));
+                    }
+                    Value::Function {
+                        param: a,
+                        body,
+                        env,
+                    } => match ctx.get_node(body) {
+                        Node::Expr(Expr::Lambda { param: b, body }) => {
+                            env.borrow_mut().insert(DefaultAtom::from(a.as_str()), lhs);
+                            env.borrow_mut().insert(DefaultAtom::from(b.as_str()), rhs);
+                            frame_stack.push_back(EvalFrame {
+                                env,
+                                expr: *body,
+                                state: EvalState::Start,
+                            });
+                        }
+                        _ => unreachable!(),
+                    },
+
+                    _ => unreachable!(),
                 };
-
-                result_stack.push_back(SharedValue::new(res));
             }
 
             EvalState::Cond => {
@@ -619,7 +447,10 @@ fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<SharedValue> {
 
                 match &*func {
                     Value::Builtin(BuiltinKind::Function(f)) => {
-                        result_stack.push_back(f(ctx, arg.clone(), *ctx.get_span(frame.expr))?);
+                        result_stack.push_back(
+                            f(ctx, &arg.borrow(), ctx.get_span(frame.expr))
+                                .map(SharedValue::new)?,
+                        );
                     }
 
                     Value::Function { param, body, env } => {
@@ -676,13 +507,10 @@ pub fn evaluate(ctx: &Context, nodes: &[NodeId]) -> Result<Value> {
 
                 let val = match ctx.get_node(*expr) {
                     Node::Expr(Expr::Lambda { param, body }) => {
-                        let func = match ctx.get_node(*param) {
-                            Node::Expr(Expr::Identifier(id)) => Value::Function {
-                                param: id.clone(),
-                                body: *body,
-                                env: closure_env.clone(),
-                            },
-                            _ => unreachable!(),
+                        let func = Value::Function {
+                            param: param.clone(),
+                            body: *body,
+                            env: closure_env.clone(),
                         };
 
                         closure_env.borrow_mut().insert(

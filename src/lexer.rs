@@ -9,30 +9,14 @@ type Result<T> = std::result::Result<T, SyntaxError>;
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Token {
-    AmpersandAmpersand,
-    Bang,
-    BangEqual,
     BracketLeft,
     BracketRight,
-    Colon,
     Comma,
     Equal,
-    EqualEqual,
-    GreaterThan,
-    GreaterThanEqual,
-    Hyphen,
-    HyphenGreaterThan,
-    LessThan,
-    LessThanEqual,
     ParenLeft,
     ParenRight,
-    Percent,
-    PipePipe,
-    Plus,
-    PlusPlus,
     Semicolon,
-    Slash,
-    Star,
+    HyphenGreaterThan,
 
     Boolean(String),
     Integer(String),
@@ -45,77 +29,44 @@ pub enum Token {
     Then,
     Else,
 
+    Operator(String),
+
     Eof,
 }
 
 impl fmt::Display for Token {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Token::AmpersandAmpersand => write!(f, "&&"),
-            Token::Bang => write!(f, "!"),
-            Token::BangEqual => write!(f, "!="),
             Token::BracketLeft => write!(f, "["),
             Token::BracketRight => write!(f, "]"),
-            Token::Colon => write!(f, ":"),
             Token::Comma => write!(f, ","),
             Token::Equal => write!(f, "="),
-            Token::EqualEqual => write!(f, "=="),
-            Token::GreaterThan => write!(f, ">"),
-            Token::GreaterThanEqual => write!(f, ">="),
-            Token::Hyphen => write!(f, "-"),
             Token::HyphenGreaterThan => write!(f, "->"),
-            Token::LessThan => write!(f, "<"),
-            Token::LessThanEqual => write!(f, "<="),
             Token::ParenLeft => write!(f, "("),
             Token::ParenRight => write!(f, ")"),
-            Token::Percent => write!(f, "%"),
-            Token::PipePipe => write!(f, "||"),
-            Token::Plus => write!(f, "+"),
-            Token::PlusPlus => write!(f, "++"),
             Token::Semicolon => write!(f, ";"),
-            Token::Slash => write!(f, "/"),
-            Token::Star => write!(f, "*"),
-
             Token::Boolean(val) => write!(f, "{val}"),
             Token::Integer(val) => write!(f, "{val}"),
             Token::Char(val) => write!(f, "'{val}'"),
             Token::String(val) => write!(f, "\"{val}\""),
             Token::Identifier(val) => write!(f, "{val}"),
-
             Token::Let => write!(f, "let"),
             Token::If => write!(f, "if"),
             Token::Then => write!(f, "then"),
             Token::Else => write!(f, "else"),
-
+            Token::Operator(op) => write!(f, "({op})"),
             Token::Eof => write!(f, "EOF"),
         }
     }
 }
 
 const SYMBOLS: &[(&str, Token)] = &[
-    ("!=", Token::BangEqual),
-    ("&&", Token::AmpersandAmpersand),
-    ("++", Token::PlusPlus),
     ("->", Token::HyphenGreaterThan),
-    ("<=", Token::LessThanEqual),
-    ("==", Token::EqualEqual),
-    (">=", Token::GreaterThanEqual),
-    ("||", Token::PipePipe),
-    //
-    ("!", Token::Bang),
-    ("%", Token::Percent),
     ("(", Token::ParenLeft),
     (")", Token::ParenRight),
-    ("*", Token::Star),
-    ("+", Token::Plus),
     (",", Token::Comma),
-    ("-", Token::Hyphen),
-    ("/", Token::Slash),
-    (":", Token::Colon),
     (";", Token::Semicolon),
-    ("<", Token::LessThan),
     ("=", Token::Equal),
-    (">", Token::GreaterThan),
     ("[", Token::BracketLeft),
     ("]", Token::BracketRight),
 ];
@@ -155,6 +106,18 @@ impl Lexer {
             return Ok((Token::Eof, Span::new(self.position, self.position)));
         }
 
+        let current_char = self.current_char().unwrap();
+
+        if is_operator_char(current_char) {
+            let slice = self.slice_buffer_while(is_operator_char);
+            if !SYMBOLS.iter().any(|(sym, _)| slice == *sym) {
+                return Ok((
+                    Token::Operator(slice.to_string()),
+                    self.advance_with_span(slice.len()),
+                ));
+            }
+        }
+
         for symbol in SYMBOLS {
             if self.remaining_buffer().starts_with(symbol.0) {
                 return Ok((symbol.1.clone(), self.advance_with_span(symbol.0.len())));
@@ -174,8 +137,6 @@ impl Lexer {
                 return Ok((keyword.1.clone(), self.advance_with_span(keyword.0.len())));
             }
         }
-
-        let current_char = self.current_char().unwrap();
 
         if current_char == 't' || current_char == 'f' {
             for pattern in ["true", "false"] {
@@ -365,4 +326,29 @@ impl Lexer {
         end.column -= 1;
         Span::new(start, end)
     }
+}
+
+fn is_operator_char(ch: char) -> bool {
+    matches!(
+        ch,
+        '!' | '#'
+            | '$'
+            | '%'
+            | '&'
+            | '*'
+            | '+'
+            | '-'
+            | '.'
+            | '/'
+            | ':'
+            | '<'
+            | '='
+            | '>'
+            | '?'
+            | '@'
+            | '\\'
+            | '^'
+            | '|'
+            | '~'
+    )
 }
