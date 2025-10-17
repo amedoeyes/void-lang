@@ -10,25 +10,25 @@ use crate::{expr::Expr, span::Span};
 
 #[macro_export]
 macro_rules! ty  {
-    (Int) => { Type::Int };
-    (Char) => { Type::Char };
-    (Bool) => { Type::Bool };
+    (Int) => { $crate::type_system::Type::Int };
+    (Char) => { $crate::type_system::Type::Char };
+    (Bool) => { $crate::type_system::Type::Bool };
     (()) => { Type::Unit };
 
     ([$inner:tt]) => {
-        Type::List(Box::new(ty!($inner)))
+        $crate::type_system::Type::List(Box::new(ty!($inner)))
     };
 
     ($param:tt -> $body:tt) => {
-        Type::Fun(Box::new(ty!($param)), Box::new(ty!($body)))
+        $crate::type_system::Type::Fun(Box::new(ty!($param)), Box::new(ty!($body)))
     };
 
     ($param:tt -> $body:tt -> $($rest:tt)*) => {
-        Type::Fun(Box::new(ty!($param)), Box::new(ty!($body -> $($rest)*)))
+        $crate::type_system::Type::Fun(Box::new(ty!($param)), Box::new(ty!($body -> $($rest)*)))
     };
 
     ($var:literal) => {
-        Type::Var($var)
+        $crate::type_system::Type::Var($var)
     };
 
     (($($inner:tt)*)) => {
@@ -36,9 +36,15 @@ macro_rules! ty  {
     };
 
     (forall $($vars:literal)* . ($($class:tt $var:literal),*) => $($body:tt)*) => {
-        Type::Poly(
+        $crate::type_system::Type::Poly(
             [$($vars),*].into_iter().collect::<FxHashSet<usize>>(),
-            Vec::from([$(Constraint { class: TypeClass::$class, ty: Type::Var($var), span: Span::default() }),*]),
+            Vec::from([
+                $(Constraint {
+                    class: $crate::type_system::TypeClass::$class,
+                    ty: $crate::type_system::Type::Var($var),
+                    span: Span::default()
+                }),*
+            ]),
             Box::new(ty!($($body)*))
         )
     };
@@ -418,89 +424,95 @@ fn infer_expr(
     env_vars: &FxHashMap<String, Type>,
     expr: NodeId,
 ) -> Result<Type> {
-    let ty = match ctx.get_node(expr).clone() {
-        Node::Expr(Expr::Unit) => Type::Unit,
-        Node::Expr(Expr::Integer(_)) => Type::Int,
-        Node::Expr(Expr::Char(_)) => Type::Char,
-        Node::Expr(Expr::Boolean(_)) => Type::Bool,
-        Node::Expr(Expr::Nil) => Type::List(Box::new(env.fresh_var())),
-        Node::Expr(Expr::Cons { head, tail }) => {
-            let head_ty = infer_expr(ctx, env, env_vars, head)?;
-            let mut tail = tail;
+    let ty = ctx.get_type(expr).as_ref();
 
-            while let Node::Expr(Expr::Cons {
-                head: next_head,
-                tail: next_tail,
-            }) = ctx.get_node(tail).clone()
-            {
-                let next_head_ty = infer_expr(ctx, env, env_vars, next_head)?;
-                env.unify(&head_ty, &next_head_ty, ctx.get_span(next_head))?;
-                tail = next_tail;
+    let ty = if let Some(ty) = ty {
+        ty.clone()
+    } else {
+        match ctx.get_node(expr).clone() {
+            Node::Expr(Expr::Unit) => Type::Unit,
+            Node::Expr(Expr::Integer(_)) => Type::Int,
+            Node::Expr(Expr::Char(_)) => Type::Char,
+            Node::Expr(Expr::Boolean(_)) => Type::Bool,
+            Node::Expr(Expr::Nil) => Type::List(Box::new(env.fresh_var())),
+            Node::Expr(Expr::Cons { head, tail }) => {
+                let head_ty = infer_expr(ctx, env, env_vars, head)?;
+                let mut tail = tail;
+
+                while let Node::Expr(Expr::Cons {
+                    head: next_head,
+                    tail: next_tail,
+                }) = ctx.get_node(tail).clone()
+                {
+                    let next_head_ty = infer_expr(ctx, env, env_vars, next_head)?;
+                    env.unify(&head_ty, &next_head_ty, ctx.get_span(next_head))?;
+                    tail = next_tail;
+                }
+
+                Type::List(Box::new(head_ty))
             }
-
-            Type::List(Box::new(head_ty))
-        }
-        Node::Expr(Expr::Identifier(name)) => env.instantiate(
-            env_vars
-                .get(&name)
-                .ok_or(Error::UnknownIdentifier(name, ctx.get_span(expr)))?
-                .clone(),
-            ctx.get_span(expr),
-        ),
-        Node::Expr(Expr::Condition { cond, then, alt }) => {
-            let cond_ty = infer_expr(ctx, env, env_vars, cond)?;
-            let then_ty = infer_expr(ctx, env, env_vars, then)?;
-            let alt_ty = infer_expr(ctx, env, env_vars, alt)?;
-            env.unify(&Type::Bool, &cond_ty, ctx.get_span(cond))?;
-            env.unify(&then_ty, &alt_ty, ctx.get_span(alt))?;
-            alt_ty
-        }
-        Node::Expr(Expr::Infix { lhs, op, rhs }) => {
-            let lhs_ty = infer_expr(ctx, env, env_vars, lhs)?;
-            let rhs_ty = infer_expr(ctx, env, env_vars, rhs)?;
-
-            let op_ty = env.instantiate(
+            Node::Expr(Expr::Identifier(name)) => env.instantiate(
                 env_vars
-                    .get(&op)
-                    .ok_or(Error::UnknownOperator(op.clone(), ctx.get_span(expr)))?
+                    .get(&name)
+                    .ok_or(Error::UnknownIdentifier(name, ctx.get_span(expr)))?
                     .clone(),
                 ctx.get_span(expr),
-            );
+            ),
+            Node::Expr(Expr::Condition { cond, then, alt }) => {
+                let cond_ty = infer_expr(ctx, env, env_vars, cond)?;
+                let then_ty = infer_expr(ctx, env, env_vars, then)?;
+                let alt_ty = infer_expr(ctx, env, env_vars, alt)?;
+                env.unify(&Type::Bool, &cond_ty, ctx.get_span(cond))?;
+                env.unify(&then_ty, &alt_ty, ctx.get_span(alt))?;
+                alt_ty
+            }
+            Node::Expr(Expr::Infix { lhs, op, rhs }) => {
+                let lhs_ty = infer_expr(ctx, env, env_vars, lhs)?;
+                let rhs_ty = infer_expr(ctx, env, env_vars, rhs)?;
 
-            let res_ty = env.fresh_var();
-            env.unify(
-                &Type::Fun(
-                    Box::new(lhs_ty.clone()),
-                    Box::new(Type::Fun(
-                        Box::new(rhs_ty.clone()),
-                        Box::new(res_ty.clone()),
-                    )),
-                ),
-                &op_ty,
-                ctx.get_span(expr),
-            )?;
+                let op_ty = env.instantiate(
+                    env_vars
+                        .get(&op)
+                        .ok_or(Error::UnknownOperator(op.clone(), ctx.get_span(expr)))?
+                        .clone(),
+                    ctx.get_span(expr),
+                );
 
-            res_ty
+                let res_ty = env.fresh_var();
+                env.unify(
+                    &Type::Fun(
+                        Box::new(lhs_ty.clone()),
+                        Box::new(Type::Fun(
+                            Box::new(rhs_ty.clone()),
+                            Box::new(res_ty.clone()),
+                        )),
+                    ),
+                    &op_ty,
+                    ctx.get_span(expr),
+                )?;
+
+                res_ty
+            }
+            Node::Expr(Expr::Lambda { param, body }) => {
+                let param_ty = env.fresh_var();
+                let mut new_env_vars = env_vars.clone();
+                new_env_vars.insert(param, param_ty.clone());
+                let body_ty = infer_expr(ctx, env, &new_env_vars, body)?;
+                Type::Fun(Box::new(param_ty), Box::new(body_ty))
+            }
+            Node::Expr(Expr::Application { func, arg }) => {
+                let func_ty = infer_expr(ctx, env, env_vars, func)?;
+                let arg_ty = infer_expr(ctx, env, env_vars, arg)?;
+                let ret_ty = env.fresh_var();
+                env.unify(
+                    &func_ty,
+                    &Type::Fun(Box::new(arg_ty), Box::new(ret_ty.clone())),
+                    ctx.get_span(arg),
+                )?;
+                ret_ty
+            }
+            _ => unreachable!(),
         }
-        Node::Expr(Expr::Lambda { param, body }) => {
-            let param_ty = env.fresh_var();
-            let mut new_env_vars = env_vars.clone();
-            new_env_vars.insert(param, param_ty.clone());
-            let body_ty = infer_expr(ctx, env, &new_env_vars, body)?;
-            Type::Fun(Box::new(param_ty), Box::new(body_ty))
-        }
-        Node::Expr(Expr::Application { func, arg }) => {
-            let func_ty = infer_expr(ctx, env, env_vars, func)?;
-            let arg_ty = infer_expr(ctx, env, env_vars, arg)?;
-            let ret_ty = env.fresh_var();
-            env.unify(
-                &func_ty,
-                &Type::Fun(Box::new(arg_ty), Box::new(ret_ty.clone())),
-                ctx.get_span(arg),
-            )?;
-            ret_ty
-        }
-        _ => unreachable!(),
     };
 
     let ty = env.substitute(&ty);

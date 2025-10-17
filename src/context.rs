@@ -8,7 +8,7 @@ use crate::{
     expr::Expr,
     span::Span,
     ty,
-    type_system::{Constraint, Type, TypeClass},
+    type_system::{Constraint, Type},
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -74,7 +74,7 @@ impl Operator {
 pub struct Context {
     nodes: Vec<Node>,
     spans: Vec<Span>,
-    types: Vec<Type>,
+    types: Vec<Option<Type>>,
     builtins: FxHashMap<String, Builtin>,
     operators: FxHashMap<String, Operator>,
 }
@@ -99,7 +99,7 @@ impl Context {
         let id = NodeId(self.nodes.len());
         self.nodes.push(node);
         self.spans.push(Span::default());
-        self.types.push(Type::Unit);
+        self.types.push(None);
         id
     }
 
@@ -116,7 +116,7 @@ impl Context {
     }
 
     pub fn set_type(&mut self, id: NodeId, ty: Type) {
-        self.types[id.0] = ty;
+        self.types[id.0] = Some(ty);
     }
 
     pub fn get_node(&self, id: NodeId) -> &Node {
@@ -127,7 +127,7 @@ impl Context {
         self.spans[id.0]
     }
 
-    pub fn get_type(&self, id: NodeId) -> &Type {
+    pub fn get_type(&self, id: NodeId) -> &Option<Type> {
         &self.types[id.0]
     }
 

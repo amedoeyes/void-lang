@@ -92,8 +92,16 @@ fn run() -> Result<()> {
 
             for node in nodes {
                 match ctx.get_node(node) {
-                    Node::Expr(_) => println!("{} : {}", node.display(&ctx), ctx.get_type(node)),
-                    Node::Bind(name, _) => println!("{} : {}", name, ctx.get_type(node)),
+                    Node::Expr(_) => {
+                        println!(
+                            "{} : {}",
+                            node.display(&ctx),
+                            ctx.get_type(node).as_ref().unwrap()
+                        )
+                    }
+                    Node::Bind(name, _) => {
+                        println!("{} : {}", name, ctx.get_type(node).as_ref().unwrap())
+                    }
                 }
             }
         }

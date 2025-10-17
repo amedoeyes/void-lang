@@ -4,6 +4,7 @@ use crate::{
     expr::Expr,
     lexer::{Lexer, Token},
     span::Span,
+    ty,
 };
 
 type Result<T> = std::result::Result<T, SyntaxError>;
@@ -146,6 +147,7 @@ impl<'a> Parser<'a> {
                         tail: list,
                     });
                 }
+                self.context.set_type(list, ty!([Char]));
                 self.context.set_span(list, span);
                 self.advance()?;
                 Ok(list)
