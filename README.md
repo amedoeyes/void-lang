@@ -56,6 +56,12 @@ let sum = n ->
 	else n + sum (n - 1);
 ```
 
+Operators:
+
+```fsharp
+let (^) = x -> n -> if n == 0 then 1 else x * (x ^ (n - 1));
+```
+
 Lists:
 
 ```fsharp
