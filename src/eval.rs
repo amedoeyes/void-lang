@@ -385,10 +385,11 @@ fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<SharedValue> {
                         env,
                     } => match ctx.get_node(body) {
                         Node::Expr(Expr::Lambda { param: b, body }) => {
-                            env.borrow_mut().insert(DefaultAtom::from(a.as_str()), lhs);
-                            env.borrow_mut().insert(DefaultAtom::from(b.as_str()), rhs);
+                            let mut new_env = env.borrow().clone();
+                            new_env.insert(DefaultAtom::from(a.as_str()), lhs);
+                            new_env.insert(DefaultAtom::from(b.as_str()), rhs);
                             frame_stack.push_back(EvalFrame {
-                                env,
+                                env: Rc::new(RefCell::new(new_env)),
                                 expr: *body,
                                 state: EvalState::Start,
                             });
@@ -497,7 +498,6 @@ pub fn evaluate(ctx: &Context, nodes: &[NodeId]) -> Result<Value> {
                 .borrow()
                 .clone();
             }
-
             Node::Bind(name, expr) => {
                 let mut closure_env = FxHashMap::default();
                 for (k, v) in env.borrow().iter() {

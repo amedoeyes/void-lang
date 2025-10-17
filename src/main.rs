@@ -226,12 +226,6 @@ fn run() -> Result<()> {
                                 span.start.line, span.start.column
                             );
                         }
-                        type_system::Error::InvalidOperator(op, ty, span) => {
-                            println!(
-                                "{}:{}: invalid operator '({op})' with type '{ty}' it should be '_ -> _ -> _'",
-                                span.start.line, span.start.column
-                            );
-                        }
                         type_system::Error::NoInstance(cons, ty, span) => {
                             println!(
                                 "{}:{}: No '{cons}' instance for type '{ty}'",

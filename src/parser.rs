@@ -37,22 +37,43 @@ impl<'a> Parser<'a> {
                     let span = self.span;
 
                     self.advance()?;
-                    let name = if let Token::Identifier(id) = &self.token {
-                        id.clone()
-                    } else {
-                        return Err(SyntaxError::UnexpectedToken(
-                            "Identifier".to_string(),
-                            (self.token, self.span),
-                        ));
+
+                    let name = match &self.token {
+                        Token::Identifier(id) => {
+                            let id = id.clone();
+                            self.advance()?;
+                            id
+                        }
+                        Token::ParenLeft => {
+                            self.advance()?;
+                            let op = if let Token::Operator(op) = &self.token {
+                                let op = op.clone();
+                                self.advance()?;
+                                op
+                            } else {
+                                return Err(SyntaxError::UnexpectedToken(
+                                    "perator".to_string(),
+                                    (self.token, self.span),
+                                ));
+                            };
+                            self.expect(Token::ParenRight)?;
+                            op
+                        }
+                        _ => {
+                            return Err(SyntaxError::UnexpectedToken(
+                                "Identifier or operator".to_string(),
+                                (self.token, self.span),
+                            ));
+                        }
                     };
 
-                    self.advance()?;
                     self.expect(Token::Equal)?;
 
                     let expr = self.parse_expr(0)?;
                     self.expect(Token::Semicolon)?;
 
                     let bind = self.context.add_bind(&name, expr);
+
                     self.context
                         .set_span(bind, span.merge(self.context.get_span(expr)));
 

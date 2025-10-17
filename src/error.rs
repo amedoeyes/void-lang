@@ -111,15 +111,6 @@ impl fmt::Display for Error {
                     *span,
                     &format!("unknown operator '({op})'"),
                 ),
-                type_system::Error::InvalidOperator(op, ty, span) => write_message_and_lines(
-                    f,
-                    filename,
-                    source,
-                    *span,
-                    &format!(
-                        "operator '({op})' has type '{ty}' but expected a binary function type 'a -> b -> c'"
-                    ),
-                ),
                 type_system::Error::NoInstance(cons, ty, span) => write_message_and_lines(
                     f,
                     filename,

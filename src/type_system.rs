@@ -58,7 +58,6 @@ pub enum Error {
     InfiniteType(String, Span),
     UnknownIdentifier(String, Span),
     UnknownOperator(String, Span),
-    InvalidOperator(String, String, Span),
     NoInstance(String, String, Span),
 }
 
@@ -460,7 +459,7 @@ fn infer_expr(
             let lhs_ty = infer_expr(ctx, env, env_vars, lhs)?;
             let rhs_ty = infer_expr(ctx, env, env_vars, rhs)?;
 
-            let mut op_ty = env.instantiate(
+            let op_ty = env.instantiate(
                 env_vars
                     .get(&op)
                     .ok_or(Error::UnknownOperator(op.clone(), ctx.get_span(expr)))?
@@ -468,24 +467,20 @@ fn infer_expr(
                 ctx.get_span(expr),
             );
 
-            let Some((lhs_param, rhs_param, result_body)) = (match op_ty {
-                Type::Fun(ref lhs_param, ref mut body) => match body.as_mut() {
-                    Type::Fun(rhs_param, result_body) => Some((lhs_param, rhs_param, result_body)),
-                    _ => None,
-                },
-                _ => None,
-            }) else {
-                return Err(Error::InvalidOperator(
-                    op,
-                    op_ty.to_string(),
-                    ctx.get_span(expr),
-                ));
-            };
+            let res_ty = env.fresh_var();
+            env.unify(
+                &Type::Fun(
+                    Box::new(lhs_ty.clone()),
+                    Box::new(Type::Fun(
+                        Box::new(rhs_ty.clone()),
+                        Box::new(res_ty.clone()),
+                    )),
+                ),
+                &op_ty,
+                ctx.get_span(expr),
+            )?;
 
-            env.unify(lhs_param, &lhs_ty, ctx.get_span(lhs))?;
-            env.unify(rhs_param, &rhs_ty, ctx.get_span(rhs))?;
-
-            *std::mem::take(result_body)
+            res_ty
         }
         Node::Expr(Expr::Lambda { param, body }) => {
             let param_ty = env.fresh_var();
