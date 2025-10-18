@@ -62,6 +62,14 @@ Operators:
 let (^) = x -> n -> if n == 0 then 1 else x * (x ^ (n - 1));
 ```
 
+Operator sectioning:
+
+```fsharp
+let add = (+) 1 1;
+let addl = (+ 1) 1;
+let addr = (1 +) 1;
+```
+
 Lists:
 
 ```fsharp
