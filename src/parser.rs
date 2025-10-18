@@ -15,6 +15,7 @@ pub struct Parser<'a> {
     lexer: Lexer,
     token: Token,
     span: Span,
+    peek: Option<(Token, Span)>,
 }
 
 impl<'a> Parser<'a> {
@@ -24,6 +25,7 @@ impl<'a> Parser<'a> {
             lexer: Lexer::new(input),
             token: Token::Eof,
             span: Span::default(),
+            peek: None,
         }
     }
 
@@ -70,7 +72,7 @@ impl<'a> Parser<'a> {
 
                     self.expect(Token::Equal)?;
 
-                    let expr = self.parse_expr(0)?;
+                    let expr = self.parse_expr(0, false)?;
                     self.expect(Token::Semicolon)?;
 
                     let bind = self.context.add_bind(&name, expr);
@@ -82,7 +84,7 @@ impl<'a> Parser<'a> {
                 }
 
                 _ => {
-                    nodes.push(self.parse_expr(0)?);
+                    nodes.push(self.parse_expr(0, false)?);
                 }
             }
         }
@@ -91,10 +93,22 @@ impl<'a> Parser<'a> {
     }
 
     fn advance(&mut self) -> Result<()> {
-        let (token, span) = self.lexer.next_token()?;
-        self.token = token;
-        self.span = span;
+        if let Some((token, span)) = self.peek.take() {
+            self.token = token;
+            self.span = span;
+        } else {
+            let (token, span) = self.lexer.next_token()?;
+            self.token = token;
+            self.span = span;
+        }
         Ok(())
+    }
+
+    fn peek(&mut self) -> Result<&Token> {
+        if self.peek.is_none() {
+            self.peek = Some(self.lexer.next_token()?)
+        }
+        Ok(&self.peek.as_ref().unwrap().0)
     }
 
     fn expect(&mut self, token: Token) -> Result<()> {
@@ -120,7 +134,6 @@ impl<'a> Parser<'a> {
                 self.advance()?;
                 Ok(expr)
             }
-
             Token::Integer(int) => {
                 let expr = self
                     .context
@@ -129,14 +142,12 @@ impl<'a> Parser<'a> {
                 self.advance()?;
                 Ok(expr)
             }
-
             Token::Char(char) => {
                 let expr = self.context.add_expr(Expr::Char(*char));
                 self.context.set_span(expr, self.span);
                 self.advance()?;
                 Ok(expr)
             }
-
             Token::String(str) => {
                 let span = self.span;
                 let mut list = self.context.add_expr(Expr::Nil);
@@ -152,7 +163,6 @@ impl<'a> Parser<'a> {
                 self.advance()?;
                 Ok(list)
             }
-
             Token::BracketLeft => {
                 let span = self.span;
 
@@ -168,7 +178,7 @@ impl<'a> Parser<'a> {
                     let mut elems = Vec::new();
 
                     loop {
-                        let elem = self.parse_expr(0)?;
+                        let elem = self.parse_expr(0, false)?;
                         elems.push(elem);
 
                         if self.token == Token::Comma {
@@ -194,44 +204,127 @@ impl<'a> Parser<'a> {
                     Ok(list)
                 }
             }
-
             Token::Identifier(id) => {
                 let expr = self.context.add_expr(Expr::Identifier(id.clone()));
                 self.context.set_span(expr, self.span);
                 self.advance()?;
                 Ok(expr)
             }
-
             Token::If => {
                 let span = self.span;
                 self.advance()?;
-                let cond = self.parse_expr(0)?;
+                let cond = self.parse_expr(0, false)?;
                 self.expect(Token::Then)?;
-                let then = self.parse_expr(0)?;
+                let then = self.parse_expr(0, false)?;
                 self.expect(Token::Else)?;
-                let alt = self.parse_expr(0)?;
+                let alt = self.parse_expr(0, false)?;
                 let expr = self.context.add_expr(Expr::Condition { cond, then, alt });
                 self.context
                     .set_span(expr, span.merge(self.context.get_span(alt)));
                 Ok(expr)
             }
-
             Token::ParenLeft => {
                 let span = self.span;
                 self.advance()?;
-                if self.token == Token::ParenRight {
-                    let expr = self.context.add_expr(Expr::Unit);
-                    self.context.set_span(expr, span.merge(self.span));
-                    self.advance()?;
-                    Ok(expr)
-                } else {
-                    let expr = self.parse_expr(0)?;
-                    self.context.set_span(expr, span.merge(self.span));
-                    self.expect(Token::ParenRight)?;
-                    Ok(expr)
+                match self.token.clone() {
+                    Token::ParenRight => {
+                        let expr = self.context.add_expr(Expr::Unit);
+                        self.context.set_span(expr, span.merge(self.span));
+                        self.advance()?;
+                        Ok(expr)
+                    }
+                    Token::Operator(op) => {
+                        self.advance()?;
+                        match &self.token {
+                            Token::ParenRight => {
+                                self.advance()?;
+
+                                let lhs = self.context.add_expr(Expr::Identifier("a".into()));
+                                let rhs = self.context.add_expr(Expr::Identifier("b".into()));
+                                let infix = self.context.add_expr(Expr::Infix { lhs, op, rhs });
+                                let inner = self.context.add_expr(Expr::Lambda {
+                                    param: "b".into(),
+                                    body: infix,
+                                });
+                                let expr = self.context.add_expr(Expr::Lambda {
+                                    param: "a".into(),
+                                    body: inner,
+                                });
+
+                                self.context.set_span(expr, span.merge(self.span));
+                                let span = self.context.get_span(expr);
+
+                                self.context.set_span(lhs, span);
+                                self.context.set_span(rhs, span);
+                                self.context.set_span(infix, span);
+                                self.context.set_span(inner, span);
+
+                                Ok(expr)
+                            }
+                            _ => {
+                                let lhs = self.context.add_expr(Expr::Identifier("a".into()));
+                                let rhs = self.parse_expr(0, false)?;
+                                let infix = self.context.add_expr(Expr::Infix { lhs, op, rhs });
+                                let expr = self.context.add_expr(Expr::Lambda {
+                                    param: "a".into(),
+                                    body: infix,
+                                });
+
+                                self.context.set_span(expr, span.merge(self.span));
+                                let span = self.context.get_span(expr);
+
+                                self.context.set_span(lhs, span);
+                                self.context.set_span(rhs, span);
+                                self.context.set_span(infix, span);
+
+                                self.expect(Token::ParenRight)?;
+                                Ok(expr)
+                            }
+                        }
+                    }
+                    _ => {
+                        let expr = self.parse_expr(0, true)?;
+                        match self.token.clone() {
+                            Token::ParenRight => {
+                                self.context.set_span(expr, span.merge(self.span));
+                                self.advance()?;
+                                Ok(expr)
+                            }
+                            Token::Operator(op) => {
+                                if *self.peek()? == Token::ParenRight {
+                                    self.advance()?;
+
+                                    let rhs = self.context.add_expr(Expr::Identifier("b".into()));
+                                    let infix =
+                                        self.context.add_expr(Expr::Infix { lhs: expr, op, rhs });
+                                    let expr = self.context.add_expr(Expr::Lambda {
+                                        param: "b".into(),
+                                        body: infix,
+                                    });
+
+                                    self.context.set_span(expr, span.merge(self.span));
+                                    let span = self.context.get_span(expr);
+
+                                    self.context.set_span(rhs, span);
+                                    self.context.set_span(infix, span);
+
+                                    self.expect(Token::ParenRight)?;
+                                    Ok(expr)
+                                } else {
+                                    let expr = self.parse_infix(expr, 0)?;
+                                    self.context.set_span(expr, span.merge(self.span));
+                                    self.expect(Token::ParenRight)?;
+                                    Ok(expr)
+                                }
+                            }
+                            _ => Err(SyntaxError::UnexpectedToken(
+                                Token::ParenRight.to_string(),
+                                (self.token.clone(), self.span),
+                            )),
+                        }
+                    }
                 }
             }
-
             _ => Err(SyntaxError::UnexpectedToken(
                 "expression".to_string(),
                 (self.token.clone(), self.span),
@@ -239,7 +332,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_in(&mut self, mut lhs: NodeId, min_bp: i32) -> Result<NodeId> {
+    fn parse_infix(&mut self, mut lhs: NodeId, min_bp: i32) -> Result<NodeId> {
         while let Token::Operator(op) = self.token.clone() {
             let (l_bp, r_bp) = self
                 .context
@@ -251,7 +344,7 @@ impl<'a> Parser<'a> {
                 break;
             }
             self.advance()?;
-            let rhs = self.parse_expr(r_bp)?;
+            let rhs = self.parse_expr(r_bp, false)?;
             let expr = self.context.add_expr(Expr::Infix { lhs, op, rhs });
             self.context.set_span(
                 expr,
@@ -263,14 +356,14 @@ impl<'a> Parser<'a> {
         Ok(lhs)
     }
 
-    fn parse_expr(&mut self, min_bp: i32) -> Result<NodeId> {
+    fn parse_expr(&mut self, min_bp: i32, skip_infix: bool) -> Result<NodeId> {
         let mut expr = self.parse_atom()?;
 
         if self.token == Token::HyphenGreaterThan {
             if let Node::Expr(Expr::Identifier(param)) = self.context.get_node(expr).clone() {
                 self.advance()?;
 
-                let body = self.parse_expr(0)?;
+                let body = self.parse_expr(0, false)?;
 
                 expr = self.context.add_expr(Expr::Lambda { param, body });
                 self.context.set_span(
@@ -309,8 +402,8 @@ impl<'a> Parser<'a> {
             );
         }
 
-        if matches!(self.token, Token::Operator(_)) {
-            expr = self.parse_in(expr, min_bp)?
+        if !skip_infix && matches!(self.token, Token::Operator(_)) {
+            expr = self.parse_infix(expr, min_bp)?
         }
 
         Ok(expr)
