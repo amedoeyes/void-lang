@@ -20,7 +20,7 @@ Types:
   - Lists can only contains elements of the same type
 - Function: `x -> x`
 
-Functions:
+Function declarations:
 
 ```fsharp
 let add = a -> b -> a + b;
@@ -56,11 +56,20 @@ let sum = n ->
 	else n + sum (n - 1);
 ```
 
-Operators:
+Operator declarations:
 
 ```fsharp
 let (^) = x -> n -> if n == 0 then 1 else x * (x ^ (n - 1));
 ```
+
+Operator fixity declarations:
+
+```fsharp
+op ^ right 8;
+```
+
+> [!NOTE]
+> If not declared the default will applied which is left associative with precedence of 9
 
 Operator sectioning:
 

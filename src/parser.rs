@@ -1,5 +1,5 @@
 use crate::{
-    context::{Context, Node, NodeId},
+    context::{Associativity, Context, Node, NodeId},
     error::SyntaxError,
     expr::Expr,
     lexer::{Lexer, Token},
@@ -36,6 +36,46 @@ impl<'a> Parser<'a> {
 
         while self.token != Token::Eof {
             match self.token {
+                Token::Op => {
+                    self.advance()?;
+
+                    let op = if let Token::Operator(op) = self.token.clone() {
+                        self.advance()?;
+                        op
+                    } else {
+                        return Err(SyntaxError::UnexpectedToken(
+                            "operator".to_string(),
+                            (self.token, self.span),
+                        ));
+                    };
+
+                    let assoc = match self.token {
+                        Token::Left => Associativity::Left,
+                        Token::Right => Associativity::Right,
+                        Token::None => Associativity::None,
+                        _ => {
+                            return Err(SyntaxError::UnexpectedToken(
+                                "left, right or none".to_string(),
+                                (self.token, self.span),
+                            ));
+                        }
+                    };
+                    self.advance()?;
+
+                    let prec = if let Token::Integer(prec) = self.token.clone() {
+                        self.advance()?;
+                        prec.parse().unwrap()
+                    } else {
+                        return Err(SyntaxError::UnexpectedToken(
+                            "integer".to_string(),
+                            (self.token, self.span),
+                        ));
+                    };
+
+                    self.expect(Token::Semicolon)?;
+
+                    self.context.add_operator(&op, prec, assoc);
+                }
                 Token::Let => {
                     let span = self.span;
 
@@ -82,7 +122,6 @@ impl<'a> Parser<'a> {
 
                     nodes.push(bind);
                 }
-
                 _ => {
                     nodes.push(self.parse_expr(0, false)?);
                 }

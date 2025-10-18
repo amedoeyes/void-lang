@@ -23,13 +23,17 @@ pub enum Token {
     Char(char),
     String(String),
     Identifier(String),
+    Operator(String),
+
+    Op,
+    Left,
+    Right,
+    None,
 
     Let,
     If,
     Then,
     Else,
-
-    Operator(String),
 
     Eof,
 }
@@ -50,11 +54,15 @@ impl fmt::Display for Token {
             Token::Char(val) => write!(f, "'{val}'"),
             Token::String(val) => write!(f, "\"{val}\""),
             Token::Identifier(val) => write!(f, "{val}"),
+            Token::Operator(op) => write!(f, "({op})"),
+            Token::Op => write!(f, "op"),
+            Token::Left => write!(f, "left"),
+            Token::Right => write!(f, "right"),
+            Token::None => write!(f, "none"),
             Token::Let => write!(f, "let"),
             Token::If => write!(f, "if"),
             Token::Then => write!(f, "then"),
             Token::Else => write!(f, "else"),
-            Token::Operator(op) => write!(f, "({op})"),
             Token::Eof => write!(f, "EOF"),
         }
     }
@@ -72,6 +80,10 @@ const SYMBOLS: &[(&str, Token)] = &[
 ];
 
 const KEYWORDS: &[(&str, Token)] = &[
+    ("op", Token::Op),
+    ("left", Token::Left),
+    ("right", Token::Right),
+    ("none", Token::None),
     ("let", Token::Let),
     ("if", Token::If),
     ("then", Token::Then),
