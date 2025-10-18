@@ -18,9 +18,9 @@ Types:
 - Bool: `true` | `false`
 - Lists: `[1, 2, 3, 4]` | `"Hello"`
   - Lists can only contains elements of the same type
-- Function: `x -> x`
+- Lambda: `x -> x`
 
-Function declarations:
+Bind declarations:
 
 ```fsharp
 let add = a -> b -> a + b;
