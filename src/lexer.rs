@@ -186,12 +186,12 @@ impl Lexer {
         }
 
         if current_char == '\'' {
-            let slice =
-                self.slice_buffer_between('\'', false)
-                    .ok_or(SyntaxError::UnterminatedChar(Span::new(
-                        self.position,
-                        self.position,
-                    )))?;
+            let slice = self
+                .slice_buffer_between('\'', false)
+                .ok_or(SyntaxError::Unterminated(
+                    "char".into(),
+                    Span::new(self.position, self.position),
+                ))?;
             let mut chars = slice.chars();
 
             let ch = match chars.next() {
@@ -223,12 +223,12 @@ impl Lexer {
         }
 
         if current_char == '\"' {
-            let slice =
-                self.slice_buffer_between('\"', false)
-                    .ok_or(SyntaxError::UnterminatedString(Span::new(
-                        self.position,
-                        self.position,
-                    )))?;
+            let slice = self
+                .slice_buffer_between('\"', false)
+                .ok_or(SyntaxError::Unterminated(
+                    "string".into(),
+                    Span::new(self.position, self.position),
+                ))?;
             let mut str = String::new();
 
             let mut chars = slice.chars();

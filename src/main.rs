@@ -125,7 +125,7 @@ fn run() -> Result<()> {
                 Err(err) => return Err(Error::Eval(file.clone(), contents, err)),
             };
 
-            println!("{}", value.display(&ctx));
+            println!("{}", value);
         }
 
         Some(("repl", sub_matches)) => {
@@ -173,16 +173,10 @@ fn run() -> Result<()> {
                                     span.start.line, span.start.column
                                 );
                             }
-                            SyntaxError::UnterminatedChar(span) => {
+                            SyntaxError::Unterminated(what, span) => {
                                 println!(
-                                    "{}:{}: unterminated char",
-                                    span.start.line, span.start.column
-                                )
-                            }
-                            SyntaxError::UnterminatedString(span) => {
-                                println!(
-                                    "{}:{}: unterminated string",
-                                    span.start.line, span.start.column
+                                    "{}:{}: unterminated {}",
+                                    span.start.line, span.start.column, what,
                                 )
                             }
                             SyntaxError::EmptyChar(span) => {
@@ -266,7 +260,7 @@ fn run() -> Result<()> {
                         }
                     };
 
-                    println!("{}", value.display(&ctx));
+                    println!("{}", value);
                     nodes.pop();
                 }
             }

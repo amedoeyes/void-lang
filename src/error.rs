@@ -6,8 +6,7 @@ use crate::{eval, lexer::Token, span::Span, type_system};
 #[derive(Debug)]
 pub enum SyntaxError {
     InvalidToken(Span),
-    UnterminatedChar(Span),
-    UnterminatedString(Span),
+    Unterminated(String, Span),
     EmptyChar(Span),
     InvalidChar(Span),
     InvalidEscapeChar(Span),
@@ -47,27 +46,22 @@ impl fmt::Display for Error {
                 SyntaxError::InvalidToken(span) => {
                     write_message_and_lines(f, filename, source, *span, "invalid token")
                 }
-
-                SyntaxError::UnterminatedChar(span) => {
-                    write_message_and_lines(f, filename, source, *span, "unterminated char")
-                }
-
-                SyntaxError::UnterminatedString(span) => {
-                    write_message_and_lines(f, filename, source, *span, "unterminated string")
-                }
-
+                SyntaxError::Unterminated(what, span) => write_message_and_lines(
+                    f,
+                    filename,
+                    source,
+                    *span,
+                    &format!("unterminated {what}"),
+                ),
                 SyntaxError::EmptyChar(span) => {
                     write_message_and_lines(f, filename, source, *span, "empty char")
                 }
-
                 SyntaxError::InvalidChar(span) => {
                     write_message_and_lines(f, filename, source, *span, "invalid char")
                 }
-
                 SyntaxError::InvalidEscapeChar(span) => {
                     write_message_and_lines(f, filename, source, *span, "invalid escape char")
                 }
-
                 SyntaxError::UnexpectedToken(expected, (token, span)) => {
                     write_message(
                         f,

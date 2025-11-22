@@ -1,14 +1,14 @@
 use core::fmt;
-use std::{cell::RefCell, collections::VecDeque, ops::Deref, rc::Rc, result};
+use std::{cell::RefCell, collections::VecDeque, fmt::Display, ops::Deref, rc::Rc, result};
 
 use fxhash::FxHashMap;
-use itertools::Itertools;
 use string_cache::DefaultAtom;
 
 use crate::{
     context::{BuiltinKind, Context, Node, NodeId},
     expr::Expr,
     span::Span,
+    type_system::Type,
 };
 
 #[derive(Debug)]
@@ -24,11 +24,11 @@ pub type Result<T> = result::Result<T, Error>;
 pub enum List {
     #[default]
     Nil,
-    Cons(Rc<Value>, Rc<RefCell<List>>),
+    Cons(SharedValue, SharedValue),
 }
 
 impl List {
-    pub fn from(values: Vec<Value>) -> Self {
+    pub fn from(values: Vec<SharedValue>) -> Self {
         let mut list = List::default();
         for value in values.into_iter().rev() {
             list = list.push(value);
@@ -36,31 +36,22 @@ impl List {
         list
     }
 
-    pub fn head(&self) -> Option<Value> {
+    pub fn head(&self) -> Option<SharedValue> {
         match self {
             List::Nil => None,
-            List::Cons(h, _) => Some(h.deref().clone()),
+            List::Cons(head, _) => Some(head.clone()),
         }
     }
 
-    pub fn tail(&self) -> Option<List> {
+    pub fn tail(&self) -> Option<SharedValue> {
         match self {
             List::Nil => None,
-            List::Cons(_, t) => Some(t.borrow().clone()),
+            List::Cons(_, tail) => Some(tail.clone()),
         }
     }
 
-    pub fn push(self, val: Value) -> Self {
-        List::Cons(Rc::new(val), Rc::new(RefCell::new(self)))
-    }
-
-    pub fn append(self, other: List) -> Self {
-        match self {
-            List::Nil => other,
-            List::Cons(h, t) => {
-                List::Cons(h, Rc::new(RefCell::new(t.borrow().clone().append(other))))
-            }
-        }
+    pub fn push(self, val: SharedValue) -> Self {
+        List::Cons(val, SharedValue::new(Value::List(self)))
     }
 }
 
@@ -101,180 +92,128 @@ impl Deref for SharedValue {
     }
 }
 
-impl Value {
-    pub fn force(&mut self, ctx: &Context) -> Result<Value> {
-        match self {
-            Value::Thunk {
-                expr,
-                env,
-                cached_value,
-            } => {
-                let mut cache = cached_value.borrow_mut();
-                match cache.deref() {
-                    Some(v) => Ok(v.clone()),
-                    None => {
-                        let val = eval_expr_stack(
-                            ctx,
-                            EvalFrame {
-                                env: env.clone(),
-                                expr: *expr,
-                                state: EvalState::Start,
-                            },
-                        )?;
-                        *cache = Some(val.borrow().clone());
-                        Ok(val.borrow().clone())
-                    }
-                }
-            }
-            Value::Builtin(BuiltinKind::Value(v)) => Ok(*v.clone()),
-            v => Ok(v.clone()),
-        }
-    }
-
-    pub fn display<'a>(&'a self, context: &'a Context) -> Display<'a> {
-        Display::new(self, context)
-    }
-}
-
-pub struct Display<'a> {
-    value: &'a Value,
-    context: &'a Context,
-}
-
-impl<'a> Display<'a> {
-    pub fn new(value: &'a Value, context: &'a Context) -> Self {
-        Self { value, context }
-    }
-}
-
-impl<'a> fmt::Display for Display<'a> {
+impl Display for Value {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match &self.value {
-            Value::Unit => write!(f, "()"),
-
-            Value::Integer(n) => write!(f, "{n}"),
-
-            Value::Char(c) => write!(f, "'{}'", c.escape_default()),
-
-            Value::Boolean(b) => write!(f, "{b}"),
-
-            Value::List(l) => match l {
-                List::Nil => write!(f, "[]"),
-                List::Cons(_, _) => {
-                    let mut list = l.clone();
-                    let mut values = Vec::new();
-
-                    while let Some(mut h) = list.head() {
-                        values.push(h.force(self.context).unwrap());
-                        list = list.tail().unwrap_or_default();
-                    }
-
-                    if values.is_empty() {
-                        return write!(f, "[]");
-                    }
-
-                    match &values[0] {
-                        Value::Char(_) => {
-                            let str = values
-                                .into_iter()
-                                .map(|v| {
-                                    if let Value::Char(c) = v {
-                                        c
-                                    } else {
-                                        unreachable!()
-                                    }
-                                })
-                                .collect::<String>();
-                            write!(f, "\"{}\"", str)
-                        }
-                        _ => {
-                            let list = values
-                                .into_iter()
-                                .map(|v| v.display(self.context).to_string())
-                                .join(", ");
-                            write!(f, "[{}]", list)
-                        }
-                    }
-                }
-            },
-
-            Value::Builtin(_) => {
-                write!(f, "builtin")
-            }
-
-            Value::Function { param, body, .. } => {
-                write!(f, "{} -> {}", param, body.display(self.context))
-            }
-
-            Value::Thunk { .. } => write!(
-                f,
-                "{}",
-                self.value
-                    .clone()
-                    .force(self.context)
-                    .unwrap()
-                    .display(self.context)
-            ),
+        #[derive(Debug)]
+        enum Item {
+            Value(Value, bool),
+            Str(&'static str),
         }
+
+        let mut stack = vec![Item::Value(self.clone(), false)];
+
+        while let Some(item) = stack.pop() {
+            match item {
+                Item::Value(value, in_list) => match value {
+                    Value::Unit => write!(f, "()")?,
+                    Value::Integer(n) => write!(f, "{n}")?,
+                    Value::Char(c) => write!(f, "'{}'", c.escape_default())?,
+                    Value::Boolean(b) => write!(f, "{b}")?,
+                    Value::List(l) => match l {
+                        List::Nil => {
+                            stack.push(Item::Str("]"));
+                            if !in_list {
+                                stack.push(Item::Str("["));
+                            }
+                        }
+                        List::Cons(head, tail) => {
+                            stack.push(Item::Value(tail.borrow().clone(), true));
+                            stack.push(Item::Value(head.borrow().clone(), false));
+                            stack.push(Item::Str(if in_list { ", " } else { "[" }));
+                        }
+                    },
+                    Value::Builtin(_) => write!(f, "builtin")?,
+                    _ => {}
+                },
+                Item::Str(str) => write!(f, "{}", str)?,
+            }
+        }
+
+        Ok(())
     }
 }
 
 pub type Env = Rc<RefCell<FxHashMap<DefaultAtom, SharedValue>>>;
 
+#[derive(Debug, Clone, Default)]
+pub struct State {
+    pub full_force: bool,
+}
+
 #[derive(Clone)]
-enum EvalState {
-    Start,
+pub enum Op {
+    Start(NodeId),
+    Force,
     Infix(String),
     Cond,
-    Func,
     App,
+    Nop,
+    EnableFullForce,
+    DisableFullForce,
+    Value(SharedValue),
+    Function(fn(&Frame, &mut VecDeque<Frame>, &mut VecDeque<SharedValue>) -> Result<()>),
 }
 
 #[derive(Clone)]
-struct EvalFrame {
-    env: Env,
-    expr: NodeId,
-    state: EvalState,
+pub struct Frame {
+    pub op: Op,
+    pub env: Env,
+    pub span: Span,
 }
 
-fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<SharedValue> {
-    let mut frame_stack = VecDeque::from([frame]);
-    let mut result_stack = VecDeque::new();
+impl Frame {
+    pub fn new(op: Op, env: Env, span: Span) -> Self {
+        Self { op, env, span }
+    }
 
-    while let Some(frame) = frame_stack.pop_back() {
-        match frame.state {
-            EvalState::Start => match ctx.get_node(frame.expr).clone() {
+    pub fn with_op(&self, op: Op) -> Self {
+        Self {
+            op,
+            env: self.env.clone(),
+            span: self.span,
+        }
+    }
+}
+
+pub fn eval_expr(ctx: &Context, frames: impl Into<VecDeque<Frame>>) -> Result<SharedValue> {
+    let mut frames = frames.into() as VecDeque<Frame>;
+    let mut results = VecDeque::<SharedValue>::new();
+    let mut state = State::default();
+
+    while let Some(frame) = frames.pop_back() {
+        match frame.op {
+            Op::Start(expr) => match ctx.get_node(expr).clone() {
                 Node::Expr(Expr::Unit) => {
-                    result_stack.push_back(SharedValue::new(Value::Unit));
+                    frames.push_back(frame.with_op(Op::Value(SharedValue::new(Value::Unit))));
                 }
-
                 Node::Expr(Expr::Boolean(bool)) => {
-                    result_stack.push_back(SharedValue::new(Value::Boolean(bool)));
+                    frames.push_back(
+                        frame.with_op(Op::Value(SharedValue::new(Value::Boolean(bool)))),
+                    );
                 }
-
-                Node::Expr(Expr::Integer(n)) => {
-                    result_stack.push_back(SharedValue::new(Value::Integer(n)));
+                Node::Expr(Expr::Integer(int)) => {
+                    frames
+                        .push_back(frame.with_op(Op::Value(SharedValue::new(Value::Integer(int)))));
                 }
-
-                Node::Expr(Expr::Char(c)) => {
-                    result_stack.push_back(SharedValue::new(Value::Char(c)));
+                Node::Expr(Expr::Char(char)) => {
+                    frames.push_back(frame.with_op(Op::Value(SharedValue::new(Value::Char(char)))));
                 }
-
                 Node::Expr(Expr::Nil) => {
-                    result_stack.push_back(SharedValue::new(Value::List(List::Nil)));
+                    frames.push_back(
+                        frame.with_op(Op::Value(SharedValue::new(Value::List(List::Nil)))),
+                    );
                 }
-
                 Node::Expr(Expr::Cons { head, tail }) => {
                     let mut elems = Vec::new();
                     let mut cur_head = head;
                     let mut cur_tail = tail;
 
                     loop {
-                        elems.push(Value::Thunk {
+                        elems.push(SharedValue::new(Value::Thunk {
                             expr: cur_head,
                             env: frame.env.clone(),
                             cached_value: Rc::new(RefCell::new(None)),
-                        });
+                        }));
                         match ctx.get_node(cur_tail) {
                             Node::Expr(Expr::Cons { head, tail }) => {
                                 cur_head = *head;
@@ -284,193 +223,247 @@ fn eval_expr_stack(ctx: &Context, frame: EvalFrame) -> Result<SharedValue> {
                         }
                     }
 
-                    result_stack.push_back(SharedValue::new(Value::List(List::from(elems))));
+                    frames.push_back(
+                        frame.with_op(Op::Value(SharedValue::new(Value::List(List::from(elems))))),
+                    );
                 }
-
                 Node::Expr(Expr::Lambda { param, body }) => {
                     let mut closure_env = FxHashMap::default();
                     for (k, v) in frame.env.borrow().iter() {
                         closure_env.insert(k.clone(), v.clone());
                     }
-                    result_stack.push_back(SharedValue::new(Value::Function {
+                    frames.push_back(frame.with_op(Op::Value(SharedValue::new(Value::Function {
                         param,
                         body,
                         env: Rc::new(RefCell::new(closure_env)),
-                    }))
+                    }))));
                 }
-
-                Node::Expr(Expr::Identifier(name)) => {
-                    result_stack.push_back(SharedValue::new(
-                        frame
-                            .env
-                            .borrow()
-                            .get(&name.into())
-                            .unwrap()
-                            .borrow_mut()
-                            .force(ctx)?,
-                    ));
+                Node::Expr(Expr::Identifier(id)) => {
+                    frames.push_back(frame.with_op(Op::Force));
+                    frames.push_back(frame.with_op(Op::Value(
+                        frame.env.borrow().get(&id.into()).unwrap().clone(),
+                    )));
                 }
-
                 Node::Expr(Expr::Infix { lhs, op, rhs }) => {
-                    frame_stack.push_back(EvalFrame {
-                        state: EvalState::Infix(op),
-                        ..frame.clone()
-                    });
-
-                    frame_stack.push_back(EvalFrame {
+                    frames.push_back(frame.with_op(Op::Infix(op)));
+                    frames.push_back(frame.with_op(Op::Value(SharedValue::new(Value::Thunk {
                         expr: lhs,
-                        state: EvalState::Start,
-                        ..frame.clone()
-                    });
-
-                    frame_stack.push_back(EvalFrame {
+                        env: frame.env.clone(),
+                        cached_value: Rc::new(RefCell::new(None)),
+                    }))));
+                    frames.push_back(frame.with_op(Op::Value(SharedValue::new(Value::Thunk {
                         expr: rhs,
-                        state: EvalState::Start,
-                        ..frame
-                    });
+                        env: frame.env.clone(),
+                        cached_value: Rc::new(RefCell::new(None)),
+                    }))));
                 }
-
-                Node::Expr(Expr::Condition { cond, .. }) => {
-                    frame_stack.push_back(EvalFrame {
-                        state: EvalState::Cond,
-                        ..frame.clone()
-                    });
-
-                    frame_stack.push_back(EvalFrame {
-                        expr: cond,
-                        state: EvalState::Start,
-                        ..frame
-                    });
+                Node::Expr(Expr::Condition { cond, then, alt }) => {
+                    frames.push_back(frame.with_op(Op::Cond));
+                    frames.push_back(frame.with_op(Op::Force));
+                    frames.push_back(Frame::new(
+                        Op::Start(cond),
+                        frame.env.clone(),
+                        ctx.get_span(cond),
+                    ));
+                    frames.push_back(frame.with_op(Op::Value(SharedValue::new(Value::Thunk {
+                        expr: then,
+                        env: frame.env.clone(),
+                        cached_value: Rc::new(RefCell::new(None)),
+                    }))));
+                    frames.push_back(frame.with_op(Op::Value(SharedValue::new(Value::Thunk {
+                        expr: alt,
+                        env: frame.env.clone(),
+                        cached_value: Rc::new(RefCell::new(None)),
+                    }))));
                 }
-
-                Node::Expr(Expr::Application { func, .. }) => {
-                    frame_stack.push_back(EvalFrame {
-                        state: EvalState::Func,
-                        ..frame.clone()
-                    });
-
-                    frame_stack.push_back(EvalFrame {
-                        expr: func,
-                        state: EvalState::Start,
-                        ..frame
-                    });
+                Node::Expr(Expr::Application { func, arg }) => {
+                    frames.push_back(frame.with_op(Op::App));
+                    frames.push_back(frame.with_op(Op::Force));
+                    frames.push_back(Frame::new(
+                        Op::Start(func),
+                        frame.env.clone(),
+                        ctx.get_span(func),
+                    ));
+                    frames.push_back(frame.with_op(Op::Value(SharedValue::new(Value::Thunk {
+                        expr: arg,
+                        env: frame.env.clone(),
+                        cached_value: Rc::new(RefCell::new(None)),
+                    }))));
                 }
-
                 _ => unreachable!(),
             },
+            Op::Force => {
+                let value = results.pop_back().unwrap();
 
-            EvalState::Infix(op) => {
-                let lhs = result_stack.pop_back().unwrap();
-                let rhs = result_stack.pop_back().unwrap();
+                match &*value.borrow() {
+                    Value::Thunk {
+                        expr,
+                        env,
+                        cached_value,
+                    } => {
+                        if let Some(cached) = &*cached_value.borrow() {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(cached.clone()))),
+                            );
+                        } else {
+                            let frame =
+                                Frame::new(Op::Start(*expr), env.clone(), ctx.get_span(*expr));
+                            frames.push_back(frame.with_op(Op::Force));
+                            frames.push_back(frame.with_op(Op::Function(
+                                |frame, frames, results| {
+                                    let thunk = results.pop_back().unwrap();
+                                    let value = results.pop_back().unwrap();
 
-                match frame
+                                    if let Value::Thunk { .. } = &*value.borrow() {
+                                        frames.push_back(frame.with_op(Op::Function(
+                                            |frame, frames, results| {
+                                                let thunk = results.pop_back().unwrap();
+                                                let value = results.pop_back().unwrap();
+
+                                                if let Value::Thunk { cached_value, .. } =
+                                                    &mut *thunk.borrow_mut()
+                                                {
+                                                    *cached_value.borrow_mut() =
+                                                        Some(value.borrow().clone());
+                                                }
+
+                                                frames.push_back(
+                                                    frame.with_op(Op::Value(value.clone())),
+                                                );
+
+                                                Ok(())
+                                            },
+                                        )));
+                                        frames.push_back(frame.with_op(Op::Value(thunk.clone())));
+                                        frames.push_back(frame.with_op(Op::Force));
+                                        frames.push_back(frame.with_op(Op::Value(value.clone())));
+                                    } else {
+                                        if let Value::Thunk { cached_value, .. } =
+                                            &mut *thunk.borrow_mut()
+                                        {
+                                            *cached_value.borrow_mut() =
+                                                Some(value.borrow().clone());
+                                        }
+                                        frames.push_back(frame.with_op(Op::Value(value.clone())));
+                                    }
+
+                                    Ok(())
+                                },
+                            )));
+                            frames.push_back(frame.with_op(Op::Value(value.clone())));
+                            frames.push_back(frame);
+                        }
+                    }
+                    Value::List(list) if state.full_force => match list {
+                        List::Nil => frames.push_back(frame.with_op(Op::Value(value.clone()))),
+                        List::Cons(head, tail) => {
+                            frames.push_back(frame.with_op(Op::Function(
+                                |frame, frames, results| {
+                                    let head = results.pop_back().unwrap();
+                                    let tail = results.pop_back().unwrap();
+
+                                    frames.push_back(frame.with_op(Op::Value(SharedValue::new(
+                                        Value::List(List::Cons(head.clone(), tail.clone())),
+                                    ))));
+
+                                    Ok(())
+                                },
+                            )));
+                            frames.push_back(frame.with_op(Op::Force));
+                            frames.push_back(frame.with_op(Op::Value(head.clone())));
+                            frames.push_back(frame.with_op(Op::Force));
+                            frames.push_back(frame.with_op(Op::Value(tail.clone())));
+                        }
+                    },
+                    Value::Builtin(BuiltinKind::Value(value)) => {
+                        frames.push_back(frame.with_op(Op::Value(value.clone())))
+                    }
+                    _ => frames.push_back(frame.with_op(Op::Value(value.clone()))),
+                }
+            }
+            Op::Infix(ref op) => {
+                match &*frame
                     .env
                     .borrow()
-                    .get(&op.into())
+                    .get(&op.as_str().into())
                     .unwrap()
-                    .borrow_mut()
-                    .force(ctx)?
+                    .borrow()
                 {
-                    Value::Builtin(BuiltinKind::Operator(f)) => {
-                        let res = f(
-                            ctx,
-                            (&lhs.borrow_mut().force(ctx)?, ctx.get_span(frame.expr)),
-                            (&rhs.borrow_mut().force(ctx)?, ctx.get_span(frame.expr)),
-                        )?;
-                        result_stack.push_back(SharedValue::new(res));
+                    Value::Builtin(BuiltinKind::Function(fun)) => {
+                        fun(&frame, &mut frames, &mut results)?;
                     }
                     Value::Function {
                         param: a,
                         body,
                         env,
-                    } => match ctx.get_node(body) {
+                    } => match ctx.get_node(*body) {
                         Node::Expr(Expr::Lambda { param: b, body }) => {
+                            let lhs = results.pop_back().unwrap();
+                            let rhs = results.pop_back().unwrap();
+
                             let mut new_env = env.borrow().clone();
                             new_env.insert(DefaultAtom::from(a.as_str()), lhs);
                             new_env.insert(DefaultAtom::from(b.as_str()), rhs);
-                            frame_stack.push_back(EvalFrame {
+                            frames.push_back(Frame {
+                                op: Op::Start(*body),
                                 env: Rc::new(RefCell::new(new_env)),
-                                expr: *body,
-                                state: EvalState::Start,
+                                span: ctx.get_span(*body),
                             });
                         }
                         _ => unreachable!(),
                     },
-
                     _ => unreachable!(),
                 };
             }
-
-            EvalState::Cond => {
-                let cond = result_stack.pop_back().unwrap();
-                let cond = cond.borrow();
-
-                if let Node::Expr(Expr::Condition { then, alt, .. }) = ctx.get_node(frame.expr) {
-                    match &*cond {
-                        Value::Boolean(true) => {
-                            frame_stack.push_back(EvalFrame {
-                                expr: *then,
-                                state: EvalState::Start,
-                                ..frame
-                            });
-                        }
-                        Value::Boolean(false) => {
-                            frame_stack.push_back(EvalFrame {
-                                expr: *alt,
-                                state: EvalState::Start,
-                                ..frame
-                            });
-                        }
-                        _ => unreachable!(),
-                    }
-                }
+            Op::Cond => {
+                let cond = results.pop_back().unwrap();
+                let then = results.pop_back().unwrap();
+                let alt = results.pop_back().unwrap();
+                frames.push_back(frame.with_op(Op::Value(match &*cond.borrow() {
+                    Value::Boolean(true) => then,
+                    Value::Boolean(false) => alt,
+                    _ => unreachable!(),
+                })));
             }
+            Op::App => {
+                let func = results.pop_back().unwrap();
 
-            EvalState::Func => {
-                if let Node::Expr(Expr::Application { arg, .. }) = ctx.get_node(frame.expr) {
-                    frame_stack.push_back(EvalFrame {
-                        state: EvalState::App,
-                        ..frame.clone()
-                    });
-
-                    frame_stack.push_back(EvalFrame {
-                        expr: *arg,
-                        state: EvalState::Start,
-                        ..frame
-                    });
-                }
-            }
-
-            EvalState::App => {
-                let arg = result_stack.pop_back().unwrap();
-                let func = result_stack.pop_back().unwrap();
-                let func = func.borrow();
-
-                match &*func {
-                    Value::Builtin(BuiltinKind::Function(f)) => {
-                        result_stack.push_back(
-                            f(ctx, &arg.borrow(), ctx.get_span(frame.expr))
-                                .map(SharedValue::new)?,
-                        );
+                match &*func.borrow() {
+                    Value::Builtin(BuiltinKind::Function(fun)) => {
+                        fun(&frame, &mut frames, &mut results)?;
                     }
-
                     Value::Function { param, body, env } => {
-                        env.borrow_mut()
-                            .insert(DefaultAtom::from(param.as_str()), arg);
-                        frame_stack.push_back(EvalFrame {
-                            env: Rc::new(RefCell::new(env.borrow().clone())),
-                            expr: *body,
-                            state: EvalState::Start,
-                        });
+                        let arg = results.pop_back().unwrap();
+                        let mut new_env = env.borrow().clone();
+                        new_env.insert(DefaultAtom::from(param.as_str()), arg);
+                        frames.push_back(frame.with_op(Op::Value(SharedValue::new(
+                            Value::Thunk {
+                                expr: *body,
+                                env: Rc::new(RefCell::new(new_env)),
+                                cached_value: Rc::new(RefCell::new(None)),
+                            },
+                        ))));
                     }
-
                     _ => unreachable!(),
                 }
+            }
+            Op::Nop => {}
+            Op::Value(value) => {
+                results.push_back(value);
+            }
+            Op::Function(fun) => {
+                fun(&frame, &mut frames, &mut results)?;
+            }
+            Op::EnableFullForce => {
+                state.full_force = true;
+            }
+            Op::DisableFullForce => {
+                state.full_force = false;
             }
         }
     }
 
-    Ok(result_stack.pop_back().unwrap())
+    Ok(results.pop_back().unwrap())
 }
 
 pub fn evaluate(ctx: &Context, nodes: &[NodeId]) -> Result<Value> {
@@ -483,22 +476,24 @@ pub fn evaluate(ctx: &Context, nodes: &[NodeId]) -> Result<Value> {
         );
     }
 
-    let mut val = Value::Unit;
+    let mut value = SharedValue::new(Value::Unit);
     for node in nodes {
         match ctx.get_node(*node) {
             Node::Expr(_) => {
-                val = eval_expr_stack(
+                let frame = Frame::new(Op::Start(*node), env.clone(), ctx.get_span(*node));
+                value = eval_expr(
                     ctx,
-                    EvalFrame {
-                        env: env.clone(),
-                        expr: *node,
-                        state: EvalState::Start,
-                    },
-                )?
-                .borrow()
-                .clone();
+                    [
+                        frame.with_op(Op::Force),
+                        frame.with_op(match ctx.get_type(*node) {
+                            Some(Type::List(_)) => Op::EnableFullForce,
+                            _ => Op::Nop,
+                        }),
+                        frame,
+                    ],
+                )?;
             }
-            Node::Bind(name, expr) => {
+            Node::Bind(id, expr) => {
                 let mut closure_env = FxHashMap::default();
                 for (k, v) in env.borrow().iter() {
                     closure_env.insert(k.clone(), v.clone());
@@ -514,13 +509,12 @@ pub fn evaluate(ctx: &Context, nodes: &[NodeId]) -> Result<Value> {
                         };
 
                         closure_env.borrow_mut().insert(
-                            DefaultAtom::from(name.as_str()),
+                            DefaultAtom::from(id.as_str()),
                             SharedValue::new(func.clone()),
                         );
 
                         func
                     }
-
                     _ => Value::Thunk {
                         expr: *expr,
                         env: closure_env,
@@ -529,10 +523,10 @@ pub fn evaluate(ctx: &Context, nodes: &[NodeId]) -> Result<Value> {
                 };
 
                 env.borrow_mut()
-                    .insert(DefaultAtom::from(name.as_str()), SharedValue::new(val));
+                    .insert(DefaultAtom::from(id.as_str()), SharedValue::new(val));
             }
         }
     }
 
-    Ok(val)
+    Ok(value.borrow().clone())
 }

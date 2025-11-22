@@ -1,10 +1,10 @@
 use core::fmt;
-use std::{cmp::Ordering, fmt::Formatter};
+use std::{collections::VecDeque, fmt::Formatter};
 
 use fxhash::{FxHashMap, FxHashSet};
 
 use crate::{
-    eval::{self, List, Value},
+    eval::{self, Frame, List, Op, SharedValue, Value},
     expr::Expr,
     span::Span,
     ty,
@@ -27,9 +27,8 @@ pub struct Display<'a> {
 
 #[derive(Debug, Clone)]
 pub enum BuiltinKind {
-    Value(Box<Value>),
-    Function(fn(&Context, &Value, Span) -> eval::Result<Value>),
-    Operator(fn(&Context, (&Value, Span), (&Value, Span)) -> eval::Result<Value>),
+    Value(SharedValue),
+    Function(fn(&Frame, &mut VecDeque<Frame>, &mut VecDeque<SharedValue>) -> eval::Result<()>),
 }
 
 #[derive(Debug, Clone)]
@@ -133,7 +132,7 @@ impl Context {
 
     pub fn add_operator(&mut self, symbol: &str, precedence: i32, associativity: Associativity) {
         self.operators.insert(
-            symbol.to_string(),
+            symbol.into(),
             Operator {
                 precedence,
                 associativity,
@@ -155,174 +154,672 @@ impl Context {
     }
 
     fn add_builtins(&mut self) {
-        pub fn cmp(ctx: &Context, a: &Value, b: &Value) -> eval::Result<Ordering> {
-            match (a, b) {
-                (Value::Integer(a), Value::Integer(b)) => Ok(a.cmp(b)),
-                (Value::Boolean(a), Value::Boolean(b)) => Ok(a.cmp(b)),
-                (Value::Char(a), Value::Char(b)) => Ok(a.cmp(b)),
-                (Value::List(a), Value::List(b)) => {
-                    let mut l1 = a.clone();
-                    let mut l2 = b.clone();
-                    loop {
-                        match (l1.head(), l2.head()) {
-                            (None, None) => return Ok(Ordering::Equal),
-                            (None, Some(_)) => return Ok(Ordering::Less),
-                            (Some(_), None) => return Ok(Ordering::Greater),
-                            (Some(mut a), Some(mut b)) => {
-                                match cmp(ctx, &a.force(ctx)?, &b.force(ctx)?)? {
-                                    Ordering::Equal => {
-                                        l1 = l1.tail().unwrap_or_default();
-                                        l2 = l2.tail().unwrap_or_default();
-                                    }
-                                    ordering => return Ok(ordering),
-                                }
-                            }
-                        }
-                    }
-                }
-                (Value::Unit, Value::Unit) => Ok(Ordering::Equal),
-                _ => unreachable!(),
-            }
-        }
-
         self.add_builtin(
             "||",
             ty!(Bool -> Bool -> Bool),
-            BuiltinKind::Operator(|_, (a, _), (b, _)| match (a, b) {
-                (Value::Boolean(a), Value::Boolean(b)) => Ok(Value::Boolean(*a || *b)),
-                _ => unreachable!(),
+            BuiltinKind::Function(|frame, frames, _| {
+                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+                    let a = results.pop_back().unwrap();
+                    let b = results.pop_back().unwrap();
+
+                    match &*a.borrow() {
+                        Value::Boolean(true) => {
+                            frames.push_back(frame.with_op(Op::Value(a.clone())));
+                        }
+                        Value::Boolean(false) => {
+                            frames.push_back(frame.with_op(Op::Value(b)));
+                        }
+                        _ => unreachable!(),
+                    }
+
+                    Ok(())
+                })));
+                frames.push_back(frame.with_op(Op::Force));
+
+                Ok(())
             }),
         );
 
         self.add_builtin(
             "&&",
             ty!(Bool -> Bool -> Bool),
-            BuiltinKind::Operator(|_, (a, _), (b, _)| match (a, b) {
-                (Value::Boolean(a), Value::Boolean(b)) => Ok(Value::Boolean(*a && *b)),
-                _ => unreachable!(),
+            BuiltinKind::Function(|frame, frames, _| {
+                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+                    let a = results.pop_back().unwrap();
+                    let b = results.pop_back().unwrap();
+
+                    match &*a.borrow() {
+                        Value::Boolean(false) => {
+                            frames.push_back(frame.with_op(Op::Value(a.clone())));
+                        }
+                        Value::Boolean(true) => {
+                            frames.push_back(frame.with_op(Op::Value(b)));
+                        }
+                        _ => unreachable!(),
+                    }
+
+                    Ok(())
+                })));
+                frames.push_back(frame.with_op(Op::Force));
+
+                Ok(())
             }),
         );
 
         self.add_builtin(
             "==",
             ty!(forall 0 . (Eq 0) => 0 -> 0 -> Bool),
-            BuiltinKind::Operator(|ctx, (a, _), (b, _)| {
-                Ok(Value::Boolean(cmp(ctx, a, b)? == Ordering::Equal))
+            BuiltinKind::Function(|frame, frames, results| {
+                let a = results.pop_back().unwrap();
+                let b = results.pop_back().unwrap();
+
+                match (&*a.borrow(), &*b.borrow()) {
+                    (Value::Integer(a), Value::Integer(b)) => {
+                        frames.push_back(
+                            frame.with_op(Op::Value(SharedValue::new(Value::Boolean(a == b)))),
+                        );
+                    }
+                    (Value::Boolean(a), Value::Boolean(b)) => {
+                        frames.push_back(
+                            frame.with_op(Op::Value(SharedValue::new(Value::Boolean(a == b)))),
+                        );
+                    }
+                    (Value::Char(a), Value::Char(b)) => {
+                        frames.push_back(
+                            frame.with_op(Op::Value(SharedValue::new(Value::Boolean(a == b)))),
+                        );
+                    }
+                    (Value::List(a), Value::List(b)) => match (a, b) {
+                        (List::Nil, List::Nil) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(Value::Boolean(true)))),
+                            );
+                        }
+                        (List::Nil, List::Cons(_, _)) | (List::Cons(_, _), List::Nil) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(Value::Boolean(false)))),
+                            );
+                        }
+                        (List::Cons(h1, t1), List::Cons(h2, t2)) => {
+                            frames.push_back(frame.with_op(Op::Function(
+                                |frame, frames, results| {
+                                    let value = results.pop_back().unwrap();
+
+                                    match &*value.borrow() {
+                                        Value::Boolean(true) => {
+                                            frames.push_back(frame.with_op(Op::Infix("==".into())));
+                                        }
+                                        Value::Boolean(false) => {
+                                            frames
+                                                .push_back(frame.with_op(Op::Value(value.clone())));
+                                        }
+                                        _ => unreachable!(),
+                                    }
+                                    Ok(())
+                                },
+                            )));
+
+                            frames.push_back(frame.with_op(Op::Infix("==".into())));
+                            frames.push_back(frame.with_op(Op::Force));
+                            frames.push_back(frame.with_op(Op::Value(h1.clone())));
+                            frames.push_back(frame.with_op(Op::Force));
+                            frames.push_back(frame.with_op(Op::Value(h2.clone())));
+                            frames.push_back(frame.with_op(Op::Value(t1.clone())));
+                            frames.push_back(frame.with_op(Op::Value(t2.clone())));
+                        }
+                    },
+                    (Value::Thunk { .. }, _) | (_, Value::Thunk { .. }) => {
+                        frames.push_back(frame.with_op(Op::Infix("==".into())));
+                        frames.push_back(frame.with_op(Op::Force));
+                        frames.push_back(frame.with_op(Op::Value(a.clone())));
+                        frames.push_back(frame.with_op(Op::Force));
+                        frames.push_back(frame.with_op(Op::Value(b.clone())));
+                    }
+                    _ => unreachable!(),
+                }
+
+                Ok(())
             }),
         );
 
         self.add_builtin(
             "!=",
             ty!(forall 0 . (Eq 0) => 0 -> 0 -> Bool),
-            BuiltinKind::Operator(|ctx, (a, _), (b, _)| {
-                Ok(Value::Boolean(cmp(ctx, a, b)? != Ordering::Equal))
+            BuiltinKind::Function(|frame, frames, results| {
+                let a = results.pop_back().unwrap();
+                let b = results.pop_back().unwrap();
+
+                match (&*a.borrow(), &*b.borrow()) {
+                    (Value::Integer(a), Value::Integer(b)) => {
+                        frames.push_back(
+                            frame.with_op(Op::Value(SharedValue::new(Value::Boolean(a != b)))),
+                        );
+                    }
+                    (Value::Boolean(a), Value::Boolean(b)) => {
+                        frames.push_back(
+                            frame.with_op(Op::Value(SharedValue::new(Value::Boolean(a != b)))),
+                        );
+                    }
+                    (Value::Char(a), Value::Char(b)) => {
+                        frames.push_back(
+                            frame.with_op(Op::Value(SharedValue::new(Value::Boolean(a != b)))),
+                        );
+                    }
+                    (Value::List(a), Value::List(b)) => match (a, b) {
+                        (List::Nil, List::Nil) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(Value::Boolean(false)))),
+                            );
+                        }
+                        (List::Nil, List::Cons(_, _)) | (List::Cons(_, _), List::Nil) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(Value::Boolean(true)))),
+                            );
+                        }
+                        (List::Cons(h1, t1), List::Cons(h2, t2)) => {
+                            frames.push_back(frame.with_op(Op::Function(
+                                |frame, frames, results| {
+                                    let value = results.pop_back().unwrap();
+
+                                    match &*value.borrow() {
+                                        Value::Boolean(true) => {
+                                            frames
+                                                .push_back(frame.with_op(Op::Value(value.clone())));
+                                        }
+                                        Value::Boolean(false) => {
+                                            frames.push_back(frame.with_op(Op::Infix("!=".into())));
+                                        }
+                                        _ => unreachable!(),
+                                    }
+                                    Ok(())
+                                },
+                            )));
+
+                            frames.push_back(frame.with_op(Op::Infix("!=".into())));
+                            frames.push_back(frame.with_op(Op::Force));
+                            frames.push_back(frame.with_op(Op::Value(h1.clone())));
+                            frames.push_back(frame.with_op(Op::Force));
+                            frames.push_back(frame.with_op(Op::Value(h2.clone())));
+                            frames.push_back(frame.with_op(Op::Value(t1.clone())));
+                            frames.push_back(frame.with_op(Op::Value(t2.clone())));
+                        }
+                    },
+                    (Value::Thunk { .. }, _) | (_, Value::Thunk { .. }) => {
+                        frames.push_back(frame.with_op(Op::Infix("!=".into())));
+                        frames.push_back(frame.with_op(Op::Force));
+                        frames.push_back(frame.with_op(Op::Value(a.clone())));
+                        frames.push_back(frame.with_op(Op::Force));
+                        frames.push_back(frame.with_op(Op::Value(b.clone())));
+                    }
+                    _ => unreachable!(),
+                }
+
+                Ok(())
             }),
         );
 
         self.add_builtin(
             "<",
             ty!(forall 0 . (Ord 0) => 0 -> 0 -> Bool),
-            BuiltinKind::Operator(|ctx, (a, _), (b, _)| {
-                Ok(Value::Boolean(cmp(ctx, a, b)? == Ordering::Less))
+            BuiltinKind::Function(|frame, frames, results| {
+                let a = results.pop_back().unwrap();
+                let b = results.pop_back().unwrap();
+
+                match (&*a.borrow(), &*b.borrow()) {
+                    (Value::Integer(a), Value::Integer(b)) => {
+                        frames.push_back(
+                            frame.with_op(Op::Value(SharedValue::new(Value::Boolean(a < b)))),
+                        );
+                    }
+                    (Value::Boolean(a), Value::Boolean(b)) => {
+                        frames.push_back(
+                            frame.with_op(Op::Value(SharedValue::new(Value::Boolean(a < b)))),
+                        );
+                    }
+                    (Value::Char(a), Value::Char(b)) => {
+                        frames.push_back(
+                            frame.with_op(Op::Value(SharedValue::new(Value::Boolean(a < b)))),
+                        );
+                    }
+                    (Value::List(a), Value::List(b)) => match (a, b) {
+                        (List::Nil, List::Nil) | (List::Cons(_, _), List::Nil) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(Value::Boolean(false)))),
+                            );
+                        }
+                        (List::Nil, List::Cons(_, _)) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(Value::Boolean(true)))),
+                            );
+                        }
+                        (List::Cons(h1, t1), List::Cons(h2, t2)) => {
+                            frames.push_back(frame.with_op(Op::Infix("<".into())));
+                            frames.push_back(frame.with_op(Op::Force));
+                            frames.push_back(frame.with_op(Op::Value(h1.clone())));
+                            frames.push_back(frame.with_op(Op::Force));
+                            frames.push_back(frame.with_op(Op::Value(h2.clone())));
+                            frames.push_back(frame.with_op(Op::Value(t1.clone())));
+                            frames.push_back(frame.with_op(Op::Value(t2.clone())));
+                        }
+                    },
+                    (Value::Thunk { .. }, _) | (_, Value::Thunk { .. }) => {
+                        frames.push_back(frame.with_op(Op::Infix("<".into())));
+                        frames.push_back(frame.with_op(Op::Force));
+                        frames.push_back(frame.with_op(Op::Value(a.clone())));
+                        frames.push_back(frame.with_op(Op::Force));
+                        frames.push_back(frame.with_op(Op::Value(b.clone())));
+                    }
+                    _ => unreachable!(),
+                }
+
+                Ok(())
             }),
         );
 
         self.add_builtin(
             "<=",
             ty!(forall 0 . (Ord 0) => 0 -> 0 -> Bool),
-            BuiltinKind::Operator(|ctx, (a, _), (b, _)| {
-                Ok(Value::Boolean(matches!(
-                    cmp(ctx, a, b)?,
-                    Ordering::Less | Ordering::Equal
-                )))
+            BuiltinKind::Function(|frame, frames, results| {
+                let a = results.pop_back().unwrap();
+                let b = results.pop_back().unwrap();
+
+                match (&*a.borrow(), &*b.borrow()) {
+                    (Value::Integer(a), Value::Integer(b)) => {
+                        frames.push_back(
+                            frame.with_op(Op::Value(SharedValue::new(Value::Boolean(a <= b)))),
+                        );
+                    }
+                    (Value::Boolean(a), Value::Boolean(b)) => {
+                        frames.push_back(
+                            frame.with_op(Op::Value(SharedValue::new(Value::Boolean(a <= b)))),
+                        );
+                    }
+                    (Value::Char(a), Value::Char(b)) => {
+                        frames.push_back(
+                            frame.with_op(Op::Value(SharedValue::new(Value::Boolean(a <= b)))),
+                        );
+                    }
+                    (Value::List(a), Value::List(b)) => match (a, b) {
+                        (List::Nil, List::Nil) | (List::Nil, List::Cons(_, _)) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(Value::Boolean(true)))),
+                            );
+                        }
+                        (List::Cons(_, _), List::Nil) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(Value::Boolean(false)))),
+                            );
+                        }
+                        (List::Cons(h1, t1), List::Cons(h2, t2)) => {
+                            frames.push_back(frame.with_op(Op::Function(
+                                |frame, frames, results| {
+                                    let value = results.pop_back().unwrap();
+
+                                    match &*value.borrow() {
+                                        Value::Boolean(true) => {
+                                            frames.push_back(frame.with_op(Op::Infix("<=".into())));
+                                        }
+                                        Value::Boolean(false) => {
+                                            frames
+                                                .push_back(frame.with_op(Op::Value(value.clone())));
+                                        }
+                                        _ => unreachable!(),
+                                    }
+                                    Ok(())
+                                },
+                            )));
+
+                            frames.push_back(frame.with_op(Op::Infix("<=".into())));
+                            frames.push_back(frame.with_op(Op::Force));
+                            frames.push_back(frame.with_op(Op::Value(h1.clone())));
+                            frames.push_back(frame.with_op(Op::Force));
+                            frames.push_back(frame.with_op(Op::Value(h2.clone())));
+                            frames.push_back(frame.with_op(Op::Value(t1.clone())));
+                            frames.push_back(frame.with_op(Op::Value(t2.clone())));
+                        }
+                    },
+                    (Value::Thunk { .. }, _) | (_, Value::Thunk { .. }) => {
+                        frames.push_back(frame.with_op(Op::Infix("<=".into())));
+                        frames.push_back(frame.with_op(Op::Force));
+                        frames.push_back(frame.with_op(Op::Value(a.clone())));
+                        frames.push_back(frame.with_op(Op::Force));
+                        frames.push_back(frame.with_op(Op::Value(b.clone())));
+                    }
+                    _ => unreachable!(),
+                }
+
+                Ok(())
             }),
         );
 
         self.add_builtin(
             ">",
             ty!(forall 0 . (Ord 0) => 0 -> 0 -> Bool),
-            BuiltinKind::Operator(|ctx, (a, _), (b, _)| {
-                Ok(Value::Boolean(cmp(ctx, a, b)? == Ordering::Greater))
+            BuiltinKind::Function(|frame, frames, results| {
+                let a = results.pop_back().unwrap();
+                let b = results.pop_back().unwrap();
+
+                match (&*a.borrow(), &*b.borrow()) {
+                    (Value::Integer(a), Value::Integer(b)) => {
+                        frames.push_back(
+                            frame.with_op(Op::Value(SharedValue::new(Value::Boolean(a > b)))),
+                        );
+                    }
+                    (Value::Boolean(a), Value::Boolean(b)) => {
+                        frames.push_back(
+                            frame.with_op(Op::Value(SharedValue::new(Value::Boolean(a > b)))),
+                        );
+                    }
+                    (Value::Char(a), Value::Char(b)) => {
+                        frames.push_back(
+                            frame.with_op(Op::Value(SharedValue::new(Value::Boolean(a > b)))),
+                        );
+                    }
+                    (Value::List(a), Value::List(b)) => match (a, b) {
+                        (List::Nil, List::Nil) | (List::Nil, List::Cons(_, _)) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(Value::Boolean(false)))),
+                            );
+                        }
+                        (List::Cons(_, _), List::Nil) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(Value::Boolean(true)))),
+                            );
+                        }
+                        (List::Cons(h1, t1), List::Cons(h2, t2)) => {
+                            frames.push_back(frame.with_op(Op::Infix(">".into())));
+                            frames.push_back(frame.with_op(Op::Force));
+                            frames.push_back(frame.with_op(Op::Value(h1.clone())));
+                            frames.push_back(frame.with_op(Op::Force));
+                            frames.push_back(frame.with_op(Op::Value(h2.clone())));
+                            frames.push_back(frame.with_op(Op::Value(t1.clone())));
+                            frames.push_back(frame.with_op(Op::Value(t2.clone())));
+                        }
+                    },
+                    (Value::Thunk { .. }, _) | (_, Value::Thunk { .. }) => {
+                        frames.push_back(frame.with_op(Op::Infix(">".into())));
+                        frames.push_back(frame.with_op(Op::Force));
+                        frames.push_back(frame.with_op(Op::Value(a.clone())));
+                        frames.push_back(frame.with_op(Op::Force));
+                        frames.push_back(frame.with_op(Op::Value(b.clone())));
+                    }
+                    _ => unreachable!(),
+                }
+
+                Ok(())
             }),
         );
 
         self.add_builtin(
             ">=",
             ty!(forall 0 . (Ord 0) => 0 -> 0 -> Bool),
-            BuiltinKind::Operator(|ctx, (a, _), (b, _)| {
-                Ok(Value::Boolean(matches!(
-                    cmp(ctx, a, b)?,
-                    Ordering::Greater | Ordering::Equal
-                )))
+            BuiltinKind::Function(|frame, frames, results| {
+                let a = results.pop_back().unwrap();
+                let b = results.pop_back().unwrap();
+
+                match (&*a.borrow(), &*b.borrow()) {
+                    (Value::Integer(a), Value::Integer(b)) => {
+                        frames.push_back(
+                            frame.with_op(Op::Value(SharedValue::new(Value::Boolean(a >= b)))),
+                        );
+                    }
+                    (Value::Boolean(a), Value::Boolean(b)) => {
+                        frames.push_back(
+                            frame.with_op(Op::Value(SharedValue::new(Value::Boolean(a >= b)))),
+                        );
+                    }
+                    (Value::Char(a), Value::Char(b)) => {
+                        frames.push_back(
+                            frame.with_op(Op::Value(SharedValue::new(Value::Boolean(a >= b)))),
+                        );
+                    }
+                    (Value::List(a), Value::List(b)) => match (a, b) {
+                        (List::Nil, List::Nil) | (List::Cons(_, _), List::Nil) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(Value::Boolean(true)))),
+                            );
+                        }
+                        (List::Nil, List::Cons(_, _)) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(Value::Boolean(false)))),
+                            );
+                        }
+                        (List::Cons(h1, t1), List::Cons(h2, t2)) => {
+                            frames.push_back(frame.with_op(Op::Function(
+                                |frame, frames, results| {
+                                    let value = results.pop_back().unwrap();
+
+                                    match &*value.borrow() {
+                                        Value::Boolean(true) => {
+                                            frames.push_back(frame.with_op(Op::Infix(">=".into())));
+                                        }
+                                        Value::Boolean(false) => {
+                                            frames
+                                                .push_back(frame.with_op(Op::Value(value.clone())));
+                                        }
+                                        _ => unreachable!(),
+                                    }
+                                    Ok(())
+                                },
+                            )));
+
+                            frames.push_back(frame.with_op(Op::Infix(">=".into())));
+                            frames.push_back(frame.with_op(Op::Force));
+                            frames.push_back(frame.with_op(Op::Value(h1.clone())));
+                            frames.push_back(frame.with_op(Op::Force));
+                            frames.push_back(frame.with_op(Op::Value(h2.clone())));
+                            frames.push_back(frame.with_op(Op::Value(t1.clone())));
+                            frames.push_back(frame.with_op(Op::Value(t2.clone())));
+                        }
+                    },
+                    (Value::Thunk { .. }, _) | (_, Value::Thunk { .. }) => {
+                        frames.push_back(frame.with_op(Op::Infix(">=".into())));
+                        frames.push_back(frame.with_op(Op::Force));
+                        frames.push_back(frame.with_op(Op::Value(a.clone())));
+                        frames.push_back(frame.with_op(Op::Force));
+                        frames.push_back(frame.with_op(Op::Value(b.clone())));
+                    }
+                    _ => unreachable!(),
+                }
+
+                Ok(())
             }),
         );
 
         self.add_builtin(
             "++",
             ty!(forall 0 . [0] -> [0] -> [0]),
-            BuiltinKind::Operator(|_, (a, _), (b, _)| match (a, b) {
-                (Value::List(a), Value::List(b)) => Ok(Value::List(a.clone().append(b.clone()))),
-                _ => unreachable!(),
+            BuiltinKind::Function(|frame, frames, _| {
+                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+                    let a = results.pop_back().unwrap();
+                    let b = results.pop_back().unwrap();
+
+                    fn append(a: SharedValue, b: SharedValue) -> eval::Result<SharedValue> {
+                        match &*a.borrow() {
+                            Value::List(list) => match list {
+                                List::Nil => Ok(b.clone()),
+                                List::Cons(head, tail) => Ok(SharedValue::new(Value::List(
+                                    List::Cons(head.clone(), append(tail.clone(), b)?),
+                                ))),
+                            },
+                            _ => unreachable!(),
+                        }
+                    }
+                    frames.push_back(frame.with_op(Op::Value(append(a, b)?)));
+                    Ok(())
+                })));
+                frames.push_back(frame.with_op(Op::Force));
+
+                Ok(())
             }),
         );
 
         self.add_builtin(
             ":",
             ty!(forall 0 . 0 -> [0] -> [0]),
-            BuiltinKind::Operator(|_, (a, _), (b, _)| match (a, b) {
-                (Value::List(a), Value::List(b)) => {
-                    Ok(Value::List(b.clone().push(Value::List(a.clone()))))
-                }
-                (a, Value::List(b)) => Ok(Value::List(b.clone().push(a.clone()))),
-                _ => unreachable!(),
+            BuiltinKind::Function(|frame, frames, results| {
+                let a = results.pop_back().unwrap();
+                let b = results.pop_back().unwrap();
+
+                frames.push_back(
+                    frame.with_op(Op::Value(SharedValue::new(Value::List(List::Cons(a, b))))),
+                );
+
+                Ok(())
             }),
         );
 
         self.add_builtin(
             "+",
             ty!(forall 0 . (Num 0) => 0 -> 0 -> 0),
-            BuiltinKind::Operator(|_, (a, _), (b, _)| match (a, b) {
-                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a + b)),
-                _ => unreachable!(),
+            BuiltinKind::Function(|frame, frames, results| {
+                let a = results.pop_back().unwrap();
+                let b = results.pop_back().unwrap();
+
+                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+                    let a = results.pop_back().unwrap();
+                    let b = results.pop_back().unwrap();
+
+                    match (&*a.borrow(), &*b.borrow()) {
+                        (Value::Integer(a), Value::Integer(b)) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(Value::Integer(a + b)))),
+                            );
+                        }
+                        _ => unreachable!(),
+                    }
+                    Ok(())
+                })));
+                frames.push_back(frame.with_op(Op::Force));
+                frames.push_back(frame.with_op(Op::Value(a)));
+                frames.push_back(frame.with_op(Op::Force));
+                frames.push_back(frame.with_op(Op::Value(b)));
+
+                Ok(())
             }),
         );
 
         self.add_builtin(
             "-",
             ty!(forall 0 . (Num 0) => 0 -> 0 -> 0),
-            BuiltinKind::Operator(|_, (a, _), (b, _)| match (a, b) {
-                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a - b)),
-                _ => unreachable!(),
+            BuiltinKind::Function(|frame, frames, results| {
+                let a = results.pop_back().unwrap();
+                let b = results.pop_back().unwrap();
+
+                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+                    let a = results.pop_back().unwrap();
+                    let b = results.pop_back().unwrap();
+
+                    match (&*a.borrow(), &*b.borrow()) {
+                        (Value::Integer(a), Value::Integer(b)) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(Value::Integer(a - b)))),
+                            );
+                        }
+                        _ => unreachable!(),
+                    }
+                    Ok(())
+                })));
+                frames.push_back(frame.with_op(Op::Force));
+                frames.push_back(frame.with_op(Op::Value(a)));
+                frames.push_back(frame.with_op(Op::Force));
+                frames.push_back(frame.with_op(Op::Value(b)));
+
+                Ok(())
             }),
         );
 
         self.add_builtin(
             "*",
             ty!(forall 0 . (Num 0) => 0 -> 0 -> 0),
-            BuiltinKind::Operator(|_, (a, _), (b, _)| match (a, b) {
-                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a * b)),
-                _ => unreachable!(),
+            BuiltinKind::Function(|frame, frames, results| {
+                let a = results.pop_back().unwrap();
+                let b = results.pop_back().unwrap();
+
+                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+                    let a = results.pop_back().unwrap();
+                    let b = results.pop_back().unwrap();
+
+                    match (&*a.borrow(), &*b.borrow()) {
+                        (Value::Integer(a), Value::Integer(b)) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(Value::Integer(a * b)))),
+                            );
+                        }
+                        _ => unreachable!(),
+                    }
+                    Ok(())
+                })));
+                frames.push_back(frame.with_op(Op::Force));
+                frames.push_back(frame.with_op(Op::Value(a)));
+                frames.push_back(frame.with_op(Op::Force));
+                frames.push_back(frame.with_op(Op::Value(b)));
+
+                Ok(())
             }),
         );
 
         self.add_builtin(
             "/",
             ty!(forall 0 . (Num 0) => 0 -> 0 -> 0),
-            BuiltinKind::Operator(|_, (a, _), (b, span)| match (a, b) {
-                (Value::Integer(a), Value::Integer(b)) => a
-                    .checked_div(*b)
-                    .map(Value::Integer)
-                    .ok_or(eval::Error::DivisionByZero(span)),
-                _ => unreachable!(),
+            BuiltinKind::Function(|frame, frames, results| {
+                let a = results.pop_back().unwrap();
+                let b = results.pop_back().unwrap();
+
+                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+                    let a = results.pop_back().unwrap();
+                    let b = results.pop_back().unwrap();
+
+                    match (&*a.borrow(), &*b.borrow()) {
+                        (Value::Integer(a), Value::Integer(b)) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(
+                                    a.checked_div(*b)
+                                        .map(|res| SharedValue::new(Value::Integer(res)))
+                                        .ok_or(eval::Error::DivisionByZero(frame.span))?,
+                                )),
+                            );
+                        }
+                        _ => unreachable!(),
+                    }
+                    Ok(())
+                })));
+                frames.push_back(frame.with_op(Op::Force));
+                frames.push_back(frame.with_op(Op::Value(a)));
+                frames.push_back(frame.with_op(Op::Force));
+                frames.push_back(frame.with_op(Op::Value(b)));
+
+                Ok(())
             }),
         );
 
         self.add_builtin(
             "%",
             ty!(forall 0 . (Num 0) => 0 -> 0 -> 0),
-            BuiltinKind::Operator(|_, (a, _), (b, _)| match (a, b) {
-                (Value::Integer(a), Value::Integer(b)) => Ok(Value::Integer(a % b)),
-                _ => unreachable!(),
+            BuiltinKind::Function(|frame, frames, results| {
+                let a = results.pop_back().unwrap();
+                let b = results.pop_back().unwrap();
+
+                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+                    let a = results.pop_back().unwrap();
+                    let b = results.pop_back().unwrap();
+
+                    match (&*a.borrow(), &*b.borrow()) {
+                        (Value::Integer(a), Value::Integer(b)) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(Value::Integer(a % b)))),
+                            );
+                        }
+                        _ => unreachable!(),
+                    }
+                    Ok(())
+                })));
+                frames.push_back(frame.with_op(Op::Force));
+                frames.push_back(frame.with_op(Op::Value(a)));
+                frames.push_back(frame.with_op(Op::Force));
+                frames.push_back(frame.with_op(Op::Value(b)));
+
+                Ok(())
             }),
         );
 
@@ -330,96 +827,151 @@ impl Context {
             "args",
             ty!([[Char]]),
             BuiltinKind::Value({
-                let args = std::env::args().skip(2).collect::<Vec<_>>();
-                let mut arg_list = List::Nil;
-
-                for arg in args.iter().rev() {
-                    let mut string_list = List::Nil;
+                let mut args = List::Nil;
+                for arg in std::env::args().skip(2).collect::<Vec<_>>().iter().rev() {
+                    let mut string = List::Nil;
                     for ch in arg.chars().rev() {
-                        string_list = string_list.push(Value::Char(ch));
+                        string = string.push(SharedValue::new(Value::Char(ch)));
                     }
-                    arg_list = arg_list.push(Value::List(string_list));
+                    args = args.push(SharedValue::new(Value::List(string)));
                 }
-
-                Box::new(Value::List(arg_list))
+                SharedValue::new(Value::List(args))
             }),
         );
 
         self.add_builtin(
             "not",
             ty!(Bool -> Bool),
-            BuiltinKind::Function(|_, arg, _| match arg {
-                Value::Boolean(b) => Ok(Value::Boolean(!b)),
-                _ => unreachable!(),
+            BuiltinKind::Function(|frame, frames, _| {
+                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+                    let arg = results.pop_back().unwrap();
+
+                    match &*arg.borrow() {
+                        Value::Boolean(b) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(Value::Boolean(!b)))),
+                            );
+                        }
+                        _ => unreachable!(),
+                    }
+
+                    Ok(())
+                })));
+                frames.push_back(frame.with_op(Op::Force));
+
+                Ok(())
             }),
         );
 
         self.add_builtin(
             "read",
             ty!([Char] -> [Char]),
-            BuiltinKind::Function(|ctx, arg, span| {
-                let path = match arg {
-                    Value::List(l) => {
-                        let mut list = l.clone();
+            BuiltinKind::Function(|frame, frames, _| {
+                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+                    let arg = results.pop_back().unwrap();
+
+                    let path = {
+                        let mut value = arg.clone();
                         let mut chars = Vec::new();
-                        while let Some(mut h) = list.head() {
-                            match h.force(ctx).unwrap() {
-                                Value::Char(ch) => chars.push(ch),
-                                _ => unreachable!(),
+                        while let Value::List(list) = &*value.clone().borrow() {
+                            let Some(head) = list.head() else { break };
+
+                            if let Value::Char(ch) = &*head.borrow() {
+                                chars.push(*ch)
                             }
-                            list = list.tail().unwrap_or_default();
+
+                            value = match list.tail() {
+                                Some(tail) => tail,
+                                None => break,
+                            };
                         }
+
                         chars.into_iter().collect::<String>()
-                    }
-                    _ => unreachable!(),
-                };
+                    };
 
-                let contents = if path == "-" {
-                    use std::io::Read;
-                    let mut input = String::new();
-                    std::io::stdin().read_to_string(&mut input).map_err(|e| {
-                        eval::Error::IO(format!("Failed to read from stdin: {}", e), span)
-                    })?;
-                    input
-                } else {
-                    std::fs::read_to_string(&path).map_err(|e| {
-                        eval::Error::IO(format!("Failed to read file '{}': {}", path, e), span)
-                    })?
-                };
+                    let contents = if path == "-" {
+                        use std::io::Read;
+                        let mut input = String::new();
+                        std::io::stdin().read_to_string(&mut input).map_err(|e| {
+                            eval::Error::IO(format!("Failed to read from stdin: {}", e), frame.span)
+                        })?;
+                        input
+                    } else {
+                        std::fs::read_to_string(&path).map_err(|e| {
+                            eval::Error::IO(
+                                format!("Failed to read file '{}': {}", path, e),
+                                frame.span,
+                            )
+                        })?
+                    };
 
-                let mut list = List::default();
-                for ch in contents.chars().rev() {
-                    list = list.push(Value::Char(ch))
-                }
+                    frames.push_back(
+                        frame.with_op(Op::Value(SharedValue::new(Value::List(List::from(
+                            contents
+                                .chars()
+                                .map(|ch| SharedValue::new(Value::Char(ch)))
+                                .collect(),
+                        ))))),
+                    );
 
-                Ok(Value::List(list))
+                    Ok(())
+                })));
+
+                frames.push_back(frame.with_op(Op::DisableFullForce));
+                frames.push_back(frame.with_op(Op::Force));
+                frames.push_back(frame.with_op(Op::EnableFullForce));
+
+                Ok(())
             }),
         );
 
         self.add_builtin(
             "print",
             ty!(forall 0 . 0 -> 0),
-            BuiltinKind::Function(|ctx, arg, _| {
-                println!("{}", arg.display(ctx));
-                Ok(arg.clone())
+            BuiltinKind::Function(|frame, frames, _| {
+                frames.push_back(frame.with_op(Op::Function(|_, _, results| {
+                    let arg = results.back().unwrap();
+                    println!("{}", arg.borrow());
+                    Ok(())
+                })));
+                frames.push_back(frame.with_op(Op::Force));
+                Ok(())
             }),
         );
 
         self.add_builtin(
             "head",
             ty!(forall 0 . [0] -> 0),
-            BuiltinKind::Function(|ctx, arg, span| match arg {
-                Value::List(l) => Ok(l.head().ok_or(eval::Error::EmptyList(span))?.force(ctx)?),
-                _ => unreachable!(),
+            BuiltinKind::Function(|frame, frames, _| {
+                frames.push_back(frame.with_op(Op::Function(|frame, _, results| {
+                    let arg = results.pop_back().unwrap();
+                    match &*arg.borrow() {
+                        Value::List(list) => results
+                            .push_back(list.head().ok_or(eval::Error::EmptyList(frame.span))?),
+                        _ => unreachable!(),
+                    }
+                    Ok(())
+                })));
+                frames.push_back(frame.with_op(Op::Force));
+                Ok(())
             }),
         );
 
         self.add_builtin(
             "tail",
             ty!(forall 0 . [0] -> [0]),
-            BuiltinKind::Function(|_, arg, span| match arg {
-                Value::List(l) => Ok(Value::List(l.tail().ok_or(eval::Error::EmptyList(span))?)),
-                _ => unreachable!(),
+            BuiltinKind::Function(|frame, frames, _| {
+                frames.push_back(frame.with_op(Op::Function(|frame, _, results| {
+                    let arg = results.pop_back().unwrap();
+                    match &*arg.borrow() {
+                        Value::List(list) => results
+                            .push_back(list.tail().ok_or(eval::Error::EmptyList(frame.span))?),
+                        _ => unreachable!(),
+                    }
+                    Ok(())
+                })));
+                frames.push_back(frame.with_op(Op::Force));
+                Ok(())
             }),
         );
     }
