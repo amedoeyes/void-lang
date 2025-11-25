@@ -1,6 +1,6 @@
 # Void Lang
 
-This project implements a simple expression based functional programming language with Hindley Milner type system.
+This project implements a simple lazy evaluated expression based functional programming language with Hindley Milner type system.
 
 ```fsharp
 let fib = n ->
