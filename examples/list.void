@@ -1,11 +1,19 @@
-let range_helper = acc -> current -> from ->
-	if current < from then acc
-	else range_helper (current : acc) (current - 1) from;
-
 // Construct a list from range
-let range = from -> to ->
-	if from > to then []
-	else range_helper [] to from;
+let range = start -> end ->
+    if start > end then []
+    else start : range (start + 1) end;
+
+// Map list into a new list
+let map = f -> l ->
+	if l == [] then []
+	else (f (head l)) : (map f (tail l));
+
+// Filter elements that satisfy a predicate
+let filter = pred -> l ->
+	if l == [] then []
+	else if pred (head l)
+		 then head l : (filter pred (tail l))
+		 else filter pred (tail l);
 
 // Fold left
 let foldl = f -> acc -> l ->
