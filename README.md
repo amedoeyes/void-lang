@@ -99,7 +99,7 @@ tail numbers // [2, 3, 4]
 List construct operator:
 
 ```fsharp
-1 : 2 : 3 : [1, 2, 3] // [1, 2]
+1 : 2 : 3 : [] // [1, 2, 3]
 ```
 
 ```fsharp
