@@ -16,12 +16,7 @@
           pname = "void";
           version = "1.0.0";
 
-          src = pkgs.fetchFromGitHub {
-            owner = "amedoeyes";
-            repo = "void-lang";
-            rev = version;
-            hash = "sha256-jA4wLTxsewcOgkJp12MKYDfm1fDjkeglNa88qAWwMNY=";
-          };
+          src = ./.;
 
           cargoLock = {
             lockFile = "${src}/Cargo.lock";
