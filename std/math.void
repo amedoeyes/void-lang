@@ -4,17 +4,17 @@ let div = a -> b -> a / b;
 let mul = a -> b -> a * b;
 
 let fact = n ->
-	if n == 0 then 1 
+	if n == 0 then 1
 	else n * fact (n - 1);
 
 let sum = n -> 
-	if n == 0 then 0 
+	if n == 0 then 0
 	else n + sum (n - 1);
 
-let power = x -> n -> 
-	if n == 0 then 1 
+let power = x -> n ->
+	if n == 0 then 1
 	else x * power x (n - 1);
 
 let gcd = a -> b -> 
-	if b == 0 then a 
+	if b == 0 then a
 	else gcd b (a % b);

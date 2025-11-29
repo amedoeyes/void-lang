@@ -28,14 +28,6 @@ let length = l ->
 let reverse = l ->
 	foldl (acc -> x -> x : acc) [] l;
 
-// Map list into a new list
-let map = f -> l ->
-	foldl (acc -> x -> acc ++ [f x]) [] l;
-
-// Filter elements that satisfy a predicate
-let filter = pred -> l ->
-	foldl (acc -> x -> if pred x then acc ++ [x] else acc) [] l;
-
 // Append two lists
 let append = l1 -> l2 ->
 	foldl (acc -> x -> acc ++ [x]) l1 l2;
@@ -120,3 +112,7 @@ let is_sorted = l ->
 	if l == [] then true
 	else if tail l == [] then true
 	else head l <= head (tail l) && is_sorted (tail l);
+
+let sum = l ->
+    if l == [] then 0
+    else (head l) + (sum (tail l));

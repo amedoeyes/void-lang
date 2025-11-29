@@ -30,6 +30,7 @@ pub enum Token {
     Right,
     None,
 
+    Import,
     Let,
     If,
     Then,
@@ -59,6 +60,7 @@ impl fmt::Display for Token {
             Token::Left => write!(f, "left"),
             Token::Right => write!(f, "right"),
             Token::None => write!(f, "none"),
+            Token::Import => write!(f, "import"),
             Token::Let => write!(f, "let"),
             Token::If => write!(f, "if"),
             Token::Then => write!(f, "then"),
@@ -84,6 +86,7 @@ const KEYWORDS: &[(&str, Token)] = &[
     ("left", Token::Left),
     ("right", Token::Right),
     ("none", Token::None),
+    ("import", Token::Import),
     ("let", Token::Let),
     ("if", Token::If),
     ("then", Token::Then),

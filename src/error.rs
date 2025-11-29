@@ -1,5 +1,8 @@
 use core::fmt;
-use std::io;
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 
 use crate::{eval, lexer::Token, span::Span, type_system};
 
@@ -17,9 +20,12 @@ pub enum SyntaxError {
 pub enum Error {
     Clap(clap::Error),
     Io(io::Error),
-    Syntax(String, String, Box<SyntaxError>),
-    Type(String, String, Box<type_system::Error>),
-    Eval(String, String, eval::Error),
+    InvalidPath(PathBuf),
+    CircularImport(PathBuf),
+    ModuleNotFound(Vec<String>),
+    Syntax(PathBuf, String, Box<SyntaxError>),
+    Type(PathBuf, String, Box<type_system::Error>),
+    Eval(PathBuf, String, eval::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -41,6 +47,12 @@ impl fmt::Display for Error {
         match self {
             Error::Clap(err) => err.fmt(f),
             Error::Io(err) => err.fmt(f),
+
+            Error::InvalidPath(path) => write!(f, "Invalid path '{}'", path.display()),
+            Error::CircularImport(path) => write!(f, "Circular import '{}'", path.display()),
+            Error::ModuleNotFound(module) => {
+                write!(f, "Module not found '{}'", module.join("."))
+            }
 
             Error::Syntax(filename, source, err) => match err.as_ref() {
                 SyntaxError::InvalidToken(span) => {
@@ -129,11 +141,19 @@ impl fmt::Display for Error {
     }
 }
 
-fn write_message(f: &mut fmt::Formatter, filename: &str, span: Span, message: &str) -> fmt::Result {
+fn write_message(
+    f: &mut fmt::Formatter,
+    filename: &Path,
+    span: Span,
+    message: &str,
+) -> fmt::Result {
     writeln!(
         f,
         "{}:{}:{}: {}",
-        filename, span.start.line, span.start.column, message
+        filename.display(),
+        span.start.line,
+        span.start.column,
+        message
     )
 }
 
@@ -177,7 +197,7 @@ fn write_lines(f: &mut fmt::Formatter, source: &str, span: Span) -> fmt::Result 
 
 fn write_message_and_lines(
     f: &mut fmt::Formatter,
-    filename: &str,
+    filename: &Path,
     source: &str,
     span: Span,
     message: &str,

@@ -543,6 +543,7 @@ pub fn infer(ctx: &mut Context, nodes: &[NodeId]) -> Result<()> {
                 ctx.set_type(expr, expr_ty.clone());
                 ctx.set_type(*node, expr_ty);
             }
+            Node::Import(_) => continue,
         }
     }
 
