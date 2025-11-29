@@ -20,26 +20,26 @@ Types:
   - Lists can only contains elements of the same type
 - Lambda: `x -> x`
 
-Bind declarations:
+### Bind Declarations:
 
 ```fsharp
 let add = a -> b -> a + b;
 ```
 
-Application:
+### Application
 
 ```fsharp
 add 1 2 // 3
 ```
 
-Currying:
+### Currying
 
 ```fsharp
 let add_10 = add 10;
 add_10 1 // 11
 ```
 
-Control flow:
+### Control Flow
 
 ```fsharp
 let answer = x ->
@@ -48,7 +48,7 @@ let answer = x ->
 	else x;
 ```
 
-Recursion:
+### Recursion
 
 ```fsharp
 let sum = n ->
@@ -56,13 +56,13 @@ let sum = n ->
 	else n + sum (n - 1);
 ```
 
-Operator declarations:
+### Operator Declarations
 
 ```fsharp
 let (^) = x -> n -> if n == 0 then 1 else x * (x ^ (n - 1));
 ```
 
-Operator fixity declarations:
+### Operator Fixity Declarations
 
 ```fsharp
 op ^ right 8;
@@ -71,7 +71,7 @@ op ^ right 8;
 > [!NOTE]
 > If not declared the default will applied which is left associative with precedence of 9
 
-Operator sectioning:
+### Operator Sectioning
 
 ```fsharp
 let add = (+) 1 1;
@@ -79,7 +79,7 @@ let addl = (+ 1) 1;
 let addr = (1 +) 1;
 ```
 
-Lists:
+### Lists:
 
 ```fsharp
 let numbers = [1, 2, 3, 4];
@@ -96,7 +96,7 @@ tail numbers // [2, 3, 4]
 > [!NOTE]
 > `head` and `tail` are builtin functions.
 
-List construct operator:
+### List Construct Operator
 
 ```fsharp
 1 : 2 : 3 : [] // [1, 2, 3]
@@ -106,13 +106,13 @@ List construct operator:
 0 : [1, 2, 3] // [0, 1, 2, 3]
 ```
 
-List concat operator:
+### List Concat Operator
 
 ```fsharp
 [1, 2, 3] ++ [4, 5, 6] // [1, 2, 3, 4, 5, 6]
 ```
 
-Strings:
+### Strings
 
 Strings are just `[Char]` but can be represented as characters in quotations:
 
@@ -122,9 +122,9 @@ Strings are just `[Char]` but can be represented as characters in quotations:
 
 And because it's essentially a list, all list operations apply.
 
-List examples:
+### List Examples
 
-You can find all of these list functions in `list.void` in the `examples` directory.
+You can find all of these list functions in `list.void` in the `std` directory.
 
 ```fsharp
 range 1 10 // [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
@@ -157,6 +157,8 @@ any (x -> x % 2 == 0) [1, 3, 5, 6, 7] // true
 all (x -> x % 2 == 0) [1, 3, 5, 6, 7] // false
 ```
 
+### Merge Sort Implementation
+
 ```fsharp
 let merge = l1 -> l2 ->
 	if l1 == [] then l2
@@ -179,7 +181,7 @@ let sort = l ->
 sort [6, 3, 1, 5, 1, 4, 2, 0] // [0, 1, 1, 2, 3, 4, 5, 6]
 ```
 
-Input:
+### Input
 
 Input can be accessed by either command line arguments using the `args` builtin bind, or by using the `read` builtin function supplied with a path. `read` can read from stdin when given `"-"` as an argument.
 
@@ -190,6 +192,65 @@ let filename = if tail args == [] then "examples/hello.void" else head (tail arg
 
 ```fsharp
 "Hello, " ++ read "-"
+```
+
+### Modules
+
+Modules are filesystem-based where modules map directly to files and directories. For example:
+
+**Project Structure**:
+
+```
+.
+├── lib/
+│   ├── module.void   # Directory module entry point
+│   └── div.void      # Sub-module
+├── add.void          # Single file module
+└── main.void         # Entry point
+```
+
+**Files:**
+
+`add.void`:
+
+```fsharp
+let add = a -> b -> a + b;
+```
+
+`lib/modules.void`:
+
+```fsharp
+let mul = a -> b -> a + b;
+```
+
+`lib/div.void`:
+
+```fsharp
+let div = a -> b -> a / b;
+```
+
+`main.void`:
+
+```fsharp
+import add;
+import lib;
+import lib.div;
+
+mul (add 1 2) (div 10 2)
+```
+
+**Resolution Rules:**
+
+- Single files: `import add` -> `./add.void`
+- Directory modules: `import lib` -> `./lib/module.void`
+- Sub-modules: `import lib.div` -> `./lib/div.void`
+
+### Standard Library
+
+```fsharp
+import std.list;
+
+sort [6,1,6,3,7,3,4,8,1,0,2]
 ```
 
 ## Type System
