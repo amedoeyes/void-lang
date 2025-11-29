@@ -68,7 +68,6 @@ fn run() -> Result<()> {
         .subcommand(
             Command::new("repl").arg(
                 Arg::new("file")
-                    .required(true)
                     .value_parser(value_parser!(PathBuf))
                     .help("source file"),
             ),
