@@ -35,6 +35,7 @@ impl<'a> Parser<'a> {
             match token {
                 Token::Op => self.parse_operator_decl()?,
                 Token::Let => nodes.push(self.parse_bind_decl()?),
+                Token::Import => nodes.push(self.parse_import_decl()?),
                 _ => nodes.push(self.parse_expr(0)?),
             }
         }
@@ -98,6 +99,40 @@ impl<'a> Parser<'a> {
         self.expect(Token::Semicolon)?;
         self.context.add_operator(&op, prec, assoc);
         Ok(())
+    }
+
+    fn parse_import_decl(&mut self) -> Result<NodeId> {
+        let (_, start_span) = self.expect(Token::Import)?;
+
+        let mut module = Vec::new();
+        loop {
+            let part = match self.advance()? {
+                (Token::Identifier(id), _) => id,
+                other => {
+                    return Err(SyntaxError::UnexpectedToken(
+                        "Identifier".to_string(),
+                        other,
+                    ));
+                }
+            };
+            module.push(part);
+            match self.peek(0)? {
+                (Token::Operator(val), _) => {
+                    if val == "." {
+                        self.advance()?;
+                        continue;
+                    } else {
+                        return Err(SyntaxError::UnexpectedToken(".".to_string(), self.peek(0)?));
+                    }
+                }
+                _ => break,
+            }
+        }
+        let end_span = self.expect(Token::Semicolon)?.1;
+
+        let import = self.context.add_import(&module);
+        self.context.set_span(import, start_span.merge(end_span));
+        Ok(import)
     }
 
     fn parse_expr(&mut self, min_bp: i32) -> Result<NodeId> {

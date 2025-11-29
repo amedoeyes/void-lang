@@ -5,13 +5,15 @@ mod error;
 mod eval;
 mod expr;
 mod lexer;
+mod modules;
 mod parser;
 mod span;
 mod type_system;
 
-use clap::{Arg, Command, crate_name, crate_version};
+use clap::{Arg, Command, crate_name, crate_version, value_parser};
+use fxhash::FxHashSet;
 use rustyline::DefaultEditor;
-use std::fs;
+use std::{env, fs, path::PathBuf};
 
 use crate::{
     context::{Context, Node},
@@ -29,20 +31,53 @@ fn run() -> Result<()> {
         .disable_help_subcommand(true)
         .arg_required_else_help(true)
         .subcommand_required(true)
-        .subcommand(Command::new("tokens").arg(Arg::new("file").required(true).help("source file")))
-        .subcommand(Command::new("nodes").arg(Arg::new("file").required(true).help("source file")))
-        .subcommand(Command::new("type").arg(Arg::new("file").required(true).help("source file")))
+        .subcommand(
+            Command::new("tokens").arg(
+                Arg::new("file")
+                    .required(true)
+                    .value_parser(value_parser!(PathBuf))
+                    .help("source file"),
+            ),
+        )
+        .subcommand(
+            Command::new("nodes").arg(
+                Arg::new("file")
+                    .required(true)
+                    .value_parser(value_parser!(PathBuf))
+                    .help("source file"),
+            ),
+        )
+        .subcommand(
+            Command::new("type").arg(
+                Arg::new("file")
+                    .required(true)
+                    .value_parser(value_parser!(PathBuf))
+                    .help("source file"),
+            ),
+        )
         .subcommand(
             Command::new("eval")
-                .arg(Arg::new("file").required(true).help("source file"))
+                .arg(
+                    Arg::new("file")
+                        .required(true)
+                        .value_parser(value_parser!(PathBuf))
+                        .help("source file"),
+                )
                 .arg(Arg::new("args").num_args(0..)),
         )
-        .subcommand(Command::new("repl").arg(Arg::new("file").help("source file")));
+        .subcommand(
+            Command::new("repl").arg(
+                Arg::new("file")
+                    .required(true)
+                    .value_parser(value_parser!(PathBuf))
+                    .help("source file"),
+            ),
+        );
 
     match cmd.try_get_matches()?.subcommand() {
         Some(("tokens", sub_matches)) => {
-            let file = sub_matches.get_one::<String>("file").unwrap();
-            let contents = fs::read_to_string(file)?;
+            let source_path = sub_matches.get_one::<PathBuf>("file").unwrap();
+            let contents = fs::read_to_string(source_path)?;
 
             let mut lexer = Lexer::new(&contents);
             loop {
@@ -53,22 +88,42 @@ fn run() -> Result<()> {
                         };
                         println!(
                             "{}:{}:{}: {:?}",
-                            file, span.start.line, span.end.column, token
+                            source_path.display(),
+                            span.start.line,
+                            span.end.column,
+                            token
                         );
                     }
-                    Err(err) => return Err(Error::Syntax(file.clone(), contents, Box::new(err))),
+                    Err(err) => {
+                        return Err(Error::Syntax(source_path.clone(), contents, Box::new(err)));
+                    }
                 }
             }
         }
 
         Some(("nodes", sub_matches)) => {
-            let file = sub_matches.get_one::<String>("file").unwrap();
-            let contents = fs::read_to_string(file)?;
+            let source_path = sub_matches.get_one::<PathBuf>("file").unwrap();
+            let parent_dir = source_path
+                .parent()
+                .ok_or_else(|| Error::InvalidPath(source_path.clone()))?;
 
             let mut ctx = Context::new();
+
+            let mut visited_modules = FxHashSet::default();
+            visited_modules.insert(PathBuf::from(source_path));
+
+            let contents = fs::read_to_string(source_path)?;
             let nodes = match parse(&mut ctx, &contents) {
-                Ok(nodes) => nodes,
-                Err(err) => return Err(Error::Syntax(file.clone(), contents, Box::new(err))),
+                Ok(nodes) => modules::resolve_imports(
+                    &mut ctx,
+                    &nodes,
+                    parent_dir,
+                    &mut visited_modules,
+                    &mut FxHashSet::default(),
+                )?,
+                Err(err) => {
+                    return Err(Error::Syntax(source_path.into(), contents, Box::new(err)));
+                }
             };
 
             for node in nodes {
@@ -77,17 +132,32 @@ fn run() -> Result<()> {
         }
 
         Some(("type", sub_matches)) => {
-            let file = sub_matches.get_one::<String>("file").unwrap();
-            let contents = fs::read_to_string(file)?;
+            let source_path = sub_matches.get_one::<PathBuf>("file").unwrap();
+            let parent_dir = source_path
+                .parent()
+                .ok_or_else(|| Error::InvalidPath(source_path.clone()))?;
 
             let mut ctx = Context::new();
+
+            let mut visited_modules = FxHashSet::default();
+            visited_modules.insert(PathBuf::from(source_path));
+
+            let contents = fs::read_to_string(source_path)?;
             let nodes = match parse(&mut ctx, &contents) {
-                Ok(nodes) => nodes,
-                Err(err) => return Err(Error::Syntax(file.clone(), contents, Box::new(err))),
+                Ok(nodes) => modules::resolve_imports(
+                    &mut ctx,
+                    &nodes,
+                    parent_dir,
+                    &mut visited_modules,
+                    &mut FxHashSet::default(),
+                )?,
+                Err(err) => {
+                    return Err(Error::Syntax(source_path.clone(), contents, Box::new(err)));
+                }
             };
 
             if let Err(err) = infer(&mut ctx, &nodes) {
-                return Err(Error::Type(file.clone(), contents, Box::new(err)));
+                return Err(Error::Type(source_path.clone(), contents, Box::new(err)));
             };
 
             for node in nodes {
@@ -102,27 +172,43 @@ fn run() -> Result<()> {
                     Node::Bind(name, _) => {
                         println!("{} : {}", name, ctx.get_type(node).as_ref().unwrap())
                     }
+                    Node::Import(_) => continue,
                 }
             }
         }
 
         Some(("eval", sub_matches)) => {
-            let file = sub_matches.get_one::<String>("file").unwrap();
-            let contents = fs::read_to_string(file)?;
+            let source_path = sub_matches.get_one::<PathBuf>("file").unwrap();
+            let parent_dir = source_path
+                .parent()
+                .ok_or_else(|| Error::InvalidPath(source_path.clone()))?;
 
             let mut ctx = Context::new();
+
+            let mut visited_modules = FxHashSet::default();
+            visited_modules.insert(PathBuf::from(source_path));
+
+            let contents = fs::read_to_string(source_path)?;
             let nodes = match parse(&mut ctx, &contents) {
-                Ok(nodes) => nodes,
-                Err(err) => return Err(Error::Syntax(file.clone(), contents, Box::new(err))),
+                Ok(nodes) => modules::resolve_imports(
+                    &mut ctx,
+                    &nodes,
+                    parent_dir,
+                    &mut visited_modules,
+                    &mut FxHashSet::default(),
+                )?,
+                Err(err) => {
+                    return Err(Error::Syntax(source_path.clone(), contents, Box::new(err)));
+                }
             };
 
             if let Err(err) = infer(&mut ctx, &nodes) {
-                return Err(Error::Type(file.clone(), contents, Box::new(err)));
+                return Err(Error::Type(source_path.clone(), contents, Box::new(err)));
             };
 
             let value = match evaluate(&ctx, &nodes) {
                 Ok(value) => value,
-                Err(err) => return Err(Error::Eval(file.clone(), contents, err)),
+                Err(err) => return Err(Error::Eval(source_path.clone(), contents, err)),
             };
 
             println!("{}", value);
@@ -133,16 +219,36 @@ fn run() -> Result<()> {
             let mut ctx = Context::new();
             let mut nodes = Vec::new();
 
-            if let Some(file) = sub_matches.get_one::<String>("file") {
-                let contents = fs::read_to_string(file)?;
+            if let Some(source_path) = sub_matches.get_one::<PathBuf>("file") {
+                let parent_dir = source_path
+                    .parent()
+                    .ok_or_else(|| Error::InvalidPath(source_path.clone()))?;
+
+                let mut visited_modules = FxHashSet::default();
+                visited_modules.insert(PathBuf::from(source_path));
+
+                let contents = fs::read_to_string(source_path)?;
                 nodes.extend(match parse(&mut ctx, &contents) {
-                    Ok(nodes) => nodes,
-                    Err(err) => return Err(Error::Syntax(file.clone(), contents, Box::new(err))),
+                    Ok(nodes) => modules::resolve_imports(
+                        &mut ctx,
+                        &nodes,
+                        parent_dir,
+                        &mut visited_modules,
+                        &mut FxHashSet::default(),
+                    )?,
+                    Err(err) => {
+                        return Err(Error::Syntax(source_path.clone(), contents, Box::new(err)));
+                    }
                 });
                 if let Err(err) = infer(&mut ctx, &nodes) {
-                    return Err(Error::Type(file.clone(), contents, Box::new(err)));
+                    return Err(Error::Type(source_path.clone(), contents, Box::new(err)));
                 };
             }
+
+            let cwd = env::current_dir()?;
+            let parent_dir = cwd
+                .parent()
+                .ok_or_else(|| Error::InvalidPath(cwd.clone()))?;
 
             loop {
                 let input = match rl.readline("> ") {
@@ -164,7 +270,13 @@ fn run() -> Result<()> {
                 }
 
                 nodes.extend(match parse(&mut ctx, &input) {
-                    Ok(nodes) => nodes,
+                    Ok(nodes) => modules::resolve_imports(
+                        &mut ctx,
+                        &nodes,
+                        parent_dir,
+                        &mut FxHashSet::default(),
+                        &mut FxHashSet::default(),
+                    )?,
                     Err(err) => {
                         match err {
                             SyntaxError::InvalidToken(span) => {
@@ -287,7 +399,7 @@ fn main() {
                 }
             }
             _ => {
-                eprint!("{error}");
+                eprintln!("{error}");
                 std::process::exit(1);
             }
         }

@@ -6,6 +6,7 @@ edition = "2024"
 [dependencies]
 clap = { version = "4", features = ["cargo"] }
 fxhash = "0.2"
+include_dir = "0.7"
 itertools = "0.14"
 rustyline = "16"
 string_cache = "0.8"

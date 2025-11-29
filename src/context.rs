@@ -18,6 +18,7 @@ pub struct NodeId(usize);
 pub enum Node {
     Expr(Expr),
     Bind(String, NodeId),
+    Import(Vec<String>),
 }
 
 pub struct Display<'a> {
@@ -108,6 +109,10 @@ impl Context {
 
     pub fn add_bind(&mut self, name: &str, expr: NodeId) -> NodeId {
         self.add(Node::Bind(name.to_string(), expr))
+    }
+
+    pub fn add_import(&mut self, module: &[String]) -> NodeId {
+        self.add(Node::Import(module.into()))
     }
 
     pub fn set_span(&mut self, id: NodeId, span: Span) {
@@ -1072,6 +1077,7 @@ impl<'a> fmt::Display for Display<'a> {
             Node::Bind(name, expr) => {
                 write!(f, "{} = {}", name, Display::new(*expr, self.context))
             }
+            Node::Import(module) => write!(f, "import {}", module.join(".")),
         }
     }
 }

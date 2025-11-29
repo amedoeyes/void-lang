@@ -525,6 +525,7 @@ pub fn evaluate(ctx: &Context, nodes: &[NodeId]) -> Result<Value> {
                 env.borrow_mut()
                     .insert(DefaultAtom::from(id.as_str()), SharedValue::new(val));
             }
+            Node::Import(_) => continue,
         }
     }
 
