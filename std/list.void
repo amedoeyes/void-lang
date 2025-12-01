@@ -20,6 +20,10 @@ let foldl = f -> acc -> l ->
 	if l == [] then acc
 	else foldl f (f acc (head l)) (tail l);
 
+let foldr = f -> acc -> l ->
+	if l == [] then acc
+	else f (head l) (foldr f acc (tail l));
+
 // Get the length of a list
 let length = l ->
 	foldl (acc -> _ -> acc + 1) 0 l;
@@ -116,3 +120,9 @@ let is_sorted = l ->
 let sum = l ->
     if l == [] then 0
     else (head l) + (sum (tail l));
+
+let lines = s -> foldr (ch -> acc -> if ch == '\n' then "" : acc else (ch : head acc) : tail acc) [""] s;
+
+let is_whitespace = ch -> ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r';
+
+let trim = s -> reverse (drop_while is_whitespace (reverse (drop_while is_whitespace s)));
