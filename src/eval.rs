@@ -1,7 +1,8 @@
 use core::fmt;
-use std::{cell::RefCell, collections::VecDeque, fmt::Display, ops::Deref, rc::Rc, result};
+use std::{cell::RefCell, collections::VecDeque, ops::Deref, rc::Rc, result};
 
 use fxhash::FxHashMap;
+use itertools::Itertools;
 use string_cache::DefaultAtom;
 
 use crate::{
@@ -75,6 +76,12 @@ pub enum Value {
     },
 }
 
+impl Value {
+    pub fn display<'a>(&'a self, context: &'a Context) -> Display<'a> {
+        Display::new(self, context)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct SharedValue(Rc<RefCell<Value>>);
 
@@ -92,44 +99,75 @@ impl Deref for SharedValue {
     }
 }
 
-impl Display for Value {
+pub struct Display<'a> {
+    value: &'a Value,
+    context: &'a Context,
+}
+
+impl<'a> Display<'a> {
+    pub fn new(value: &'a Value, context: &'a Context) -> Self {
+        Self { value, context }
+    }
+}
+
+impl<'a> fmt::Display for Display<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        #[derive(Debug)]
-        enum Item {
-            Value(Value, bool),
-            Str(&'static str),
-        }
+        match &self.value {
+            Value::Unit => write!(f, "()"),
+            Value::Integer(n) => write!(f, "{n}"),
+            Value::Char(c) => write!(f, "'{}'", c.escape_default()),
+            Value::Boolean(b) => write!(f, "{b}"),
+            Value::List(l) => match l {
+                List::Nil => write!(f, "[]"),
+                List::Cons(_, _) => {
+                    let mut list = SharedValue::new(self.value.clone());
+                    let mut values = Vec::new();
 
-        let mut stack = vec![Item::Value(self.clone(), false)];
+                    while let Value::List(l) = &*list.clone().borrow()
+                        && let Some(h) = l.head()
+                    {
+                        values.push(h);
+                        list = l
+                            .tail()
+                            .unwrap_or_else(|| SharedValue::new(Value::List(List::Nil)));
+                    }
 
-        while let Some(item) = stack.pop() {
-            match item {
-                Item::Value(value, in_list) => match value {
-                    Value::Unit => write!(f, "()")?,
-                    Value::Integer(n) => write!(f, "{n}")?,
-                    Value::Char(c) => write!(f, "'{}'", c.escape_default())?,
-                    Value::Boolean(b) => write!(f, "{b}")?,
-                    Value::List(l) => match l {
-                        List::Nil => {
-                            stack.push(Item::Str("]"));
-                            if !in_list {
-                                stack.push(Item::Str("["));
-                            }
+                    if values.is_empty() {
+                        return write!(f, "[]");
+                    }
+
+                    match &*values[0].borrow() {
+                        Value::Char(_) => {
+                            let str = values
+                                .iter()
+                                .map(|v| {
+                                    if let Value::Char(c) = &*v.borrow() {
+                                        *c
+                                    } else {
+                                        unreachable!()
+                                    }
+                                })
+                                .collect::<String>();
+                            write!(f, "\"{}\"", str)
                         }
-                        List::Cons(head, tail) => {
-                            stack.push(Item::Value(tail.borrow().clone(), true));
-                            stack.push(Item::Value(head.borrow().clone(), false));
-                            stack.push(Item::Str(if in_list { ", " } else { "[" }));
+                        _ => {
+                            let list = values
+                                .iter()
+                                .map(|v| v.borrow().display(self.context).to_string())
+                                .join(", ");
+                            write!(f, "[{}]", list)
                         }
-                    },
-                    Value::Builtin(_) => write!(f, "builtin")?,
-                    _ => {}
-                },
-                Item::Str(str) => write!(f, "{}", str)?,
+                    }
+                }
+            },
+            Value::Builtin(_) => {
+                write!(f, "builtin")
             }
+            Value::Function { param, body, .. } => {
+                write!(f, "{} -> {}", param, body.display(self.context))
+            }
+            Value::Thunk { .. } => Ok(()),
         }
-
-        Ok(())
     }
 }
 
@@ -151,7 +189,7 @@ pub enum Op {
     EnableFullForce,
     DisableFullForce,
     Value(SharedValue),
-    Function(fn(&Frame, &mut VecDeque<Frame>, &mut VecDeque<SharedValue>) -> Result<()>),
+    Function(fn(&Context, &Frame, &mut VecDeque<Frame>, &mut VecDeque<SharedValue>) -> Result<()>),
 }
 
 #[derive(Clone)]
@@ -310,13 +348,13 @@ pub fn eval_expr(ctx: &Context, frames: impl Into<VecDeque<Frame>>) -> Result<Sh
                                 Frame::new(Op::Start(*expr), env.clone(), ctx.get_span(*expr));
                             frames.push_back(frame.with_op(Op::Force));
                             frames.push_back(frame.with_op(Op::Function(
-                                |frame, frames, results| {
+                                |_, frame, frames, results| {
                                     let thunk = results.pop_back().unwrap();
                                     let value = results.pop_back().unwrap();
 
                                     if let Value::Thunk { .. } = &*value.borrow() {
                                         frames.push_back(frame.with_op(Op::Function(
-                                            |frame, frames, results| {
+                                            |_, frame, frames, results| {
                                                 let thunk = results.pop_back().unwrap();
                                                 let value = results.pop_back().unwrap();
 
@@ -358,7 +396,7 @@ pub fn eval_expr(ctx: &Context, frames: impl Into<VecDeque<Frame>>) -> Result<Sh
                         List::Nil => frames.push_back(frame.with_op(Op::Value(value.clone()))),
                         List::Cons(head, tail) => {
                             frames.push_back(frame.with_op(Op::Function(
-                                |frame, frames, results| {
+                                |_, frame, frames, results| {
                                     let head = results.pop_back().unwrap();
                                     let tail = results.pop_back().unwrap();
 
@@ -390,7 +428,7 @@ pub fn eval_expr(ctx: &Context, frames: impl Into<VecDeque<Frame>>) -> Result<Sh
                     .borrow()
                 {
                     Value::Builtin(BuiltinKind::Function(fun)) => {
-                        fun(&frame, &mut frames, &mut results)?;
+                        fun(ctx, &frame, &mut frames, &mut results)?;
                     }
                     Value::Function {
                         param: a,
@@ -430,7 +468,7 @@ pub fn eval_expr(ctx: &Context, frames: impl Into<VecDeque<Frame>>) -> Result<Sh
 
                 match &*func.borrow() {
                     Value::Builtin(BuiltinKind::Function(fun)) => {
-                        fun(&frame, &mut frames, &mut results)?;
+                        fun(ctx, &frame, &mut frames, &mut results)?;
                     }
                     Value::Function { param, body, env } => {
                         let arg = results.pop_back().unwrap();
@@ -452,7 +490,7 @@ pub fn eval_expr(ctx: &Context, frames: impl Into<VecDeque<Frame>>) -> Result<Sh
                 results.push_back(value);
             }
             Op::Function(fun) => {
-                fun(&frame, &mut frames, &mut results)?;
+                fun(ctx, &frame, &mut frames, &mut results)?;
             }
             Op::EnableFullForce => {
                 state.full_force = true;

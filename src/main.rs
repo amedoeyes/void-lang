@@ -210,7 +210,7 @@ fn run() -> Result<()> {
                 Err(err) => return Err(Error::Eval(source_path.clone(), contents, err)),
             };
 
-            println!("{}", value);
+            println!("{}", value.display(&ctx));
         }
 
         Some(("repl", sub_matches)) => {
@@ -371,7 +371,7 @@ fn run() -> Result<()> {
                         }
                     };
 
-                    println!("{}", value);
+                    println!("{}", value.display(&ctx));
                     nodes.pop();
                 }
             }

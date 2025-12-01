@@ -29,7 +29,9 @@ pub struct Display<'a> {
 #[derive(Debug, Clone)]
 pub enum BuiltinKind {
     Value(SharedValue),
-    Function(fn(&Frame, &mut VecDeque<Frame>, &mut VecDeque<SharedValue>) -> eval::Result<()>),
+    Function(
+        fn(&Context, &Frame, &mut VecDeque<Frame>, &mut VecDeque<SharedValue>) -> eval::Result<()>,
+    ),
 }
 
 #[derive(Debug, Clone)]
@@ -162,8 +164,8 @@ impl Context {
         self.add_builtin(
             "||",
             ty!(Bool -> Bool -> Bool),
-            BuiltinKind::Function(|frame, frames, _| {
-                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+            BuiltinKind::Function(|_, frame, frames, _| {
+                frames.push_back(frame.with_op(Op::Function(|_, frame, frames, results| {
                     let a = results.pop_back().unwrap();
                     let b = results.pop_back().unwrap();
 
@@ -188,8 +190,8 @@ impl Context {
         self.add_builtin(
             "&&",
             ty!(Bool -> Bool -> Bool),
-            BuiltinKind::Function(|frame, frames, _| {
-                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+            BuiltinKind::Function(|_, frame, frames, _| {
+                frames.push_back(frame.with_op(Op::Function(|_, frame, frames, results| {
                     let a = results.pop_back().unwrap();
                     let b = results.pop_back().unwrap();
 
@@ -214,7 +216,7 @@ impl Context {
         self.add_builtin(
             "==",
             ty!(forall 0 . (Eq 0) => 0 -> 0 -> Bool),
-            BuiltinKind::Function(|frame, frames, results| {
+            BuiltinKind::Function(|_, frame, frames, results| {
                 let a = results.pop_back().unwrap();
                 let b = results.pop_back().unwrap();
 
@@ -247,7 +249,7 @@ impl Context {
                         }
                         (List::Cons(h1, t1), List::Cons(h2, t2)) => {
                             frames.push_back(frame.with_op(Op::Function(
-                                |frame, frames, results| {
+                                |_, frame, frames, results| {
                                     let value = results.pop_back().unwrap();
 
                                     match &*value.borrow() {
@@ -290,7 +292,7 @@ impl Context {
         self.add_builtin(
             "!=",
             ty!(forall 0 . (Eq 0) => 0 -> 0 -> Bool),
-            BuiltinKind::Function(|frame, frames, results| {
+            BuiltinKind::Function(|_, frame, frames, results| {
                 let a = results.pop_back().unwrap();
                 let b = results.pop_back().unwrap();
 
@@ -323,7 +325,7 @@ impl Context {
                         }
                         (List::Cons(h1, t1), List::Cons(h2, t2)) => {
                             frames.push_back(frame.with_op(Op::Function(
-                                |frame, frames, results| {
+                                |_, frame, frames, results| {
                                     let value = results.pop_back().unwrap();
 
                                     match &*value.borrow() {
@@ -366,7 +368,7 @@ impl Context {
         self.add_builtin(
             "<",
             ty!(forall 0 . (Ord 0) => 0 -> 0 -> Bool),
-            BuiltinKind::Function(|frame, frames, results| {
+            BuiltinKind::Function(|_, frame, frames, results| {
                 let a = results.pop_back().unwrap();
                 let b = results.pop_back().unwrap();
 
@@ -424,7 +426,7 @@ impl Context {
         self.add_builtin(
             "<=",
             ty!(forall 0 . (Ord 0) => 0 -> 0 -> Bool),
-            BuiltinKind::Function(|frame, frames, results| {
+            BuiltinKind::Function(|_, frame, frames, results| {
                 let a = results.pop_back().unwrap();
                 let b = results.pop_back().unwrap();
 
@@ -457,7 +459,7 @@ impl Context {
                         }
                         (List::Cons(h1, t1), List::Cons(h2, t2)) => {
                             frames.push_back(frame.with_op(Op::Function(
-                                |frame, frames, results| {
+                                |_, frame, frames, results| {
                                     let value = results.pop_back().unwrap();
 
                                     match &*value.borrow() {
@@ -500,7 +502,7 @@ impl Context {
         self.add_builtin(
             ">",
             ty!(forall 0 . (Ord 0) => 0 -> 0 -> Bool),
-            BuiltinKind::Function(|frame, frames, results| {
+            BuiltinKind::Function(|_, frame, frames, results| {
                 let a = results.pop_back().unwrap();
                 let b = results.pop_back().unwrap();
 
@@ -558,7 +560,7 @@ impl Context {
         self.add_builtin(
             ">=",
             ty!(forall 0 . (Ord 0) => 0 -> 0 -> Bool),
-            BuiltinKind::Function(|frame, frames, results| {
+            BuiltinKind::Function(|_, frame, frames, results| {
                 let a = results.pop_back().unwrap();
                 let b = results.pop_back().unwrap();
 
@@ -591,7 +593,7 @@ impl Context {
                         }
                         (List::Cons(h1, t1), List::Cons(h2, t2)) => {
                             frames.push_back(frame.with_op(Op::Function(
-                                |frame, frames, results| {
+                                |_, frame, frames, results| {
                                     let value = results.pop_back().unwrap();
 
                                     match &*value.borrow() {
@@ -634,8 +636,8 @@ impl Context {
         self.add_builtin(
             "++",
             ty!(forall 0 . [0] -> [0] -> [0]),
-            BuiltinKind::Function(|frame, frames, _| {
-                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+            BuiltinKind::Function(|_, frame, frames, _| {
+                frames.push_back(frame.with_op(Op::Function(|_, frame, frames, results| {
                     let a = results.pop_back().unwrap();
                     let b = results.pop_back().unwrap();
 
@@ -662,7 +664,7 @@ impl Context {
         self.add_builtin(
             ":",
             ty!(forall 0 . 0 -> [0] -> [0]),
-            BuiltinKind::Function(|frame, frames, results| {
+            BuiltinKind::Function(|_, frame, frames, results| {
                 let a = results.pop_back().unwrap();
                 let b = results.pop_back().unwrap();
 
@@ -677,11 +679,11 @@ impl Context {
         self.add_builtin(
             "+",
             ty!(forall 0 . (Num 0) => 0 -> 0 -> 0),
-            BuiltinKind::Function(|frame, frames, results| {
+            BuiltinKind::Function(|_, frame, frames, results| {
                 let a = results.pop_back().unwrap();
                 let b = results.pop_back().unwrap();
 
-                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+                frames.push_back(frame.with_op(Op::Function(|_, frame, frames, results| {
                     let a = results.pop_back().unwrap();
                     let b = results.pop_back().unwrap();
 
@@ -707,11 +709,11 @@ impl Context {
         self.add_builtin(
             "-",
             ty!(forall 0 . (Num 0) => 0 -> 0 -> 0),
-            BuiltinKind::Function(|frame, frames, results| {
+            BuiltinKind::Function(|_, frame, frames, results| {
                 let a = results.pop_back().unwrap();
                 let b = results.pop_back().unwrap();
 
-                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+                frames.push_back(frame.with_op(Op::Function(|_, frame, frames, results| {
                     let a = results.pop_back().unwrap();
                     let b = results.pop_back().unwrap();
 
@@ -737,11 +739,11 @@ impl Context {
         self.add_builtin(
             "*",
             ty!(forall 0 . (Num 0) => 0 -> 0 -> 0),
-            BuiltinKind::Function(|frame, frames, results| {
+            BuiltinKind::Function(|_, frame, frames, results| {
                 let a = results.pop_back().unwrap();
                 let b = results.pop_back().unwrap();
 
-                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+                frames.push_back(frame.with_op(Op::Function(|_, frame, frames, results| {
                     let a = results.pop_back().unwrap();
                     let b = results.pop_back().unwrap();
 
@@ -767,11 +769,11 @@ impl Context {
         self.add_builtin(
             "/",
             ty!(forall 0 . (Num 0) => 0 -> 0 -> 0),
-            BuiltinKind::Function(|frame, frames, results| {
+            BuiltinKind::Function(|_, frame, frames, results| {
                 let a = results.pop_back().unwrap();
                 let b = results.pop_back().unwrap();
 
-                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+                frames.push_back(frame.with_op(Op::Function(|_, frame, frames, results| {
                     let a = results.pop_back().unwrap();
                     let b = results.pop_back().unwrap();
 
@@ -801,11 +803,11 @@ impl Context {
         self.add_builtin(
             "%",
             ty!(forall 0 . (Num 0) => 0 -> 0 -> 0),
-            BuiltinKind::Function(|frame, frames, results| {
+            BuiltinKind::Function(|_, frame, frames, results| {
                 let a = results.pop_back().unwrap();
                 let b = results.pop_back().unwrap();
 
-                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+                frames.push_back(frame.with_op(Op::Function(|_, frame, frames, results| {
                     let a = results.pop_back().unwrap();
                     let b = results.pop_back().unwrap();
 
@@ -847,8 +849,8 @@ impl Context {
         self.add_builtin(
             "not",
             ty!(Bool -> Bool),
-            BuiltinKind::Function(|frame, frames, _| {
-                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+            BuiltinKind::Function(|_, frame, frames, _| {
+                frames.push_back(frame.with_op(Op::Function(|_, frame, frames, results| {
                     let arg = results.pop_back().unwrap();
 
                     match &*arg.borrow() {
@@ -871,8 +873,8 @@ impl Context {
         self.add_builtin(
             "read",
             ty!([Char] -> [Char]),
-            BuiltinKind::Function(|frame, frames, _| {
-                frames.push_back(frame.with_op(Op::Function(|frame, frames, results| {
+            BuiltinKind::Function(|_, frame, frames, _| {
+                frames.push_back(frame.with_op(Op::Function(|_, frame, frames, results| {
                     let arg = results.pop_back().unwrap();
 
                     let path = {
@@ -933,10 +935,10 @@ impl Context {
         self.add_builtin(
             "print",
             ty!(forall 0 . 0 -> 0),
-            BuiltinKind::Function(|frame, frames, _| {
-                frames.push_back(frame.with_op(Op::Function(|_, _, results| {
+            BuiltinKind::Function(|_, frame, frames, _| {
+                frames.push_back(frame.with_op(Op::Function(|ctx, _, _, results| {
                     let arg = results.back().unwrap();
-                    println!("{}", arg.borrow());
+                    println!("{}", arg.borrow().display(ctx));
                     Ok(())
                 })));
                 frames.push_back(frame.with_op(Op::Force));
@@ -947,8 +949,8 @@ impl Context {
         self.add_builtin(
             "head",
             ty!(forall 0 . [0] -> 0),
-            BuiltinKind::Function(|frame, frames, _| {
-                frames.push_back(frame.with_op(Op::Function(|frame, _, results| {
+            BuiltinKind::Function(|_, frame, frames, _| {
+                frames.push_back(frame.with_op(Op::Function(|_, frame, _, results| {
                     let arg = results.pop_back().unwrap();
                     match &*arg.borrow() {
                         Value::List(list) => results
@@ -965,8 +967,8 @@ impl Context {
         self.add_builtin(
             "tail",
             ty!(forall 0 . [0] -> [0]),
-            BuiltinKind::Function(|frame, frames, _| {
-                frames.push_back(frame.with_op(Op::Function(|frame, _, results| {
+            BuiltinKind::Function(|_, frame, frames, _| {
+                frames.push_back(frame.with_op(Op::Function(|_, frame, _, results| {
                     let arg = results.pop_back().unwrap();
                     match &*arg.borrow() {
                         Value::List(list) => results
