@@ -255,10 +255,7 @@ impl Lexer {
                     str.push(ch);
                 }
             }
-            return Ok((
-                Token::String(slice.to_string()),
-                self.advance_with_span(slice.len() + 2),
-            ));
+            return Ok((Token::String(str), self.advance_with_span(slice.len() + 2)));
         }
 
         Err(SyntaxError::InvalidToken(Span::new(
