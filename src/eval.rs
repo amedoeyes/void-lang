@@ -523,6 +523,8 @@ pub fn evaluate(ctx: &Context, nodes: &[NodeId]) -> Result<Value> {
                     ctx,
                     [
                         frame.with_op(Op::Force),
+                        frame.with_op(Op::EnableFullForce),
+                        frame.with_op(Op::Force),
                         frame.with_op(match ctx.get_type(*node) {
                             Some(Type::List(_)) => Op::EnableFullForce,
                             _ => Op::Nop,
