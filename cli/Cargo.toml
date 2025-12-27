@@ -1,0 +1,11 @@
+[package]
+name = "void-cli"
+version = "1.0.0"
+edition = "2024"
+
+
+[dependencies]
+void = { version = "1", path = "../lib" }
+fxhash = "0.2"
+clap = { version = "4", features = ["cargo"] }
+rustyline = "16"

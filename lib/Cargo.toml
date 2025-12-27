@@ -1,0 +1,10 @@
+[package]
+name = "void"
+version = "1.0.0"
+edition = "2024"
+
+[dependencies]
+fxhash = "0.2"
+include_dir = "0.7"
+itertools = "0.14"
+string_cache = "0.8"

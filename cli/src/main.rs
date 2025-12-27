@@ -1,28 +1,49 @@
-#![allow(clippy::type_complexity)]
-
-mod context;
-mod error;
-mod eval;
-mod expr;
-mod lexer;
-mod modules;
-mod parser;
-mod span;
-mod type_system;
-
 use clap::{Arg, Command, crate_name, crate_version, value_parser};
+use core::fmt::{self, Display, Formatter};
 use fxhash::FxHashSet;
 use rustyline::DefaultEditor;
-use std::{env, fs, path::PathBuf};
+use std::{env, fs, io, path::PathBuf};
 
-use crate::{
+use void::{
     context::{Context, Node},
-    error::{Error, Result, SyntaxError},
-    eval::evaluate,
+    error,
+    eval::{self, evaluate},
     lexer::{Lexer, Token},
+    modules,
     parser::parse,
-    type_system::infer,
+    type_system::{self, infer},
 };
+
+#[derive(Debug)]
+pub enum Error {
+    Clap(clap::Error),
+    Void(error::Error),
+    Io(io::Error),
+}
+
+impl From<std::io::Error> for Error {
+    fn from(value: std::io::Error) -> Self {
+        Error::Io(value)
+    }
+}
+
+impl From<clap::Error> for Error {
+    fn from(value: clap::Error) -> Self {
+        Error::Clap(value)
+    }
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Error::Clap(err) => err.fmt(f),
+            Error::Io(err) => err.fmt(f),
+            Error::Void(err) => err.fmt(f),
+        }
+    }
+}
+
+pub type Result<T> = std::result::Result<T, Error>;
 
 fn run() -> Result<()> {
     let cmd = Command::new(crate_name!())
@@ -84,7 +105,7 @@ fn run() -> Result<()> {
                     Ok((token, span)) => {
                         if token == Token::Eof {
                             break;
-                        };
+                        }
                         println!(
                             "{}:{}:{}: {:?}",
                             source_path.display(),
@@ -94,7 +115,11 @@ fn run() -> Result<()> {
                         );
                     }
                     Err(err) => {
-                        return Err(Error::Syntax(source_path.clone(), contents, Box::new(err)));
+                        return Err(Error::Void(error::Error::Syntax(
+                            source_path.clone(),
+                            contents,
+                            Box::new(err),
+                        )));
                     }
                 }
             }
@@ -104,7 +129,7 @@ fn run() -> Result<()> {
             let source_path = sub_matches.get_one::<PathBuf>("file").unwrap();
             let parent_dir = source_path
                 .parent()
-                .ok_or_else(|| Error::InvalidPath(source_path.clone()))?;
+                .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
 
             let mut ctx = Context::new();
 
@@ -119,9 +144,14 @@ fn run() -> Result<()> {
                     parent_dir,
                     &mut visited_modules,
                     &mut FxHashSet::default(),
-                )?,
+                )
+                .map_err(Error::Void)?,
                 Err(err) => {
-                    return Err(Error::Syntax(source_path.into(), contents, Box::new(err)));
+                    return Err(Error::Void(error::Error::Syntax(
+                        source_path.clone(),
+                        contents,
+                        Box::new(err),
+                    )));
                 }
             };
 
@@ -134,7 +164,7 @@ fn run() -> Result<()> {
             let source_path = sub_matches.get_one::<PathBuf>("file").unwrap();
             let parent_dir = source_path
                 .parent()
-                .ok_or_else(|| Error::InvalidPath(source_path.clone()))?;
+                .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
 
             let mut ctx = Context::new();
 
@@ -149,15 +179,24 @@ fn run() -> Result<()> {
                     parent_dir,
                     &mut visited_modules,
                     &mut FxHashSet::default(),
-                )?,
+                )
+                .map_err(Error::Void)?,
                 Err(err) => {
-                    return Err(Error::Syntax(source_path.clone(), contents, Box::new(err)));
+                    return Err(Error::Void(error::Error::Syntax(
+                        source_path.clone(),
+                        contents,
+                        Box::new(err),
+                    )));
                 }
             };
 
             if let Err(err) = infer(&mut ctx, &nodes) {
-                return Err(Error::Type(source_path.clone(), contents, Box::new(err)));
-            };
+                return Err(Error::Void(error::Error::Type(
+                    source_path.clone(),
+                    contents,
+                    Box::new(err),
+                )));
+            }
 
             for node in nodes {
                 match ctx.get_node(node) {
@@ -180,7 +219,7 @@ fn run() -> Result<()> {
             let source_path = sub_matches.get_one::<PathBuf>("file").unwrap();
             let parent_dir = source_path
                 .parent()
-                .ok_or_else(|| Error::InvalidPath(source_path.clone()))?;
+                .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
 
             let mut ctx = Context::new();
 
@@ -195,19 +234,35 @@ fn run() -> Result<()> {
                     parent_dir,
                     &mut visited_modules,
                     &mut FxHashSet::default(),
-                )?,
+                )
+                .map_err(Error::Void)?,
+
                 Err(err) => {
-                    return Err(Error::Syntax(source_path.clone(), contents, Box::new(err)));
+                    return Err(Error::Void(error::Error::Syntax(
+                        source_path.clone(),
+                        contents,
+                        Box::new(err),
+                    )));
                 }
             };
 
             if let Err(err) = infer(&mut ctx, &nodes) {
-                return Err(Error::Type(source_path.clone(), contents, Box::new(err)));
-            };
+                return Err(Error::Void(error::Error::Type(
+                    source_path.clone(),
+                    contents,
+                    Box::new(err),
+                )));
+            }
 
             let value = match evaluate(&ctx, &nodes) {
                 Ok(value) => value,
-                Err(err) => return Err(Error::Eval(source_path.clone(), contents, err)),
+                Err(err) => {
+                    return Err(Error::Void(error::Error::Eval(
+                        source_path.clone(),
+                        contents,
+                        err,
+                    )));
+                }
             };
 
             println!("{}", value.display(&ctx));
@@ -221,7 +276,7 @@ fn run() -> Result<()> {
             if let Some(source_path) = sub_matches.get_one::<PathBuf>("file") {
                 let parent_dir = source_path
                     .parent()
-                    .ok_or_else(|| Error::InvalidPath(source_path.clone()))?;
+                    .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
 
                 let mut visited_modules = FxHashSet::default();
                 visited_modules.insert(PathBuf::from(source_path));
@@ -234,20 +289,30 @@ fn run() -> Result<()> {
                         parent_dir,
                         &mut visited_modules,
                         &mut FxHashSet::default(),
-                    )?,
+                    )
+                    .map_err(Error::Void)?,
                     Err(err) => {
-                        return Err(Error::Syntax(source_path.clone(), contents, Box::new(err)));
+                        return Err(Error::Void(error::Error::Syntax(
+                            source_path.clone(),
+                            contents,
+                            Box::new(err),
+                        )));
                     }
                 });
+
                 if let Err(err) = infer(&mut ctx, &nodes) {
-                    return Err(Error::Type(source_path.clone(), contents, Box::new(err)));
-                };
+                    return Err(Error::Void(error::Error::Type(
+                        source_path.clone(),
+                        contents,
+                        Box::new(err),
+                    )));
+                }
             }
 
             let cwd = env::current_dir()?;
             let parent_dir = cwd
                 .parent()
-                .ok_or_else(|| Error::InvalidPath(cwd.clone()))?;
+                .ok_or_else(|| Error::Void(error::Error::InvalidPath(cwd.clone())))?;
 
             loop {
                 let input = match rl.readline("> ") {
@@ -275,34 +340,36 @@ fn run() -> Result<()> {
                         parent_dir,
                         &mut FxHashSet::default(),
                         &mut FxHashSet::default(),
-                    )?,
+                    )
+                    .map_err(Error::Void)?,
+
                     Err(err) => {
                         match err {
-                            SyntaxError::InvalidToken(span) => {
+                            error::SyntaxError::InvalidToken(span) => {
                                 println!(
                                     "{}:{}: invalid token",
                                     span.start.line, span.start.column
                                 );
                             }
-                            SyntaxError::Unterminated(what, span) => {
+                            error::SyntaxError::Unterminated(what, span) => {
                                 println!(
                                     "{}:{}: unterminated {}",
                                     span.start.line, span.start.column, what,
                                 )
                             }
-                            SyntaxError::EmptyChar(span) => {
+                            error::SyntaxError::EmptyChar(span) => {
                                 println!("{}:{}: empty char", span.start.line, span.start.column)
                             }
-                            SyntaxError::InvalidChar(span) => {
+                            error::SyntaxError::InvalidChar(span) => {
                                 println!("{}:{}: invalid char", span.start.line, span.start.column)
                             }
-                            SyntaxError::InvalidEscapeChar(span) => {
+                            error::SyntaxError::InvalidEscapeChar(span) => {
                                 println!(
                                     "{}:{}: invalid escape char",
                                     span.start.line, span.start.column
                                 )
                             }
-                            SyntaxError::UnexpectedToken(expect, (token, span)) => {
+                            error::SyntaxError::UnexpectedToken(expect, (token, span)) => {
                                 println!(
                                     "{}:{}: expected '{expect}' but got '{token}'",
                                     span.start.line, span.start.column
@@ -348,7 +415,7 @@ fn run() -> Result<()> {
                     }
                     nodes.pop();
                     continue;
-                };
+                }
 
                 if let Node::Expr(_) = ctx.get_node(*nodes.last().unwrap()) {
                     let value = match evaluate(&ctx, &nodes) {
@@ -376,7 +443,6 @@ fn run() -> Result<()> {
                 }
             }
         }
-
         _ => unreachable!(),
     };
 

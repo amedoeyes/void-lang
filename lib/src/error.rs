@@ -18,7 +18,6 @@ pub enum SyntaxError {
 
 #[derive(Debug)]
 pub enum Error {
-    Clap(clap::Error),
     Io(io::Error),
     InvalidPath(PathBuf),
     CircularImport(PathBuf),
@@ -36,16 +35,9 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<clap::Error> for Error {
-    fn from(value: clap::Error) -> Self {
-        Error::Clap(value)
-    }
-}
-
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
-            Error::Clap(err) => err.fmt(f),
             Error::Io(err) => err.fmt(f),
 
             Error::InvalidPath(path) => write!(f, "Invalid path '{}'", path.display()),
