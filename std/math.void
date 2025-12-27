@@ -18,3 +18,8 @@ let power = x -> n ->
 let gcd = a -> b -> 
 	if b == 0 then a
 	else gcd b (a % b);
+
+
+let abs = n -> if n < 0 then negate n else n;
+
+let rem_euclid = a -> b -> (a % b) + (if (a % b) < 0 then abs b else 0);
