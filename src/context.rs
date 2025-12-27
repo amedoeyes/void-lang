@@ -871,6 +871,30 @@ impl Context {
         );
 
         self.add_builtin(
+            "negate",
+            ty!(Int -> Int),
+            BuiltinKind::Function(|_, frame, frames, _| {
+                frames.push_back(frame.with_op(Op::Function(|_, frame, frames, results| {
+                    let arg = results.pop_back().unwrap();
+
+                    match &*arg.borrow() {
+                        Value::Integer(i) => {
+                            frames.push_back(
+                                frame.with_op(Op::Value(SharedValue::new(Value::Integer(-i)))),
+                            );
+                        }
+                        _ => unreachable!(),
+                    }
+
+                    Ok(())
+                })));
+                frames.push_back(frame.with_op(Op::Force));
+
+                Ok(())
+            }),
+        );
+
+        self.add_builtin(
             "read",
             ty!([Char] -> [Char]),
             BuiltinKind::Function(|_, frame, frames, _| {
