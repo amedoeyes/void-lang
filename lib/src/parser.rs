@@ -1,15 +1,35 @@
-use std::collections::VecDeque;
+use core::fmt;
+use std::{
+    collections::VecDeque,
+    fmt::{Display, Formatter},
+};
 
 use crate::{
     context::{Associativity, Context, NodeId},
-    error::SyntaxError,
     expr::Expr,
-    lexer::{Lexer, Token},
+    lexer::{self, Lexer, Token},
     span::Span,
     ty,
 };
 
-type Result<T> = std::result::Result<T, SyntaxError>;
+#[derive(Debug)]
+pub enum Error {
+    Lexer(lexer::Error),
+    UnexpectedToken(String, (Token, Span)),
+}
+
+impl Display for Error {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            Error::Lexer(error) => error.fmt(f),
+            Error::UnexpectedToken(expected, (token, _)) => {
+                write!(f, "expected '{}' but got '{}'", expected, *token,)
+            }
+        }
+    }
+}
+
+type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Debug)]
 pub struct Parser<'a> {
@@ -52,11 +72,11 @@ impl<'a> Parser<'a> {
                     op
                 }
                 other => {
-                    return Err(SyntaxError::UnexpectedToken("operator".to_string(), other));
+                    return Err(Error::UnexpectedToken("operator".to_string(), other));
                 }
             },
             other => {
-                return Err(SyntaxError::UnexpectedToken(
+                return Err(Error::UnexpectedToken(
                     "Identifier or operator".to_string(),
                     other,
                 ));
@@ -76,7 +96,7 @@ impl<'a> Parser<'a> {
         let op = match self.advance()? {
             (Token::Operator(op), _) => op,
             other => {
-                return Err(SyntaxError::UnexpectedToken("operator".to_string(), other));
+                return Err(Error::UnexpectedToken("operator".to_string(), other));
             }
         };
         let assoc = match self.advance()? {
@@ -84,7 +104,7 @@ impl<'a> Parser<'a> {
             (Token::Right, _) => Associativity::Right,
             (Token::None, _) => Associativity::None,
             other => {
-                return Err(SyntaxError::UnexpectedToken(
+                return Err(Error::UnexpectedToken(
                     "left, right or none".to_string(),
                     other,
                 ));
@@ -93,7 +113,7 @@ impl<'a> Parser<'a> {
         let prec = match self.advance()? {
             (Token::Integer(prec), _) => prec.parse().unwrap(),
             other => {
-                return Err(SyntaxError::UnexpectedToken("integer".to_string(), other));
+                return Err(Error::UnexpectedToken("integer".to_string(), other));
             }
         };
         self.expect(Token::Semicolon)?;
@@ -109,10 +129,7 @@ impl<'a> Parser<'a> {
             let part = match self.advance()? {
                 (Token::Identifier(id), _) => id,
                 other => {
-                    return Err(SyntaxError::UnexpectedToken(
-                        "Identifier".to_string(),
-                        other,
-                    ));
+                    return Err(Error::UnexpectedToken("Identifier".to_string(), other));
                 }
             };
             module.push(part);
@@ -122,7 +139,7 @@ impl<'a> Parser<'a> {
                         self.advance()?;
                         continue;
                     } else {
-                        return Err(SyntaxError::UnexpectedToken(".".to_string(), self.peek(0)?));
+                        return Err(Error::UnexpectedToken(".".to_string(), self.peek(0)?));
                     }
                 }
                 _ => break,
@@ -172,7 +189,7 @@ impl<'a> Parser<'a> {
                                 last_paren_pos = pos;
                             }
                             Token::Eof => {
-                                return Err(SyntaxError::UnexpectedToken(
+                                return Err(Error::UnexpectedToken(
                                     ")".into(),
                                     self.peek(last_paren_pos + 1)?,
                                 ));
@@ -188,19 +205,19 @@ impl<'a> Parser<'a> {
                     }
                 }
             },
-            _ => Err(SyntaxError::UnexpectedToken(
+            _ => Err(Error::UnexpectedToken(
                 "expression".to_string(),
                 self.peek(0)?,
             )),
         }
     }
 
-    fn parse_operator_section(&mut self) -> std::result::Result<NodeId, SyntaxError> {
+    fn parse_operator_section(&mut self) -> std::result::Result<NodeId, Error> {
         let start_span = self.expect(Token::ParenLeft)?.1;
         let op = match self.advance()? {
             (Token::Operator(op), _) => op,
             other => {
-                return Err(SyntaxError::UnexpectedToken("operator".into(), other));
+                return Err(Error::UnexpectedToken("operator".into(), other));
             }
         };
         let end_span = self.expect(Token::ParenRight)?.1;
@@ -224,13 +241,13 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn parse_operator_left_section(&mut self) -> std::result::Result<NodeId, SyntaxError> {
+    fn parse_operator_left_section(&mut self) -> std::result::Result<NodeId, Error> {
         let start_span = self.expect(Token::ParenLeft)?.1;
         let lhs = self.parse_expr(0)?;
         let op = match self.advance()? {
             (Token::Operator(op), _) => op,
             other => {
-                return Err(SyntaxError::UnexpectedToken("operator".into(), other));
+                return Err(Error::UnexpectedToken("operator".into(), other));
             }
         };
         let end_span = self.expect(Token::ParenRight)?.1;
@@ -247,12 +264,12 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn parse_operator_right_section(&mut self) -> std::result::Result<NodeId, SyntaxError> {
+    fn parse_operator_right_section(&mut self) -> std::result::Result<NodeId, Error> {
         let start_span = self.expect(Token::ParenLeft)?.1;
         let op = match self.advance()? {
             (Token::Operator(op), _) => op,
             other => {
-                return Err(SyntaxError::UnexpectedToken("operator".into(), other));
+                return Err(Error::UnexpectedToken("operator".into(), other));
             }
         };
         let rhs = self.parse_expr(0)?;
@@ -271,7 +288,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn parse_paren_expr(&mut self) -> std::result::Result<NodeId, SyntaxError> {
+    fn parse_paren_expr(&mut self) -> std::result::Result<NodeId, Error> {
         let start_span = self.expect(Token::ParenLeft)?.1;
         let expr = self.parse_expr(0)?;
         let end_span = self.expect(Token::ParenRight)?.1;
@@ -279,7 +296,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn parse_unit_lit(&mut self) -> std::result::Result<NodeId, SyntaxError> {
+    fn parse_unit_lit(&mut self) -> std::result::Result<NodeId, Error> {
         let start_span = self.expect(Token::ParenLeft)?.1;
         let end_span = self.expect(Token::ParenRight)?.1;
         let expr = self.context.add_expr(Expr::Unit);
@@ -287,7 +304,7 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn parse_cond_expr(&mut self) -> std::result::Result<NodeId, SyntaxError> {
+    fn parse_cond_expr(&mut self) -> std::result::Result<NodeId, Error> {
         let start_span = self.expect(Token::If)?.1;
         let cond = self.parse_expr(0)?;
         self.expect(Token::Then)?;
@@ -300,18 +317,18 @@ impl<'a> Parser<'a> {
         Ok(expr)
     }
 
-    fn parse_identifier(&mut self) -> std::result::Result<NodeId, SyntaxError> {
+    fn parse_identifier(&mut self) -> std::result::Result<NodeId, Error> {
         match self.advance()? {
             (Token::Identifier(id), span) => {
                 let expr = self.context.add_expr(Expr::Identifier(id));
                 self.context.set_span(expr, span);
                 Ok(expr)
             }
-            other => Err(SyntaxError::UnexpectedToken("identifier".into(), other)),
+            other => Err(Error::UnexpectedToken("identifier".into(), other)),
         }
     }
 
-    fn parse_lambda_expr(&mut self) -> std::result::Result<NodeId, SyntaxError> {
+    fn parse_lambda_expr(&mut self) -> std::result::Result<NodeId, Error> {
         match self.advance()? {
             (Token::Identifier(param), param_span) => {
                 self.expect(Token::HyphenGreaterThan)?;
@@ -321,11 +338,11 @@ impl<'a> Parser<'a> {
                 self.context.set_span(expr, param_span.merge(body_span));
                 Ok(expr)
             }
-            other => Err(SyntaxError::UnexpectedToken("identifier".into(), other)),
+            other => Err(Error::UnexpectedToken("identifier".into(), other)),
         }
     }
 
-    fn parse_list_lit(&mut self) -> std::result::Result<NodeId, SyntaxError> {
+    fn parse_list_lit(&mut self) -> std::result::Result<NodeId, Error> {
         match self.advance()? {
             (Token::BracketLeft, start_span) => match self.peek(0)? {
                 (Token::BracketRight, end_span) => {
@@ -358,14 +375,14 @@ impl<'a> Parser<'a> {
                     Ok(list)
                 }
             },
-            other => Err(SyntaxError::UnexpectedToken(
+            other => Err(Error::UnexpectedToken(
                 Token::BracketLeft.to_string(),
                 other,
             )),
         }
     }
 
-    fn parse_string_lit(&mut self) -> std::result::Result<NodeId, SyntaxError> {
+    fn parse_string_lit(&mut self) -> std::result::Result<NodeId, Error> {
         match self.advance()? {
             (Token::String(str), span) => {
                 let mut list = self.context.add_expr(Expr::Nil);
@@ -380,18 +397,18 @@ impl<'a> Parser<'a> {
                 self.context.set_span(list, span);
                 Ok(list)
             }
-            other => Err(SyntaxError::UnexpectedToken("string".into(), other)),
+            other => Err(Error::UnexpectedToken("string".into(), other)),
         }
     }
 
-    fn parse_char_lit(&mut self) -> std::result::Result<NodeId, SyntaxError> {
+    fn parse_char_lit(&mut self) -> std::result::Result<NodeId, Error> {
         match self.advance()? {
             (Token::Char(char), span) => {
                 let expr = self.context.add_expr(Expr::Char(char));
                 self.context.set_span(expr, span);
                 Ok(expr)
             }
-            other => Err(SyntaxError::UnexpectedToken("char".into(), other)),
+            other => Err(Error::UnexpectedToken("char".into(), other)),
         }
     }
 
@@ -404,7 +421,7 @@ impl<'a> Parser<'a> {
                 self.context.set_span(expr, span);
                 Ok(expr)
             }
-            other => Err(SyntaxError::UnexpectedToken("integer".into(), other)),
+            other => Err(Error::UnexpectedToken("integer".into(), other)),
         }
     }
 
@@ -419,7 +436,7 @@ impl<'a> Parser<'a> {
                 self.context.set_span(expr, span);
                 Ok(expr)
             }
-            other => Err(SyntaxError::UnexpectedToken("boolean".into(), other)),
+            other => Err(Error::UnexpectedToken("boolean".into(), other)),
         }
     }
 
@@ -460,7 +477,8 @@ impl<'a> Parser<'a> {
 
     fn peek(&mut self, n: usize) -> Result<(Token, Span)> {
         while self.lookahead.len() <= n {
-            self.lookahead.push_back(self.lexer.next_token()?);
+            self.lookahead
+                .push_back(self.lexer.next_token().map_err(Error::Lexer)?);
         }
         Ok(self.lookahead[n].clone())
     }
@@ -469,14 +487,14 @@ impl<'a> Parser<'a> {
         if let Some(peek) = self.lookahead.pop_front() {
             Ok(peek)
         } else {
-            self.lexer.next_token()
+            self.lexer.next_token().map_err(Error::Lexer)
         }
     }
 
     fn expect(&mut self, expected: Token) -> Result<(Token, Span)> {
         match self.advance()? {
             (token, span) if token == expected => Ok((token, span)),
-            other => Err(SyntaxError::UnexpectedToken(expected.to_string(), other)),
+            other => Err(Error::UnexpectedToken(expected.to_string(), other)),
         }
     }
 }

@@ -4,17 +4,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::{eval, lexer::Token, span::Span, type_system};
-
-#[derive(Debug)]
-pub enum SyntaxError {
-    InvalidToken(Span),
-    Unterminated(String, Span),
-    EmptyChar(Span),
-    InvalidChar(Span),
-    InvalidEscapeChar(Span),
-    UnexpectedToken(String, (Token, Span)),
-}
+use crate::{
+    eval,
+    lexer::{self, Token},
+    parser,
+    span::Span,
+    type_system,
+};
 
 #[derive(Debug)]
 pub enum Error {
@@ -22,7 +18,7 @@ pub enum Error {
     InvalidPath(PathBuf),
     CircularImport(PathBuf),
     ModuleNotFound(Vec<String>),
-    Syntax(PathBuf, String, Box<SyntaxError>),
+    Syntax(PathBuf, String, Box<parser::Error>),
     Type(PathBuf, String, Box<type_system::Error>),
     Eval(PathBuf, String, eval::Error),
 }
@@ -47,32 +43,15 @@ impl fmt::Display for Error {
             }
 
             Error::Syntax(filename, source, err) => match err.as_ref() {
-                SyntaxError::InvalidToken(span) => {
-                    write_message_and_lines(f, filename, source, *span, "invalid token")
+                parser::Error::Lexer(lexer::Error::InvalidToken(span))
+                | parser::Error::Lexer(lexer::Error::Unterminated(_, span))
+                | parser::Error::Lexer(lexer::Error::EmptyChar(span))
+                | parser::Error::Lexer(lexer::Error::InvalidChar(span))
+                | parser::Error::Lexer(lexer::Error::InvalidEscapeChar(span)) => {
+                    write_message_and_lines(f, filename, source, *span, &err.to_string())
                 }
-                SyntaxError::Unterminated(what, span) => write_message_and_lines(
-                    f,
-                    filename,
-                    source,
-                    *span,
-                    &format!("unterminated {what}"),
-                ),
-                SyntaxError::EmptyChar(span) => {
-                    write_message_and_lines(f, filename, source, *span, "empty char")
-                }
-                SyntaxError::InvalidChar(span) => {
-                    write_message_and_lines(f, filename, source, *span, "invalid char")
-                }
-                SyntaxError::InvalidEscapeChar(span) => {
-                    write_message_and_lines(f, filename, source, *span, "invalid escape char")
-                }
-                SyntaxError::UnexpectedToken(expected, (token, span)) => {
-                    write_message(
-                        f,
-                        filename,
-                        *span,
-                        &format!("expected '{}' but got '{}'", expected, *token),
-                    )?;
+                parser::Error::UnexpectedToken(_, (token, span)) => {
+                    write_message(f, filename, *span, &err.to_string())?;
                     if *token != Token::Eof {
                         write_lines(f, source, *span)?;
                     }

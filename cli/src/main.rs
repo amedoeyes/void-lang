@@ -8,9 +8,9 @@ use void::{
     context::{Context, Node},
     error,
     eval::{self, evaluate},
-    lexer::{Lexer, Token},
+    lexer::{self, Lexer, Token},
     modules,
-    parser::parse,
+    parser::{self, parse},
     type_system::{self, infer},
 };
 
@@ -118,7 +118,7 @@ fn run() -> Result<()> {
                         return Err(Error::Void(error::Error::Syntax(
                             source_path.clone(),
                             contents,
-                            Box::new(err),
+                            Box::new(parser::Error::Lexer(err)),
                         )));
                     }
                 }
@@ -345,34 +345,17 @@ fn run() -> Result<()> {
 
                     Err(err) => {
                         match err {
-                            error::SyntaxError::InvalidToken(span) => {
+                            parser::Error::Lexer(lexer::Error::InvalidToken(span))
+                            | parser::Error::Lexer(lexer::Error::Unterminated(_, span))
+                            | parser::Error::Lexer(lexer::Error::EmptyChar(span))
+                            | parser::Error::Lexer(lexer::Error::InvalidChar(span))
+                            | parser::Error::Lexer(lexer::Error::InvalidEscapeChar(span))
+                            | parser::Error::UnexpectedToken(_, (_, span)) => {
                                 println!(
-                                    "{}:{}: invalid token",
-                                    span.start.line, span.start.column
-                                );
-                            }
-                            error::SyntaxError::Unterminated(what, span) => {
-                                println!(
-                                    "{}:{}: unterminated {}",
-                                    span.start.line, span.start.column, what,
-                                )
-                            }
-                            error::SyntaxError::EmptyChar(span) => {
-                                println!("{}:{}: empty char", span.start.line, span.start.column)
-                            }
-                            error::SyntaxError::InvalidChar(span) => {
-                                println!("{}:{}: invalid char", span.start.line, span.start.column)
-                            }
-                            error::SyntaxError::InvalidEscapeChar(span) => {
-                                println!(
-                                    "{}:{}: invalid escape char",
-                                    span.start.line, span.start.column
-                                )
-                            }
-                            error::SyntaxError::UnexpectedToken(expect, (token, span)) => {
-                                println!(
-                                    "{}:{}: expected '{expect}' but got '{token}'",
-                                    span.start.line, span.start.column
+                                    "{}:{}: {}",
+                                    span.start.line,
+                                    span.start.column,
+                                    &err.to_string()
                                 );
                             }
                         }

@@ -1,97 +1,10 @@
-use core::fmt;
-
 use crate::{
-    error::SyntaxError,
+    lexer::{
+        error::{Error, Result},
+        token::{KEYWORDS, SYMBOLS, Token},
+    },
     span::{Position, Span},
 };
-
-type Result<T> = std::result::Result<T, SyntaxError>;
-
-#[derive(Debug, PartialEq, Clone)]
-pub enum Token {
-    BracketLeft,
-    BracketRight,
-    Comma,
-    Equal,
-    ParenLeft,
-    ParenRight,
-    Semicolon,
-    HyphenGreaterThan,
-
-    Boolean(String),
-    Integer(String),
-    Char(char),
-    String(String),
-    Identifier(String),
-    Operator(String),
-
-    Op,
-    Left,
-    Right,
-    None,
-
-    Import,
-    Let,
-    If,
-    Then,
-    Else,
-
-    Eof,
-}
-
-impl fmt::Display for Token {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        match self {
-            Token::BracketLeft => write!(f, "["),
-            Token::BracketRight => write!(f, "]"),
-            Token::Comma => write!(f, ","),
-            Token::Equal => write!(f, "="),
-            Token::HyphenGreaterThan => write!(f, "->"),
-            Token::ParenLeft => write!(f, "("),
-            Token::ParenRight => write!(f, ")"),
-            Token::Semicolon => write!(f, ";"),
-            Token::Boolean(val) => write!(f, "{val}"),
-            Token::Integer(val) => write!(f, "{val}"),
-            Token::Char(val) => write!(f, "'{val}'"),
-            Token::String(val) => write!(f, "\"{val}\""),
-            Token::Identifier(val) => write!(f, "{val}"),
-            Token::Operator(op) => write!(f, "({op})"),
-            Token::Op => write!(f, "op"),
-            Token::Left => write!(f, "left"),
-            Token::Right => write!(f, "right"),
-            Token::None => write!(f, "none"),
-            Token::Import => write!(f, "import"),
-            Token::Let => write!(f, "let"),
-            Token::If => write!(f, "if"),
-            Token::Then => write!(f, "then"),
-            Token::Else => write!(f, "else"),
-            Token::Eof => write!(f, "EOF"),
-        }
-    }
-}
-
-const SYMBOLS: &[(&str, Token)] = &[
-    ("->", Token::HyphenGreaterThan),
-    ("(", Token::ParenLeft),
-    (")", Token::ParenRight),
-    (",", Token::Comma),
-    (";", Token::Semicolon),
-    ("=", Token::Equal),
-    ("[", Token::BracketLeft),
-    ("]", Token::BracketRight),
-];
-
-const KEYWORDS: &[(&str, Token)] = &[
-    ("op", Token::Op),
-    ("left", Token::Left),
-    ("right", Token::Right),
-    ("none", Token::None),
-    ("import", Token::Import),
-    ("let", Token::Let),
-    ("if", Token::If),
-    ("then", Token::Then),
-    ("else", Token::Else),
-];
 
 #[derive(Debug)]
 pub struct Lexer {
@@ -191,7 +104,7 @@ impl Lexer {
         if current_char == '\'' {
             let slice = self
                 .slice_buffer_between('\'', false)
-                .ok_or(SyntaxError::Unterminated(
+                .ok_or(Error::Unterminated(
                     "char".into(),
                     Span::new(self.position, self.position),
                 ))?;
@@ -207,19 +120,17 @@ impl Lexer {
                     Some('"') => '"',
                     Some('0') => '\0',
                     _ => {
-                        return Err(SyntaxError::InvalidEscapeChar(self.span_from_range(1, 2)));
+                        return Err(Error::InvalidEscapeChar(self.span_from_range(1, 2)));
                     }
                 },
                 Some(char) => char,
                 None => {
-                    return Err(SyntaxError::EmptyChar(self.span_from_range(0, 1)));
+                    return Err(Error::EmptyChar(self.span_from_range(0, 1)));
                 }
             };
 
             if chars.next().is_some() {
-                return Err(SyntaxError::InvalidChar(
-                    self.span_from_range(0, slice.len() + 1),
-                ));
+                return Err(Error::InvalidChar(self.span_from_range(0, slice.len() + 1)));
             }
 
             return Ok((Token::Char(ch), self.advance_with_span(slice.len() + 2)));
@@ -228,7 +139,7 @@ impl Lexer {
         if current_char == '\"' {
             let slice = self
                 .slice_buffer_between('\"', false)
-                .ok_or(SyntaxError::Unterminated(
+                .ok_or(Error::Unterminated(
                     "string".into(),
                     Span::new(self.position, self.position),
                 ))?;
@@ -246,7 +157,7 @@ impl Lexer {
                         Some('"') => '"',
                         Some('0') => '\0',
                         _ => {
-                            return Err(SyntaxError::InvalidEscapeChar(
+                            return Err(Error::InvalidEscapeChar(
                                 self.span_from_range(str.len() + 1, str.len() + 2),
                             ));
                         }
@@ -258,10 +169,7 @@ impl Lexer {
             return Ok((Token::String(str), self.advance_with_span(slice.len() + 2)));
         }
 
-        Err(SyntaxError::InvalidToken(Span::new(
-            self.position,
-            self.position,
-        )))
+        Err(Error::InvalidToken(Span::new(self.position, self.position)))
     }
 
     fn current_char(&self) -> Option<char> {
