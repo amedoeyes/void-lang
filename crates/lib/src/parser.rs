@@ -7,7 +7,7 @@ use std::{
 use crate::{
     context::{Associativity, Context, NodeId},
     expr::Expr,
-    lexer::{self, Lexer, Token},
+    lexer::{self, Delimiter, Keyword, Lexer, Literal, Token},
     span::Span,
     ty,
 };
@@ -34,12 +34,12 @@ type Result<T> = std::result::Result<T, Error>;
 #[derive(Debug)]
 pub struct Parser<'a> {
     context: &'a mut Context,
-    lexer: Lexer,
+    lexer: Lexer<'a>,
     lookahead: VecDeque<(Token, Span)>,
 }
 
 impl<'a> Parser<'a> {
-    pub fn new(context: &'a mut Context, input: &str) -> Self {
+    pub fn new(context: &'a mut Context, input: &'a str) -> Self {
         Parser {
             context,
             lexer: Lexer::new(input),
@@ -53,9 +53,9 @@ impl<'a> Parser<'a> {
             && token != Token::Eof
         {
             match token {
-                Token::Op => self.parse_operator_decl()?,
-                Token::Let => nodes.push(self.parse_bind_decl()?),
-                Token::Import => nodes.push(self.parse_import_decl()?),
+                Token::Keyword(Keyword::Op) => self.parse_operator_decl()?,
+                Token::Keyword(Keyword::Let) => nodes.push(self.parse_bind_decl()?),
+                Token::Keyword(Keyword::Import) => nodes.push(self.parse_import_decl()?),
                 _ => nodes.push(self.parse_expr(0)?),
             }
         }
@@ -63,12 +63,12 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_bind_decl(&mut self) -> Result<NodeId> {
-        let (_, let_span) = self.expect(Token::Let)?;
+        let (_, let_span) = self.expect(Token::Keyword(Keyword::Let))?;
         let name = match self.advance()? {
             (Token::Identifier(id), _) => id,
-            (Token::ParenLeft, _) => match self.advance()? {
-                (Token::Operator(op), _) => {
-                    self.expect(Token::ParenRight)?;
+            (Token::Delimiter(Delimiter::ParenLeft), _) => match self.advance()? {
+                (Token::Symbol(op), _) => {
+                    self.expect(Token::Delimiter(Delimiter::ParenRight))?;
                     op
                 }
                 other => {
@@ -82,27 +82,27 @@ impl<'a> Parser<'a> {
                 ));
             }
         };
-        self.expect(Token::Equal)?;
+        self.expect(Token::Symbol("=".into()))?;
         let expr = self.parse_expr(0)?;
         let expr_span = self.context.get_span(expr);
-        self.expect(Token::Semicolon)?;
+        self.expect(Token::Delimiter(Delimiter::Semicolon))?;
         let bind = self.context.add_bind(&name, expr);
         self.context.set_span(bind, let_span.merge(expr_span));
         Ok(bind)
     }
 
     fn parse_operator_decl(&mut self) -> Result<()> {
-        self.expect(Token::Op)?;
+        self.expect(Token::Keyword(Keyword::Op))?;
         let op = match self.advance()? {
-            (Token::Operator(op), _) => op,
+            (Token::Symbol(op), _) => op,
             other => {
                 return Err(Error::UnexpectedToken("operator".to_string(), other));
             }
         };
         let assoc = match self.advance()? {
-            (Token::Left, _) => Associativity::Left,
-            (Token::Right, _) => Associativity::Right,
-            (Token::None, _) => Associativity::None,
+            (Token::Keyword(Keyword::Left), _) => Associativity::Left,
+            (Token::Keyword(Keyword::Right), _) => Associativity::Right,
+            (Token::Keyword(Keyword::None), _) => Associativity::None,
             other => {
                 return Err(Error::UnexpectedToken(
                     "left, right or none".to_string(),
@@ -111,18 +111,18 @@ impl<'a> Parser<'a> {
             }
         };
         let prec = match self.advance()? {
-            (Token::Integer(prec), _) => prec.parse().unwrap(),
+            (Token::Literal(Literal::Integer(prec)), _) => prec.parse().unwrap(),
             other => {
                 return Err(Error::UnexpectedToken("integer".to_string(), other));
             }
         };
-        self.expect(Token::Semicolon)?;
+        self.expect(Token::Delimiter(Delimiter::Semicolon))?;
         self.context.add_operator(&op, prec, assoc);
         Ok(())
     }
 
     fn parse_import_decl(&mut self) -> Result<NodeId> {
-        let (_, start_span) = self.expect(Token::Import)?;
+        let (_, start_span) = self.expect(Token::Keyword(Keyword::Import))?;
 
         let mut module = Vec::new();
         loop {
@@ -134,7 +134,7 @@ impl<'a> Parser<'a> {
             };
             module.push(part);
             match self.peek(0)? {
-                (Token::Operator(val), _) => {
+                (Token::Symbol(val), _) => {
                     if val == "." {
                         self.advance()?;
                         continue;
@@ -145,7 +145,7 @@ impl<'a> Parser<'a> {
                 _ => break,
             }
         }
-        let end_span = self.expect(Token::Semicolon)?.1;
+        let end_span = self.expect(Token::Delimiter(Delimiter::Semicolon))?.1;
 
         let import = self.context.add_import(&module);
         self.context.set_span(import, start_span.merge(end_span));
@@ -161,20 +161,20 @@ impl<'a> Parser<'a> {
 
     fn parse_primary_expr(&mut self) -> Result<NodeId> {
         match self.peek(0)?.0 {
-            Token::Boolean(_) => self.parse_bool_lit(),
-            Token::Integer(_) => self.parse_integer_lit(),
-            Token::Char(_) => self.parse_char_lit(),
-            Token::String(_) => self.parse_string_lit(),
-            Token::BracketLeft => self.parse_list_lit(),
+            Token::Literal(Literal::Bool(_)) => self.parse_bool_lit(),
+            Token::Literal(Literal::Integer(_)) => self.parse_integer_lit(),
+            Token::Literal(Literal::Char(_)) => self.parse_char_lit(),
+            Token::Literal(Literal::String(_)) => self.parse_string_lit(),
+            Token::Delimiter(Delimiter::BracketLeft) => self.parse_list_lit(),
             Token::Identifier(_) => match self.peek(1)? {
-                (Token::HyphenGreaterThan, _) => self.parse_lambda_expr(),
+                (Token::Symbol(s), _) if s == "->" => self.parse_lambda_expr(),
                 _ => self.parse_identifier(),
             },
-            Token::If => self.parse_cond_expr(),
-            Token::ParenLeft => match self.peek(1)?.0 {
-                Token::ParenRight => self.parse_unit_lit(),
-                Token::Operator(_) => match self.peek(2)?.0 {
-                    Token::ParenRight => self.parse_operator_section(),
+            Token::Keyword(Keyword::If) => self.parse_cond_expr(),
+            Token::Delimiter(Delimiter::ParenLeft) => match self.peek(1)?.0 {
+                Token::Delimiter(Delimiter::ParenRight) => self.parse_unit_lit(),
+                Token::Symbol(_) => match self.peek(2)?.0 {
+                    Token::Delimiter(Delimiter::ParenRight) => self.parse_operator_section(),
                     _ => self.parse_operator_right_section(),
                 },
                 _ => {
@@ -183,8 +183,8 @@ impl<'a> Parser<'a> {
                     let mut last_paren_pos = 0;
                     while depth > 0 {
                         match self.peek(pos)?.0 {
-                            Token::ParenLeft => depth += 1,
-                            Token::ParenRight => {
+                            Token::Delimiter(Delimiter::ParenLeft) => depth += 1,
+                            Token::Delimiter(Delimiter::ParenRight) => {
                                 depth -= 1;
                                 last_paren_pos = pos;
                             }
@@ -200,7 +200,7 @@ impl<'a> Parser<'a> {
                     }
 
                     match self.peek(pos - 2)?.0 {
-                        Token::Operator(_) => self.parse_operator_left_section(),
+                        Token::Symbol(_) => self.parse_operator_left_section(),
                         _ => self.parse_paren_expr(),
                     }
                 }
@@ -213,14 +213,14 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_operator_section(&mut self) -> std::result::Result<NodeId, Error> {
-        let start_span = self.expect(Token::ParenLeft)?.1;
+        let start_span = self.expect(Token::Delimiter(Delimiter::ParenLeft))?.1;
         let op = match self.advance()? {
-            (Token::Operator(op), _) => op,
+            (Token::Symbol(op), _) => op,
             other => {
                 return Err(Error::UnexpectedToken("operator".into(), other));
             }
         };
-        let end_span = self.expect(Token::ParenRight)?.1;
+        let end_span = self.expect(Token::Delimiter(Delimiter::ParenRight))?.1;
         let lhs = self.context.add_expr(Expr::Identifier("a".into()));
         let rhs = self.context.add_expr(Expr::Identifier("b".into()));
         let infix = self.context.add_expr(Expr::Infix { lhs, op, rhs });
@@ -242,15 +242,15 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_operator_left_section(&mut self) -> std::result::Result<NodeId, Error> {
-        let start_span = self.expect(Token::ParenLeft)?.1;
+        let start_span = self.expect(Token::Delimiter(Delimiter::ParenLeft))?.1;
         let lhs = self.parse_expr(0)?;
         let op = match self.advance()? {
-            (Token::Operator(op), _) => op,
+            (Token::Symbol(op), _) => op,
             other => {
                 return Err(Error::UnexpectedToken("operator".into(), other));
             }
         };
-        let end_span = self.expect(Token::ParenRight)?.1;
+        let end_span = self.expect(Token::Delimiter(Delimiter::ParenRight))?.1;
         let rhs = self.context.add_expr(Expr::Identifier("b".into()));
         let infix = self.context.add_expr(Expr::Infix { lhs, op, rhs });
         let expr = self.context.add_expr(Expr::Lambda {
@@ -265,15 +265,15 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_operator_right_section(&mut self) -> std::result::Result<NodeId, Error> {
-        let start_span = self.expect(Token::ParenLeft)?.1;
+        let start_span = self.expect(Token::Delimiter(Delimiter::ParenLeft))?.1;
         let op = match self.advance()? {
-            (Token::Operator(op), _) => op,
+            (Token::Symbol(op), _) => op,
             other => {
                 return Err(Error::UnexpectedToken("operator".into(), other));
             }
         };
         let rhs = self.parse_expr(0)?;
-        let end_span = self.expect(Token::ParenRight)?.1;
+        let end_span = self.expect(Token::Delimiter(Delimiter::ParenRight))?.1;
         let lhs = self.context.add_expr(Expr::Identifier("a".into()));
         let infix = self.context.add_expr(Expr::Infix { lhs, op, rhs });
         let expr = self.context.add_expr(Expr::Lambda {
@@ -289,27 +289,27 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_paren_expr(&mut self) -> std::result::Result<NodeId, Error> {
-        let start_span = self.expect(Token::ParenLeft)?.1;
+        let start_span = self.expect(Token::Delimiter(Delimiter::ParenLeft))?.1;
         let expr = self.parse_expr(0)?;
-        let end_span = self.expect(Token::ParenRight)?.1;
+        let end_span = self.expect(Token::Delimiter(Delimiter::ParenRight))?.1;
         self.context.set_span(expr, start_span.merge(end_span));
         Ok(expr)
     }
 
     fn parse_unit_lit(&mut self) -> std::result::Result<NodeId, Error> {
-        let start_span = self.expect(Token::ParenLeft)?.1;
-        let end_span = self.expect(Token::ParenRight)?.1;
+        let start_span = self.expect(Token::Delimiter(Delimiter::ParenLeft))?.1;
+        let end_span = self.expect(Token::Delimiter(Delimiter::ParenRight))?.1;
         let expr = self.context.add_expr(Expr::Unit);
         self.context.set_span(expr, start_span.merge(end_span));
         Ok(expr)
     }
 
     fn parse_cond_expr(&mut self) -> std::result::Result<NodeId, Error> {
-        let start_span = self.expect(Token::If)?.1;
+        let start_span = self.expect(Token::Keyword(Keyword::If))?.1;
         let cond = self.parse_expr(0)?;
-        self.expect(Token::Then)?;
+        self.expect(Token::Keyword(Keyword::Then))?;
         let then = self.parse_expr(0)?;
-        self.expect(Token::Else)?;
+        self.expect(Token::Keyword(Keyword::Else))?;
         let alt = self.parse_expr(0)?;
         let end_span = self.context.get_span(alt);
         let expr = self.context.add_expr(Expr::Condition { cond, then, alt });
@@ -331,7 +331,7 @@ impl<'a> Parser<'a> {
     fn parse_lambda_expr(&mut self) -> std::result::Result<NodeId, Error> {
         match self.advance()? {
             (Token::Identifier(param), param_span) => {
-                self.expect(Token::HyphenGreaterThan)?;
+                self.expect(Token::Symbol("->".into()))?;
                 let body = self.parse_expr(0)?;
                 let body_span = self.context.get_span(body);
                 let expr = self.context.add_expr(Expr::Lambda { param, body });
@@ -344,8 +344,8 @@ impl<'a> Parser<'a> {
 
     fn parse_list_lit(&mut self) -> std::result::Result<NodeId, Error> {
         match self.advance()? {
-            (Token::BracketLeft, start_span) => match self.peek(0)? {
-                (Token::BracketRight, end_span) => {
+            (Token::Delimiter(Delimiter::BracketLeft), start_span) => match self.peek(0)? {
+                (Token::Delimiter(Delimiter::BracketRight), end_span) => {
                     self.advance()?;
                     let list = self.context.add_expr(Expr::Nil);
                     self.context.set_span(list, start_span.merge(end_span));
@@ -356,14 +356,14 @@ impl<'a> Parser<'a> {
                     loop {
                         elems.push(self.parse_expr(0)?);
                         match self.peek(0)? {
-                            (Token::Comma, _) => {
+                            (Token::Delimiter(Delimiter::Comma), _) => {
                                 self.advance()?;
                                 continue;
                             }
                             _ => break,
                         }
                     }
-                    let (_, end_span) = self.expect(Token::BracketRight)?;
+                    let (_, end_span) = self.expect(Token::Delimiter(Delimiter::BracketRight))?;
                     let mut list = self.context.add_expr(Expr::Nil);
                     for elem in elems.into_iter().rev() {
                         list = self.context.add_expr(Expr::Cons {
@@ -376,7 +376,7 @@ impl<'a> Parser<'a> {
                 }
             },
             other => Err(Error::UnexpectedToken(
-                Token::BracketLeft.to_string(),
+                Token::Delimiter(Delimiter::BracketLeft).to_string(),
                 other,
             )),
         }
@@ -384,7 +384,7 @@ impl<'a> Parser<'a> {
 
     fn parse_string_lit(&mut self) -> std::result::Result<NodeId, Error> {
         match self.advance()? {
-            (Token::String(str), span) => {
+            (Token::Literal(Literal::String(str)), span) => {
                 let mut list = self.context.add_expr(Expr::Nil);
                 for char in str.chars().rev() {
                     let expr = self.context.add_expr(Expr::Char(char));
@@ -403,7 +403,7 @@ impl<'a> Parser<'a> {
 
     fn parse_char_lit(&mut self) -> std::result::Result<NodeId, Error> {
         match self.advance()? {
-            (Token::Char(char), span) => {
+            (Token::Literal(Literal::Char(char)), span) => {
                 let expr = self.context.add_expr(Expr::Char(char));
                 self.context.set_span(expr, span);
                 Ok(expr)
@@ -414,7 +414,7 @@ impl<'a> Parser<'a> {
 
     fn parse_integer_lit(&mut self) -> Result<NodeId> {
         match self.advance()? {
-            (Token::Integer(int), span) => {
+            (Token::Literal(Literal::Integer(int)), span) => {
                 let expr = self
                     .context
                     .add_expr(Expr::Integer(int.parse::<i64>().unwrap()));
@@ -427,22 +427,18 @@ impl<'a> Parser<'a> {
 
     fn parse_bool_lit(&mut self) -> Result<NodeId> {
         match self.advance()? {
-            (Token::Boolean(bool), span) => {
-                let expr = self.context.add_expr(Expr::Boolean(match bool.as_str() {
-                    "true" => true,
-                    "false" => false,
-                    _ => unreachable!(),
-                }));
+            (Token::Literal(Literal::Bool(bool)), span) => {
+                let expr = self.context.add_expr(Expr::Boolean(bool));
                 self.context.set_span(expr, span);
                 Ok(expr)
             }
-            other => Err(Error::UnexpectedToken("boolean".into(), other)),
+            other => Err(Error::UnexpectedToken("true or false".into(), other)),
         }
     }
 
     fn parse_infix(&mut self, mut lhs: NodeId, min_bp: i32) -> Result<NodeId> {
-        while let (Token::Operator(op), _) = self.peek(0)?
-            && self.peek(1)?.0 != Token::ParenRight
+        while let (Token::Symbol(op), _) = self.peek(0)?
+            && self.peek(1)?.0 != Token::Delimiter(Delimiter::ParenRight)
         {
             let (l_bp, r_bp) = self
                 .context

@@ -1,6 +1,6 @@
 pub use error::{Error, Result};
 pub use lexer::Lexer;
-pub use token::Token;
+pub use token::{Delimiter, Keyword, Literal, Token};
 
 mod error;
 mod lexer;

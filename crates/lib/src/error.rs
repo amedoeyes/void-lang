@@ -138,6 +138,7 @@ fn write_lines(f: &mut fmt::Formatter, source: &str, span: Span) -> fmt::Result 
     writeln!(f, "     | ")?;
     if lines.len() > 1 {
         for (i, line) in lines.iter().enumerate() {
+            let line_width = line.chars().count();
             let line_num = i + span.start.line;
             writeln!(f, "{line_num:4} | {line}")?;
             if span.start.line == line_num {
@@ -145,12 +146,12 @@ fn write_lines(f: &mut fmt::Formatter, source: &str, span: Span) -> fmt::Result 
                     f,
                     "     | {}{}",
                     " ".repeat(span.start.column.saturating_sub(1)),
-                    "^".repeat(span.start.column.abs_diff(line.len()) + 1)
+                    "^".repeat(span.start.column.abs_diff(line_width) + 1)
                 )?;
             } else if span.end.line == line_num {
                 writeln!(f, "     | {}", "^".repeat(span.end.column))?;
             } else {
-                writeln!(f, "     | {}", "^".repeat(line.len()))?;
+                writeln!(f, "     | {}", "^".repeat(line_width))?;
             }
         }
     } else {
