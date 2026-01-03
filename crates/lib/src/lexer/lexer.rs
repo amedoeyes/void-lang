@@ -137,7 +137,13 @@ impl<'a> Lexer<'a> {
             ("false", Token::Literal(Literal::Bool(false))),
         ]
         .iter()
-        .find(|(p, _)| self.remaining_buffer().starts_with(p))
+        .find(|(p, _)| {
+            self.remaining_buffer().starts_with(p)
+                && self.remaining_buffer()[p.len()..]
+                    .chars()
+                    .next()
+                    .is_none_or(|c| !c.is_alphanumeric() && c != '_')
+        })
         .map(|(p, t)| Ok((t.clone(), self.advance(p.len()))))
     }
 
