@@ -132,9 +132,6 @@ fn tokens_cmd(source_path: &PathBuf) -> Result<()> {
     loop {
         match lexer.next_token() {
             Ok((token, span)) => {
-                if token == Token::Eof {
-                    break;
-                }
                 println!(
                     "{}:{}:{}: {:?}",
                     source_path.display(),
@@ -142,6 +139,9 @@ fn tokens_cmd(source_path: &PathBuf) -> Result<()> {
                     span.end.column,
                     token
                 );
+                if token == Token::Eof {
+                    break;
+                }
             }
             Err(err) => {
                 return Err(Error::Void(error::Error::Syntax(
