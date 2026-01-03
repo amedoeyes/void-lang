@@ -1,4 +1,4 @@
-use clap::{Arg, Command, crate_name, crate_version, value_parser};
+use clap::{Parser, Subcommand, crate_name, crate_version};
 use core::fmt::{self, Display, Formatter};
 use fxhash::FxHashSet;
 use rustyline::DefaultEditor;
@@ -13,90 +13,35 @@ use void::{
     type_system::{self, infer},
 };
 
-fn main() {
-    if let Err(error) = run() {
-        match error {
-            Error::Clap(error) => {
-                error.print().expect("error writing error");
-                match error.kind() {
-                    clap::error::ErrorKind::DisplayHelp
-                    | clap::error::ErrorKind::DisplayVersion
-                    | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand => {
-                        std::process::exit(0)
-                    }
-                    _ => std::process::exit(1),
-                }
-            }
-            _ => {
-                eprintln!("{error}");
-                std::process::exit(1);
-            }
-        }
-    }
+#[derive(Parser)]
+#[command(name = crate_name!())]
+#[command(version = crate_version!())]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
 }
 
-fn run() -> Result<()> {
-    let cmd = Command::new(crate_name!())
-        .version(crate_version!())
-        .disable_colored_help(true)
-        .disable_help_subcommand(true)
-        .arg_required_else_help(true)
-        .subcommand_required(true)
-        .subcommand(
-            Command::new("tokens").arg(
-                Arg::new("file")
-                    .required(true)
-                    .value_parser(value_parser!(PathBuf))
-                    .help("source file"),
-            ),
-        )
-        .subcommand(
-            Command::new("nodes").arg(
-                Arg::new("file")
-                    .required(true)
-                    .value_parser(value_parser!(PathBuf))
-                    .help("source file"),
-            ),
-        )
-        .subcommand(
-            Command::new("type").arg(
-                Arg::new("file")
-                    .required(true)
-                    .value_parser(value_parser!(PathBuf))
-                    .help("source file"),
-            ),
-        )
-        .subcommand(
-            Command::new("eval")
-                .arg(
-                    Arg::new("file")
-                        .required(true)
-                        .value_parser(value_parser!(PathBuf))
-                        .help("source file"),
-                )
-                .arg(Arg::new("args").num_args(0..)),
-        )
-        .subcommand(
-            Command::new("repl").arg(
-                Arg::new("file")
-                    .value_parser(value_parser!(PathBuf))
-                    .help("source file"),
-            ),
-        );
+#[derive(Subcommand)]
+enum Commands {
+    Lex { file: PathBuf },
+    Parse { file: PathBuf },
+    Type { file: PathBuf },
+    Eval { file: PathBuf, args: Vec<String> },
+    Repl { file: Option<PathBuf> },
+}
 
-    match cmd.try_get_matches()?.subcommand() {
-        Some(("tokens", sub_matches)) => tokens_cmd(sub_matches.get_one("file").unwrap()),
-        Some(("nodes", sub_matches)) => nodes_cmd(sub_matches.get_one("file").unwrap()),
-        Some(("type", sub_matches)) => type_cmd(sub_matches.get_one("file").unwrap()),
-        Some(("eval", sub_matches)) => eval_cmd(sub_matches.get_one("file").unwrap()),
-        Some(("repl", sub_matches)) => repl_cmd(sub_matches.get_one("file")),
-        _ => unreachable!(),
+fn main() -> Result<()> {
+    match Cli::parse().command {
+        Commands::Lex { file } => lex_cmd(&file),
+        Commands::Parse { file } => parse_cmd(&file),
+        Commands::Type { file } => type_cmd(&file),
+        Commands::Eval { file, .. } => eval_cmd(&file),
+        Commands::Repl { file } => repl_cmd(file.as_ref()),
     }
 }
 
 #[derive(Debug)]
 enum Error {
-    Clap(clap::Error),
     Void(error::Error),
     Io(io::Error),
 }
@@ -107,16 +52,9 @@ impl From<std::io::Error> for Error {
     }
 }
 
-impl From<clap::Error> for Error {
-    fn from(value: clap::Error) -> Self {
-        Error::Clap(value)
-    }
-}
-
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self {
-            Error::Clap(err) => err.fmt(f),
             Error::Io(err) => err.fmt(f),
             Error::Void(err) => err.fmt(f),
         }
@@ -125,7 +63,7 @@ impl Display for Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
-fn tokens_cmd(source_path: &PathBuf) -> Result<()> {
+fn lex_cmd(source_path: &PathBuf) -> Result<()> {
     let contents = fs::read_to_string(source_path)?;
     let mut lexer = Lexer::new(&contents);
 
@@ -156,7 +94,7 @@ fn tokens_cmd(source_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn nodes_cmd(source_path: &PathBuf) -> Result<()> {
+fn parse_cmd(source_path: &PathBuf) -> Result<()> {
     let mut ctx = Context::new();
 
     let parent_dir = source_path
