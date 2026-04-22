@@ -44,7 +44,7 @@ impl fmt::Display for Error {
 
             Error::Syntax(filename, source, err) => match err.as_ref() {
                 parser::Error::Lexer(lexer::Error::InvalidToken(span))
-                | parser::Error::Lexer(lexer::Error::Unterminated(_, span))
+                | parser::Error::Lexer(lexer::Error::Unterminated(span, _))
                 | parser::Error::Lexer(lexer::Error::EmptyChar(span))
                 | parser::Error::Lexer(lexer::Error::InvalidChar(span))
                 | parser::Error::Lexer(lexer::Error::InvalidEscapeChar(span)) => {

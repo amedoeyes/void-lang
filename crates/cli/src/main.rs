@@ -316,7 +316,7 @@ fn repl_cmd(source_path: Option<&PathBuf>) -> Result<()> {
             Err(err) => {
                 match err {
                     parser::Error::Lexer(lexer::Error::InvalidToken(span))
-                    | parser::Error::Lexer(lexer::Error::Unterminated(_, span))
+                    | parser::Error::Lexer(lexer::Error::Unterminated(span, _))
                     | parser::Error::Lexer(lexer::Error::EmptyChar(span))
                     | parser::Error::Lexer(lexer::Error::InvalidChar(span))
                     | parser::Error::Lexer(lexer::Error::InvalidEscapeChar(span))

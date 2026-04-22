@@ -88,7 +88,7 @@ impl<'a> Lexer<'a> {
         self.current_char().filter(|&c| is_symbol(c)).map(|_| {
             let (count, len) = self.scan_while(is_symbol);
             Ok((
-                Token::Symbol(self.remaining_buffer()[..len].to_string()),
+                Token::Symbol(self.remaining_buffer()[..len].into()),
                 self.advance(count),
             ))
         })
@@ -153,7 +153,7 @@ impl<'a> Lexer<'a> {
             .map(|_| {
                 let (count, len) = self.scan_while(|c| c.is_ascii_digit());
                 Ok((
-                    Token::Literal(Literal::Integer(self.remaining_buffer()[..len].to_string())),
+                    Token::Literal(Literal::Integer(self.remaining_buffer()[..len].into())),
                     self.advance(count),
                 ))
             })
@@ -162,8 +162,8 @@ impl<'a> Lexer<'a> {
     fn match_char(&mut self) -> Option<Result<(Token, Span)>> {
         self.current_char().filter(|&c| c == '\'').map(|_| {
             let (count, len) = self.scan_between('\'').ok_or(Error::Unterminated(
-                "'\''".into(),
                 Span::new(self.position, self.position),
+                "\'".into(),
             ))?;
 
             let mut chars = self.remaining_buffer()[1..=len].chars();
@@ -199,8 +199,8 @@ impl<'a> Lexer<'a> {
     fn match_string(&mut self) -> Option<Result<(Token, Span)>> {
         self.current_char().filter(|&c| c == '\"').map(|_| {
             let (count, len) = self.scan_between('\"').ok_or(Error::Unterminated(
-                "'\"'".into(),
                 Span::new(self.position, self.position),
+                "\"".into(),
             ))?;
 
             let mut str = String::new();
@@ -242,7 +242,7 @@ impl<'a> Lexer<'a> {
             .map(|_| {
                 let (count, len) = self.scan_while(|c| c.is_alphanumeric() || c == '_');
                 Ok((
-                    Token::Identifier(self.remaining_buffer()[..len].to_string()),
+                    Token::Identifier(self.remaining_buffer()[..len].into()),
                     self.advance(count),
                 ))
             })
