@@ -323,3 +323,371 @@ impl<'a> Lexer<'a> {
         Span::new(start, end)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use indoc::indoc;
+    use pretty_assertions::assert_eq;
+
+    macro_rules! assert_tokens {
+        ($source:expr, { $( $l1:literal : $c1:literal - $l2:literal : $c2:literal : $t:ident $( ( $($a:tt)* ) )? )* } $(,)?) => {{
+            let tokens = tokenize($source);
+            assert_eq!(
+                tokens.is_ok(),
+                true,
+                "Expected successful tokenization but got error: {:?}",
+                tokens.unwrap_err()
+            );
+            assert_eq!(tokens.unwrap(), &[ $( (Span::from((($l1, $c1), ($l2, $c2))), assert_tokens!(@token $t $( $($a)* )?)) ),* ]);
+        }};
+
+        (@token Symbol $($sym:tt)*) => { Token::Symbol(stringify!($($sym)*).into()) };
+        (@token Delimiter $delim:ident) => { Token::Delimiter(Delimiter::$delim) };
+        (@token Keyword $kw:ident) => { Token::Keyword(Keyword::$kw) };
+        (@token Literal $lit:ident ( $($val:tt)* )) => { assert_tokens!(@literal $lit ( $($val)* )) };
+        (@token Identifier $id:expr) => { Token::Identifier($id.into()) };
+        (@token Eof) => { Token::Eof };
+
+        (@literal Bool ( $val:literal )) => { Token::Literal(Literal::Bool($val)) };
+        (@literal Integer ( $val:literal )) => { Token::Literal(Literal::Integer($val.into())) };
+        (@literal Char ( $val:literal )) => { Token::Literal(Literal::Char($val)) };
+        (@literal String ( $val:literal )) => { Token::Literal(Literal::String($val.into())) };
+    }
+
+    macro_rules! assert_error {
+        ($source:expr, { $l1:literal : $c1:literal - $l2:literal : $c2:literal : $e:ident $( ( $($a:tt)* ) )? } $(,)?) => {{
+            let tokens = tokenize($source);
+            assert_eq!(tokens.is_err(), true, "Expected tokenization to fail but succeeded");
+            assert_eq!(tokens.unwrap_err(), assert_error!(@err $e ( Span::from((($l1, $c1), ($l2, $c2))) $( , $($a)* )? )));
+        }};
+
+        (@err InvalidToken ( $span:expr )) => { Error::InvalidToken($span) };
+        (@err Unterminated ( $span:expr , $what:expr )) => { Error::Unterminated($span, $what.into()) };
+        (@err EmptyChar ( $span:expr )) => { Error::EmptyChar($span) };
+        (@err InvalidChar ( $span:expr )) => { Error::InvalidChar($span) };
+        (@err InvalidEscapeChar ( $span:expr )) => { Error::InvalidEscapeChar($span) };
+    }
+
+    fn tokenize(source: &str) -> Result<Vec<(Span, Token)>> {
+        let mut lexer = Lexer::new(source);
+        let mut tokens = Vec::new();
+        loop {
+            match lexer.next_token() {
+                Ok((token, span)) => {
+                    if token == Token::Eof {
+                        tokens.push((span, Token::Eof));
+                        break Ok(tokens);
+                    }
+                    tokens.push((span, token));
+                }
+                Err(e) => break Err(e),
+            }
+        }
+    }
+
+    #[test]
+    fn test_empty_input() {
+        assert_tokens!("", { 1:1-1:1: Eof });
+    }
+
+    #[test]
+    fn test_whitespace() {
+        assert_tokens!("   \t\n\r  \n \u{00A0} \u{3000} \u{2003}", { 3:7-3:7: Eof });
+    }
+
+    #[test]
+    fn test_comments() {
+        assert_tokens!(
+            indoc! {"
+                // comment
+                // comment
+            "},
+            {
+                3:1-3:1: Eof
+            },
+        );
+        assert_tokens!(
+            indoc! {"
+                // comment
+                // comment
+                x
+            "},
+            {
+                3:1-3:1: Identifier("x")
+                4:1-4:1: Eof
+            },
+        );
+        assert_tokens!(
+            indoc! {"
+                // comment
+                x
+                // comment
+                y
+            "},
+            {
+                2:1-2:1: Identifier("x")
+                4:1-4:1: Identifier("y")
+                5:1-5:1: Eof
+            },
+        );
+    }
+
+    #[test]
+    fn test_symbols() {
+        assert_tokens!(
+            indoc! {"
+                +
+                -
+                *
+                /
+                ->
+                +-*/->
+            "},
+            {
+                1:1-1:1: Symbol(+)
+                2:1-2:1: Symbol(-)
+                3:1-3:1: Symbol(*)
+                4:1-4:1: Symbol(/)
+                5:1-5:2: Symbol(->)
+                6:1-6:6: Symbol(+-*/->)
+                7:1-7:1: Eof
+            }
+        );
+    }
+
+    #[test]
+    fn test_delimiters() {
+        assert_tokens!(
+            indoc! {"
+                (
+                )
+                [
+                ]
+                ,
+                ;
+            "},
+            {
+                1:1-1:1: Delimiter(ParenLeft)
+                2:1-2:1: Delimiter(ParenRight)
+                3:1-3:1: Delimiter(BracketLeft)
+                4:1-4:1: Delimiter(BracketRight)
+                5:1-5:1: Delimiter(Comma)
+                6:1-6:1: Delimiter(Semicolon)
+                7:1-7:1: Eof
+            }
+        );
+    }
+
+    #[test]
+    fn test_keywords() {
+        assert_tokens!(
+            indoc! {"
+                op
+                left
+                right
+                none
+                import
+                let
+                if
+                then
+                else
+            "},
+            {
+                1:1-1:2: Keyword(Op)
+                2:1-2:4: Keyword(Left)
+                3:1-3:5: Keyword(Right)
+                4:1-4:4: Keyword(None)
+                5:1-5:6: Keyword(Import)
+                6:1-6:3: Keyword(Let)
+                7:1-7:2: Keyword(If)
+                8:1-8:4: Keyword(Then)
+                9:1-9:4: Keyword(Else)
+                10:1-10:1: Eof
+            }
+        );
+    }
+
+    #[test]
+    fn test_identifiers() {
+        assert_tokens!(
+            indoc! {"
+                foo
+                _foo
+                foo_
+                foo_bar
+                foo123
+                _foo123
+                foo123_
+                foo_bar_123
+                x\u{0664}
+                α
+                β
+                γ
+                δ
+                hello_世界
+                _привет
+                operator
+                lettuce
+            "},
+            {
+                1:1-1:3: Identifier("foo")
+                2:1-2:4: Identifier("_foo")
+                3:1-3:4: Identifier("foo_")
+                4:1-4:7: Identifier("foo_bar")
+                5:1-5:6: Identifier("foo123")
+                6:1-6:7: Identifier("_foo123")
+                7:1-7:7: Identifier("foo123_")
+                8:1-8:11: Identifier("foo_bar_123")
+                9:1-9:2: Identifier("x\u{0664}")
+                10:1-10:1: Identifier("α")
+                11:1-11:1: Identifier("β")
+                12:1-12:1: Identifier("γ")
+                13:1-13:1: Identifier("δ")
+                14:1-14:8: Identifier("hello_世界")
+                15:1-15:7: Identifier("_привет")
+                16:1-16:8: Identifier("operator")
+                17:1-17:7: Identifier("lettuce")
+                18:1-18:1: Eof
+            },
+        );
+    }
+    #[test]
+    fn test_bool_literals() {
+        assert_tokens!(
+            indoc! {"
+                true
+                false
+            "},
+            {
+                1:1-1:4: Literal(Bool(true))
+                2:1-2:5: Literal(Bool(false))
+                3:1-3:1: Eof
+            }
+        );
+    }
+
+    #[test]
+    fn test_integer_literals() {
+        assert_tokens!(
+            indoc! {"
+                0
+                42
+                123456789
+            "},
+            {
+                1:1-1:1: Literal(Integer("0"))
+                2:1-2:2: Literal(Integer("42"))
+                3:1-3:9: Literal(Integer("123456789"))
+                4:1-4:1: Eof
+            }
+        );
+    }
+
+    #[test]
+    fn test_char_literals() {
+        assert_tokens!(
+            indoc! {"
+                'a'
+                'α'
+                '世'
+                '🌍'
+                '\\n'
+                '\\''
+            "},
+            {
+                1:1-1:3: Literal(Char('a'))
+                2:1-2:3: Literal(Char('α'))
+                3:1-3:3: Literal(Char('世'))
+                4:1-4:3: Literal(Char('🌍'))
+                5:1-5:4: Literal(Char('\n'))
+                6:1-6:4: Literal(Char('\''))
+                7:1-7:1: Eof
+            }
+        );
+        assert_error!("''", { 1:1-1:2: EmptyChar });
+        assert_error!("'ab'", { 1:1-1:4: InvalidChar });
+        assert_error!("'a", { 1:1-1:1: Unterminated("'") });
+        assert_error!("'\\x'", { 1:2-1:3: InvalidEscapeChar });
+    }
+
+    #[test]
+    fn test_string_literals() {
+        assert_tokens!(
+            indoc! {r#"
+                "hello"
+                "world\n"
+                "escaped \"quote\""
+                "Hello 世界!"
+                "Привет"
+                "🌍"
+            "#},
+            {
+                1:1-1:7: Literal(String("hello"))
+                2:1-2:9: Literal(String("world\n"))
+                3:1-3:19: Literal(String("escaped \"quote\""))
+                4:1-4:11: Literal(String("Hello 世界!"))
+                5:1-5:8: Literal(String("Привет"))
+                6:1-6:3: Literal(String("🌍"))
+                7:1-7:1: Eof
+            }
+        );
+        assert_error!("\"hello", { 1:1-1:1: Unterminated("\"") });
+        assert_error!("\"\\x\"", { 1:2-1:3: InvalidEscapeChar });
+    }
+
+    #[test]
+    fn test_error_invalid_token() {
+        assert_error!("\0", { 1:1-1:1: InvalidToken });
+        assert_error!("\u{0301}", { 1:1-1:1: InvalidToken });
+        assert_error!("\u{0664}", { 1:1-1:1: InvalidToken });
+        assert_error!("\u{096D}", { 1:1-1:1: InvalidToken });
+        assert_error!("★", { 1:1-1:1: InvalidToken });
+        assert_error!("♥", { 1:1-1:1: InvalidToken });
+        assert_error!("←", { 1:1-1:1: InvalidToken });
+    }
+
+    #[test]
+    fn test_fib() {
+        assert_tokens!(
+            indoc! {"
+                let fib = n ->
+                    if n == 0 || n == 1 then n
+                    else fib (n - 1) + fib (n - 2);
+            "},
+            {
+                1:1-1:3: Keyword(Let)
+                1:5-1:7: Identifier("fib")
+                1:9-1:9: Symbol(=)
+                1:11-1:11: Identifier("n")
+                1:13-1:14: Symbol(->)
+                2:5-2:6: Keyword(If)
+                2:8-2:8: Identifier("n")
+                2:10-2:11: Symbol(==)
+                2:13-2:13: Literal(Integer("0"))
+                2:15-2:16: Symbol(||)
+                2:18-2:18: Identifier("n")
+                2:20-2:21: Symbol(==)
+                2:23-2:23: Literal(Integer("1"))
+                2:25-2:28: Keyword(Then)
+                2:30-2:30: Identifier("n")
+                3:5-3:8: Keyword(Else)
+                3:10-3:12: Identifier("fib")
+                3:14-3:14: Delimiter(ParenLeft)
+                3:15-3:15: Identifier("n")
+                3:17-3:17: Symbol(-)
+                3:19-3:19: Literal(Integer("1"))
+                3:20-3:20: Delimiter(ParenRight)
+                3:22-3:22: Symbol(+)
+                3:24-3:26: Identifier("fib")
+                3:28-3:28: Delimiter(ParenLeft)
+                3:29-3:29: Identifier("n")
+                3:31-3:31: Symbol(-)
+                3:33-3:33: Literal(Integer("2"))
+                3:34-3:34: Delimiter(ParenRight)
+                3:35-3:35: Delimiter(Semicolon)
+                4:1-4:1: Eof
+            }
+        );
+    }
+}

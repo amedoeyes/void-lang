@@ -1,7 +1,7 @@
 use crate::span::Span;
 use std::fmt::{self, Display, Formatter};
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Error {
     InvalidToken(Span),
     Unterminated(Span, String),

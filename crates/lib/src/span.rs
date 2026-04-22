@@ -6,6 +6,12 @@ pub struct Position {
     pub column: usize,
 }
 
+impl Position {
+    pub fn new(line: usize, column: usize) -> Self {
+        Self { line, column }
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct Span {
     pub start: Position,
@@ -30,5 +36,11 @@ impl Span {
             span.end = other.end;
         }
         span
+    }
+}
+
+impl From<((usize, usize), (usize, usize))> for Span {
+    fn from(((l1, c1), (l2, c2)): ((usize, usize), (usize, usize))) -> Self {
+        Self::new(Position::new(l1, c1), Position::new(l2, c2))
     }
 }
