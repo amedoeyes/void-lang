@@ -30,13 +30,18 @@ enum Commands {
     Repl { file: Option<PathBuf> },
 }
 
-fn main() -> Result<()> {
-    match Cli::parse().command {
+fn main() {
+    let res = match Cli::parse().command {
         Commands::Lex { file } => lex_cmd(&file),
         Commands::Parse { file } => parse_cmd(&file),
         Commands::Type { file } => type_cmd(&file),
         Commands::Eval { file, .. } => eval_cmd(&file),
         Commands::Repl { file } => repl_cmd(file.as_ref()),
+    };
+
+    if let Err(e) = res {
+        eprintln!("{}", e);
+        std::process::exit(1);
     }
 }
 
