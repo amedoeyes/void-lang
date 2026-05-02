@@ -221,23 +221,37 @@ impl<'a> Parser<'a> {
             }
         };
         let end_span = self.expect(Token::Delimiter(Delimiter::ParenRight))?.1;
+
         let lhs = self.context.add_expr(Expr::Identifier("a".into()));
         let rhs = self.context.add_expr(Expr::Identifier("b".into()));
-        let infix = self.context.add_expr(Expr::Infix { lhs, op, rhs });
+
+        let op = self.context.add_expr(Expr::Identifier(op));
+        let app1 = self
+            .context
+            .add_expr(Expr::Application { func: op, arg: lhs });
+        let app2 = self.context.add_expr(Expr::Application {
+            func: app1,
+            arg: rhs,
+        });
+
         let inner = self.context.add_expr(Expr::Lambda {
             param: "b".into(),
-            body: infix,
+            body: app2,
         });
         let expr = self.context.add_expr(Expr::Lambda {
             param: "a".into(),
             body: inner,
         });
+
         let span = start_span.merge(end_span);
         self.context.set_span(expr, span);
         self.context.set_span(lhs, span);
         self.context.set_span(rhs, span);
-        self.context.set_span(infix, span);
+        self.context.set_span(op, span);
+        self.context.set_span(app1, span);
+        self.context.set_span(app2, span);
         self.context.set_span(inner, span);
+
         Ok(expr)
     }
 
@@ -251,16 +265,30 @@ impl<'a> Parser<'a> {
             }
         };
         let end_span = self.expect(Token::Delimiter(Delimiter::ParenRight))?.1;
+
         let rhs = self.context.add_expr(Expr::Identifier("b".into()));
-        let infix = self.context.add_expr(Expr::Infix { lhs, op, rhs });
+
+        let op = self.context.add_expr(Expr::Identifier(op));
+        let app1 = self
+            .context
+            .add_expr(Expr::Application { func: op, arg: lhs });
+        let app2 = self.context.add_expr(Expr::Application {
+            func: app1,
+            arg: rhs,
+        });
+
         let expr = self.context.add_expr(Expr::Lambda {
             param: "b".into(),
-            body: infix,
+            body: app2,
         });
+
         let span = start_span.merge(end_span);
         self.context.set_span(expr, span);
         self.context.set_span(rhs, span);
-        self.context.set_span(infix, span);
+        self.context.set_span(op, span);
+        self.context.set_span(app1, span);
+        self.context.set_span(app2, span);
+
         Ok(expr)
     }
 
@@ -274,17 +302,31 @@ impl<'a> Parser<'a> {
         };
         let rhs = self.parse_expr(0)?;
         let end_span = self.expect(Token::Delimiter(Delimiter::ParenRight))?.1;
+
         let lhs = self.context.add_expr(Expr::Identifier("a".into()));
-        let infix = self.context.add_expr(Expr::Infix { lhs, op, rhs });
+
+        let op = self.context.add_expr(Expr::Identifier(op));
+        let app1 = self
+            .context
+            .add_expr(Expr::Application { func: op, arg: lhs });
+        let app2 = self.context.add_expr(Expr::Application {
+            func: app1,
+            arg: rhs,
+        });
+
         let expr = self.context.add_expr(Expr::Lambda {
             param: "a".into(),
-            body: infix,
+            body: app2,
         });
+
         let span = start_span.merge(end_span);
         self.context.set_span(expr, span);
         self.context.set_span(lhs, span);
         self.context.set_span(rhs, span);
-        self.context.set_span(infix, span);
+        self.context.set_span(op, span);
+        self.context.set_span(app1, span);
+        self.context.set_span(app2, span);
+
         Ok(expr)
     }
 
@@ -451,7 +493,16 @@ impl<'a> Parser<'a> {
             }
             self.advance()?;
             let rhs = self.parse_expr(r_bp)?;
-            let expr = self.context.add_expr(Expr::Infix { lhs, op, rhs });
+
+            let id = self.context.add_expr(Expr::Identifier(op));
+            let app = self
+                .context
+                .add_expr(Expr::Application { func: id, arg: lhs });
+            let expr = self.context.add_expr(Expr::Application {
+                func: app,
+                arg: rhs,
+            });
+
             self.context.set_span(
                 expr,
                 self.context.get_span(lhs).merge(self.context.get_span(rhs)),
