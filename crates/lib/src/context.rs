@@ -5,7 +5,7 @@ use fxhash::{FxHashMap, FxHashSet};
 
 use crate::{
     eval::{self, Frame, List, Op, SharedValue, Value},
-    expr::Expr,
+    expr::{Expr, TypeExpr},
     span::Span,
     ty,
     type_system::{Constraint, Type},
@@ -16,7 +16,9 @@ pub struct NodeId(usize);
 
 #[derive(Debug, Clone)]
 pub enum Node {
+    TypeExpr(TypeExpr),
     Expr(Expr),
+    Type(String, Vec<String>, Vec<NodeId>),
     Bind(String, NodeId),
     Import(Vec<String>),
 }
@@ -105,8 +107,21 @@ impl Context {
         id
     }
 
+    pub fn add_type_expr(&mut self, expr: TypeExpr) -> NodeId {
+        self.add(Node::TypeExpr(expr))
+    }
+
     pub fn add_expr(&mut self, expr: Expr) -> NodeId {
         self.add(Node::Expr(expr))
+    }
+
+    pub fn add_type(
+        &mut self,
+        name: String,
+        params: Vec<String>,
+        constructors: Vec<NodeId>,
+    ) -> NodeId {
+        self.add(Node::Type(name, params, constructors))
     }
 
     pub fn add_bind(&mut self, name: &str, expr: NodeId) -> NodeId {
@@ -127,6 +142,30 @@ impl Context {
 
     pub fn get_node(&self, id: NodeId) -> &Node {
         &self.nodes[id.0]
+    }
+
+    pub fn get_node_mut(&mut self, id: NodeId) -> &mut Node {
+        &mut self.nodes[id.0]
+    }
+
+    pub fn get_type_expr(&self, id: NodeId) -> Option<&TypeExpr> {
+        self.nodes.get(id.0).and_then(|n| {
+            if let Node::TypeExpr(expr) = n {
+                Some(expr)
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn get_type_expr_mut(&mut self, id: NodeId) -> Option<&mut TypeExpr> {
+        self.nodes.get_mut(id.0).and_then(|n| {
+            if let Node::TypeExpr(expr) = n {
+                Some(expr)
+            } else {
+                None
+            }
+        })
     }
 
     pub fn get_span(&self, id: NodeId) -> Span {
@@ -1041,11 +1080,28 @@ impl<'a> Display<'a> {
 impl<'a> fmt::Display for Display<'a> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self.context.get_node(self.id) {
+            Node::TypeExpr(expr) => match expr {
+                TypeExpr::Unit => write!(f, "()"),
+                TypeExpr::Identifier(id) => write!(f, "{id}"),
+                TypeExpr::Constructor(cons, args) => {
+                    write!(
+                        f,
+                        "{}{}{}",
+                        cons,
+                        if !args.is_empty() { " " } else { "" },
+                        args.iter()
+                            .map(|elem| format!("({})", Display::new(*elem, self.context)))
+                            .collect::<Vec<String>>()
+                            .join(" ")
+                    )
+                }
+            },
             Node::Expr(expr) => match expr {
                 Expr::Unit => write!(f, "()"),
                 Expr::Boolean(val) => write!(f, "{val}"),
                 Expr::Char(val) => write!(f, "'{}'", val.escape_default()),
                 Expr::Integer(val) => write!(f, "{val}"),
+                Expr::Constructor(cons) => write!(f, "{cons}"),
                 Expr::Identifier(id) => write!(f, "{id}"),
                 Expr::Condition { cond, then, alt } => write!(
                     f,
@@ -1100,6 +1156,21 @@ impl<'a> fmt::Display for Display<'a> {
                     }
                 }
             },
+            Node::Type(name, params, constructors) => {
+                write!(f, "type {}", name)?;
+                if !params.is_empty() {
+                    write!(f, " {}", params.join(", "),)?;
+                }
+                write!(
+                    f,
+                    " = {}",
+                    constructors
+                        .iter()
+                        .map(|elem| Display::new(*elem, self.context).to_string())
+                        .collect::<Vec<String>>()
+                        .join(" | ")
+                )
+            }
             Node::Bind(name, expr) => {
                 write!(f, "{} = {}", name, Display::new(*expr, self.context))
             }

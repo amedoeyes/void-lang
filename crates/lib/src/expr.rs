@@ -6,16 +6,12 @@ pub enum Expr {
     Boolean(bool),
     Char(char),
     Integer(i64),
+    Constructor(String),
     Identifier(String),
     Condition {
         cond: NodeId,
         then: NodeId,
         alt: NodeId,
-    },
-    Infix {
-        lhs: NodeId,
-        op: String,
-        rhs: NodeId,
     },
     Lambda {
         param: String,
@@ -30,4 +26,16 @@ pub enum Expr {
         head: NodeId,
         tail: NodeId,
     },
+    Infix {
+        lhs: NodeId,
+        op: String,
+        rhs: NodeId,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum TypeExpr {
+    Unit,
+    Identifier(String),
+    Constructor(String, Vec<NodeId>),
 }

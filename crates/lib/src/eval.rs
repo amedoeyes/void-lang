@@ -517,6 +517,7 @@ pub fn evaluate(ctx: &Context, nodes: &[NodeId]) -> Result<Value> {
     let mut value = SharedValue::new(Value::Unit);
     for node in nodes {
         match ctx.get_node(*node) {
+            Node::TypeExpr(type_expr) => todo!(),
             Node::Expr(_) => {
                 let frame = Frame::new(Op::Start(*node), env.clone(), ctx.get_span(*node));
                 value = eval_expr(
@@ -533,6 +534,7 @@ pub fn evaluate(ctx: &Context, nodes: &[NodeId]) -> Result<Value> {
                     ],
                 )?;
             }
+            Node::Type(_, items, items1) => todo!(),
             Node::Bind(id, expr) => {
                 let mut closure_env = FxHashMap::default();
                 for (k, v) in env.borrow().iter() {

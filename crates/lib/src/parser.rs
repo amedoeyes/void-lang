@@ -5,11 +5,12 @@ use std::{
 };
 
 use crate::{
-    context::{Associativity, Context, NodeId},
-    expr::Expr,
+    context::{Associativity, Context, Node, NodeId},
+    expr::{Expr, TypeExpr},
     lexer::{self, Delimiter, Keyword, Lexer, Literal, Token},
     span::Span,
     ty,
+    type_system::Type,
 };
 
 #[derive(Debug)]
@@ -49,17 +50,62 @@ impl<'a> Parser<'a> {
 
     pub fn parse(mut self) -> Result<Vec<NodeId>> {
         let mut nodes = Vec::new();
-        while let (token, _) = self.peek(0)?.clone()
+        while let (token, span) = self.peek(0)?.clone()
             && token != Token::Eof
         {
             match token {
                 Token::Keyword(Keyword::Op) => self.parse_operator_decl()?,
+                Token::Keyword(Keyword::Type) => nodes.push(self.parse_type_decl()?),
                 Token::Keyword(Keyword::Let) => nodes.push(self.parse_bind_decl()?),
                 Token::Keyword(Keyword::Import) => nodes.push(self.parse_import_decl()?),
-                _ => nodes.push(self.parse_expr(0)?),
+                _ => {
+                    return Err(Error::UnexpectedToken(
+                        "let|import|op".into(),
+                        (token, span),
+                    ));
+                }
             }
         }
         Ok(nodes)
+    }
+
+    fn parse_type_decl(&mut self) -> Result<NodeId> {
+        let (_, start_span) = self.expect(Token::Keyword(Keyword::Type))?;
+        let name = match self.advance()? {
+            (Token::Type(ty), _) => ty,
+            other => {
+                return Err(Error::UnexpectedToken("type".to_string(), other));
+            }
+        };
+
+        let mut params = Vec::new();
+
+        while let (Token::Identifier(id), _) = self.peek(0)? {
+            params.push(id);
+            self.advance()?;
+        }
+
+        self.expect(Token::Symbol("=".into()))?;
+
+        let mut consts = Vec::new();
+
+        loop {
+            let cons = self.parse_type_expr()?;
+            consts.push(cons);
+
+            match self.peek(0)? {
+                (Token::Symbol(val), _) if val == "|" => {
+                    self.advance()?;
+                    continue;
+                }
+                _ => break,
+            }
+        }
+
+        let (_, end_span) = self.expect(Token::Delimiter(Delimiter::Semicolon))?;
+
+        let ty = self.context.add_type(name, params, consts);
+        Ok(ty)
     }
 
     fn parse_bind_decl(&mut self) -> Result<NodeId> {
@@ -129,7 +175,7 @@ impl<'a> Parser<'a> {
             let part = match self.advance()? {
                 (Token::Identifier(id), _) => id,
                 other => {
-                    return Err(Error::UnexpectedToken("Identifier".to_string(), other));
+                    return Err(Error::UnexpectedToken("identifier".to_string(), other));
                 }
             };
             module.push(part);
@@ -152,6 +198,63 @@ impl<'a> Parser<'a> {
         Ok(import)
     }
 
+    fn parse_type_expr(&mut self) -> Result<NodeId> {
+        let expr = self.parse_primary_type_expr()?;
+        if let Some(TypeExpr::Constructor(..)) = self.context.get_type_expr(expr) {
+            let mut temp = Vec::new();
+            while let Ok(arg) = self.parse_primary_type_expr() {
+                temp.push(arg);
+            }
+            if let Some(TypeExpr::Constructor(_, args)) = self.context.get_type_expr_mut(expr) {
+                args.extend(temp)
+            }
+        }
+        Ok(expr)
+    }
+
+    fn parse_primary_type_expr(&mut self) -> Result<NodeId> {
+        match self.peek(0)?.0 {
+            Token::Type(_) => match self.advance()? {
+                (Token::Type(ty), span) => {
+                    let expr = self
+                        .context
+                        .add_type_expr(TypeExpr::Constructor(ty, Vec::new()));
+                    self.context.set_span(expr, span);
+                    Ok(expr)
+                }
+                other => Err(Error::UnexpectedToken("type".into(), other)),
+            },
+            Token::Identifier(_) => match self.advance()? {
+                (Token::Identifier(id), span) => {
+                    let expr = self.context.add_type_expr(TypeExpr::Identifier(id));
+                    self.context.set_span(expr, span);
+                    Ok(expr)
+                }
+                other => Err(Error::UnexpectedToken("identifier".into(), other)),
+            },
+            Token::Delimiter(Delimiter::ParenLeft) => match self.peek(1)?.0 {
+                Token::Delimiter(Delimiter::ParenRight) => {
+                    let start_span = self.expect(Token::Delimiter(Delimiter::ParenLeft))?.1;
+                    let end_span = self.expect(Token::Delimiter(Delimiter::ParenRight))?.1;
+                    let expr = self.context.add_type_expr(TypeExpr::Unit);
+                    self.context.set_span(expr, start_span.merge(end_span));
+                    Ok(expr)
+                }
+                _ => {
+                    let start_span = self.expect(Token::Delimiter(Delimiter::ParenLeft))?.1;
+                    let expr = self.parse_type_expr()?;
+                    let end_span = self.expect(Token::Delimiter(Delimiter::ParenRight))?.1;
+                    self.context.set_span(expr, start_span.merge(end_span));
+                    Ok(expr)
+                }
+            },
+            _ => Err(Error::UnexpectedToken(
+                "type expression".to_string(),
+                self.peek(0)?,
+            )),
+        }
+    }
+
     fn parse_expr(&mut self, min_bp: i32) -> Result<NodeId> {
         let mut expr = self.parse_primary_expr()?;
         expr = self.parse_application(expr)?;
@@ -166,6 +269,7 @@ impl<'a> Parser<'a> {
             Token::Literal(Literal::Char(_)) => self.parse_char_lit(),
             Token::Literal(Literal::String(_)) => self.parse_string_lit(),
             Token::Delimiter(Delimiter::BracketLeft) => self.parse_list_lit(),
+            Token::Type(_) => self.parse_type(),
             Token::Identifier(_) => match self.peek(1)? {
                 (Token::Symbol(s), _) if s == "->" => self.parse_lambda_expr(),
                 _ => self.parse_identifier(),
@@ -357,6 +461,17 @@ impl<'a> Parser<'a> {
         let expr = self.context.add_expr(Expr::Condition { cond, then, alt });
         self.context.set_span(expr, start_span.merge(end_span));
         Ok(expr)
+    }
+
+    fn parse_type(&mut self) -> std::result::Result<NodeId, Error> {
+        match self.advance()? {
+            (Token::Type(ty), span) => {
+                let expr = self.context.add_expr(Expr::Constructor(ty));
+                self.context.set_span(expr, span);
+                Ok(expr)
+            }
+            other => Err(Error::UnexpectedToken("identifier".into(), other)),
+        }
     }
 
     fn parse_identifier(&mut self) -> std::result::Result<NodeId, Error> {

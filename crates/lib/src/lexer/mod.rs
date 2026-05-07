@@ -31,6 +31,7 @@ impl<'a> Lexer<'a> {
             Self::match_integer,
             Self::match_char,
             Self::match_string,
+            Self::match_type,
             Self::match_identifier,
             Self::match_eof,
         ]
@@ -114,6 +115,7 @@ impl<'a> Lexer<'a> {
             ("right", Token::Keyword(Keyword::Right)),
             ("none", Token::Keyword(Keyword::None)),
             ("import", Token::Keyword(Keyword::Import)),
+            ("type", Token::Keyword(Keyword::Type)),
             ("let", Token::Keyword(Keyword::Let)),
             ("if", Token::Keyword(Keyword::If)),
             ("then", Token::Keyword(Keyword::Then)),
@@ -233,6 +235,18 @@ impl<'a> Lexer<'a> {
                 self.advance(count + 2),
             ))
         })
+    }
+
+    fn match_type(&mut self) -> Option<Result<(Token, Span)>> {
+        self.current_char()
+            .filter(|&c| c.is_alphabetic() && c.is_uppercase())
+            .map(|_| {
+                let (count, len) = self.scan_while(|c| c.is_alphanumeric() || c == '_');
+                Ok((
+                    Token::Type(self.remaining_buffer()[..len].into()),
+                    self.advance(count),
+                ))
+            })
     }
 
     fn match_identifier(&mut self) -> Option<Result<(Token, Span)>> {

@@ -6,6 +6,7 @@ use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 
 use crate::context::{Context, Node, NodeId};
+use crate::expr::TypeExpr;
 use crate::{expr::Expr, span::Span};
 
 #[macro_export]
@@ -101,9 +102,10 @@ pub enum Type {
     Char,
     Bool,
     Var(usize),
-    List(Box<Type>),
     Fun(Box<Type>, Box<Type>),
     Poly(FxHashSet<usize>, Vec<Constraint>, Box<Type>),
+    Adt(String, Vec<Type>),
+    List(Box<Type>),
 }
 
 impl Type {
@@ -124,6 +126,11 @@ impl Type {
                 body.collect_type_vars(vars);
             }
             Type::Poly(_, _, body) => body.collect_type_vars(vars),
+            Type::Adt(_, params) => {
+                for param in params {
+                    param.collect_type_vars(vars);
+                }
+            }
             _ => {}
         }
     }
@@ -201,6 +208,21 @@ impl Type {
                 }
 
                 body.fmt(f, &var_order_map)
+            }
+            Type::Adt(name, params) => {
+                write!(f, "{}", name)?;
+                for param in params {
+                    write!(f, " ")?;
+                    match param {
+                        Type::Fun(_, _) | Type::Adt(_, _) => {
+                            write!(f, "(")?;
+                            param.fmt(f, var_order_map)?;
+                            write!(f, ")")?;
+                        }
+                        _ => param.fmt(f, var_order_map)?,
+                    }
+                }
+                Ok(())
             }
         }
     }
@@ -352,6 +374,13 @@ impl Env {
                 Box::new(self.instantiate_helper(*param, span, substitutions)),
                 Box::new(self.instantiate_helper(*body, span, substitutions)),
             ),
+            Type::Adt(name, params) => {
+                let new_params = params
+                    .into_iter()
+                    .map(|p| self.instantiate_helper(p, span, substitutions))
+                    .collect();
+                Type::Adt(name, new_params)
+            }
             _ => ty,
         }
     }
@@ -368,6 +397,10 @@ impl Env {
                 Box::new(self.substitute(param)),
                 Box::new(self.substitute(body)),
             ),
+            Type::Adt(name, params) => {
+                let new_params = params.iter().map(|p| self.substitute(p)).collect();
+                Type::Adt(name.clone(), new_params)
+            }
             _ => ty.clone(),
         }
     }
@@ -392,6 +425,15 @@ impl Env {
             (a, Type::Var(b)) => {
                 self.occurs_check(b, &a, span)?;
                 self.substitutions.insert(b, a);
+                Ok(())
+            }
+            (Type::Adt(name1, args1), Type::Adt(name2, args2)) if name1 == name2 => {
+                if args1.len() != args2.len() {
+                    todo!();
+                }
+                for (arg1, arg2) in args1.iter().zip(args2.iter()) {
+                    self.unify(arg1, arg2, span)?;
+                }
                 Ok(())
             }
             (a, b) => Err(Error::TypeMismatch(
@@ -451,13 +493,14 @@ fn infer_expr(
 
                 Type::List(Box::new(head_ty))
             }
-            Node::Expr(Expr::Identifier(name)) => env.instantiate(
-                env_vars
-                    .get(&name)
-                    .ok_or(Error::UnknownIdentifier(name, ctx.get_span(expr)))?
-                    .clone(),
-                ctx.get_span(expr),
-            ),
+            Node::Expr(Expr::Constructor(name)) | Node::Expr(Expr::Identifier(name)) => env
+                .instantiate(
+                    env_vars
+                        .get(&name)
+                        .ok_or(Error::UnknownIdentifier(name, ctx.get_span(expr)))?
+                        .clone(),
+                    ctx.get_span(expr),
+                ),
             Node::Expr(Expr::Condition { cond, then, alt }) => {
                 let cond_ty = infer_expr(ctx, env, env_vars, cond)?;
                 let then_ty = infer_expr(ctx, env, env_vars, then)?;
@@ -520,19 +563,69 @@ fn infer_expr(
     Ok(ty)
 }
 
+fn translate_type_expr(ctx: &Context, expr: NodeId, params_ty: &FxHashMap<String, Type>) -> Type {
+    match ctx.get_type_expr(expr).unwrap() {
+        TypeExpr::Unit => Type::Unit,
+        TypeExpr::Identifier(id) => match params_ty.get(id) {
+            Some(ty) => ty.clone(),
+            None => todo!(),
+        },
+        TypeExpr::Constructor(name, args) => match name.as_str() {
+            "Int" => Type::Int,
+            "Bool" => Type::Bool,
+            "Char" => Type::Char,
+            "Unit" => Type::Unit,
+            _ => Type::Adt(
+                name.clone(),
+                args.iter()
+                    .map(|arg| translate_type_expr(ctx, *arg, params_ty))
+                    .collect(),
+            ),
+        },
+    }
+}
+
 pub fn infer(ctx: &mut Context, nodes: &[NodeId]) -> Result<()> {
     let mut env = Env::new();
     let mut env_vars = FxHashMap::default();
 
-    for (name, builtin) in ctx.builtins() {
-        env_vars.insert(name.clone(), env.generalize(&builtin.ty));
-    }
+    // for (name, builtin) in ctx.builtins() {
+    //     env_vars.insert(name.clone(), env.generalize(&builtin.ty));
+    // }
 
     for node in nodes {
         match ctx.get_node(*node).clone() {
             Node::Expr(_) => {
                 let expr_ty = infer_expr(ctx, &mut env, &env_vars, *node)?;
                 ctx.set_type(*node, env.generalize(&env.substitute(&expr_ty)));
+            }
+            Node::Type(ty_name, params, constructors) => {
+                let mut params_ty = FxHashMap::default();
+                for param in &params {
+                    params_ty.insert(param.clone(), env.fresh_var());
+                }
+                let adt_ty = Type::Adt(
+                    ty_name.clone(),
+                    params_ty.iter().map(|(_, v)| v).cloned().collect(),
+                );
+
+                for cons in constructors {
+                    if let Some(TypeExpr::Constructor(cons_name, args)) = ctx.get_type_expr(cons) {
+                        let args_ty = args
+                            .iter()
+                            .map(|a| translate_type_expr(ctx, *a, &params_ty))
+                            .collect::<Vec<_>>();
+
+                        let mut cons_ty = adt_ty.clone();
+
+                        for arg_ty in args_ty.iter().rev() {
+                            cons_ty = Type::Fun(Box::new(arg_ty.clone()), Box::new(cons_ty));
+                        }
+
+                        env_vars.insert(cons_name.clone(), env.generalize(&cons_ty));
+                    }
+                }
+                ctx.set_type(*node, adt_ty);
             }
             Node::Bind(name, expr) => {
                 let ty = env.fresh_var();
@@ -544,10 +637,10 @@ pub fn infer(ctx: &mut Context, nodes: &[NodeId]) -> Result<()> {
                 ctx.set_type(*node, expr_ty);
             }
             Node::Import(_) => continue,
+            _ => unreachable!(),
         }
     }
 
     env.solve_constraints()?;
-
     Ok(())
 }
