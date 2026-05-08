@@ -1,17 +1,15 @@
 use clap::{Parser, Subcommand, crate_name, crate_version};
 use core::fmt::{self, Display, Formatter};
 use fxhash::FxHashSet;
-use rustyline::DefaultEditor;
 use std::{collections::HashMap, env, fs, io, path::PathBuf};
 use void::{
     context::{Context, Node, NodeId},
     error,
-    eval::{self, evaluate},
     expr::Expr,
-    lexer::{self, Lexer, Token},
+    lexer::{Lexer, Token},
     modules,
     parser::{self, parse},
-    type_system::{self, infer},
+    type_system::infer,
 };
 
 #[derive(Debug, Clone)]
@@ -340,20 +338,6 @@ fn compile_expr(
         Node::Expr(expr) => match expr {
             Expr::Boolean(b) => out.push(Instruction::PushInt(*b as i64)),
             Expr::Integer(i) => out.push(Instruction::PushInt(*i)),
-            Expr::Infix { lhs, op, rhs } => {
-                compile_expr(&ctx, *rhs, params, out);
-                out.push(Instruction::Eval);
-                compile_expr(
-                    &ctx,
-                    *lhs,
-                    &params.iter().map(|(k, v)| (k.clone(), v + 1)).collect(),
-                    out,
-                );
-                out.push(Instruction::Eval);
-                out.push(Instruction::PushGlobal(op.clone()));
-                out.push(Instruction::MkAp);
-                out.push(Instruction::MkAp);
-            }
             Expr::Identifier(id) => {
                 if let Some(offset) = params.get(id) {
                     out.push(Instruction::Push(*offset));
@@ -452,8 +436,7 @@ enum Commands {
     Lex { file: PathBuf },
     Parse { file: PathBuf },
     Type { file: PathBuf },
-    Eval { file: PathBuf, args: Vec<String> },
-    Repl { file: Option<PathBuf> },
+    // Repl { file: Option<PathBuf> },
     Compile { file: PathBuf },
     Run { file: PathBuf },
 }
@@ -463,8 +446,7 @@ fn main() {
         Commands::Lex { file } => lex_cmd(&file),
         Commands::Parse { file } => parse_cmd(&file),
         Commands::Type { file } => type_cmd(&file),
-        Commands::Eval { file, .. } => eval_cmd(&file),
-        Commands::Repl { file } => repl_cmd(file.as_ref()),
+        // Commands::Repl { file } => repl_cmd(file.as_ref()),
         Commands::Compile { file } => compile_cmd(&file),
         Commands::Run { file } => run_cmd(&file),
     };
@@ -717,216 +699,164 @@ fn type_cmd(source_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn eval_cmd(source_path: &PathBuf) -> Result<()> {
-    let mut ctx = Context::new();
-    let parent_dir = source_path
-        .parent()
-        .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
+// fn repl_cmd(source_path: Option<&PathBuf>) -> Result<()> {
+//     let mut ctx = Context::new();
 
-    let mut visited_modules = FxHashSet::default();
-    visited_modules.insert(PathBuf::from(source_path));
+//     let mut rl = DefaultEditor::new().expect("could not initialize line editor");
 
-    let contents = fs::read_to_string(source_path)?;
-    let nodes = match parse(&mut ctx, &contents) {
-        Ok(nodes) => modules::resolve_imports(
-            &mut ctx,
-            &nodes,
-            parent_dir,
-            &mut visited_modules,
-            &mut FxHashSet::default(),
-        )
-        .map_err(Error::Void)?,
-        Err(err) => {
-            return Err(Error::Void(error::Error::Syntax(
-                source_path.clone(),
-                contents,
-                Box::new(err),
-            )));
-        }
-    };
+//     let mut nodes = Vec::new();
 
-    if let Err(err) = infer(&mut ctx, &nodes) {
-        return Err(Error::Void(error::Error::Type(
-            source_path.clone(),
-            contents,
-            Box::new(err),
-        )));
-    }
+//     if let Some(source_path) = source_path {
+//         let parent_dir = source_path
+//             .parent()
+//             .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
 
-    let value = match evaluate(&ctx, &nodes) {
-        Ok(value) => value,
-        Err(err) => {
-            return Err(Error::Void(error::Error::Eval(
-                source_path.clone(),
-                contents,
-                err,
-            )));
-        }
-    };
+//         let mut visited_modules = FxHashSet::default();
+//         visited_modules.insert(PathBuf::from(source_path));
 
-    println!("{}", value.display(&ctx));
+//         let contents = fs::read_to_string(source_path)?;
+//         nodes.extend(match parse(&mut ctx, &contents) {
+//             Ok(nodes) => modules::resolve_imports(
+//                 &mut ctx,
+//                 &nodes,
+//                 parent_dir,
+//                 &mut visited_modules,
+//                 &mut FxHashSet::default(),
+//             )
+//             .map_err(Error::Void)?,
+//             Err(err) => {
+//                 return Err(Error::Void(error::Error::Syntax(
+//                     source_path.clone(),
+//                     contents,
+//                     Box::new(err),
+//                 )));
+//             }
+//         });
 
-    Ok(())
-}
+//         if let Err(err) = infer(&mut ctx, &nodes) {
+//             return Err(Error::Void(error::Error::Type(
+//                 source_path.clone(),
+//                 contents,
+//                 Box::new(err),
+//             )));
+//         }
+//     }
 
-fn repl_cmd(source_path: Option<&PathBuf>) -> Result<()> {
-    let mut ctx = Context::new();
+//     let cwd = env::current_dir()?;
+//     let parent_dir = cwd
+//         .parent()
+//         .ok_or_else(|| Error::Void(error::Error::InvalidPath(cwd.clone())))?;
 
-    let mut rl = DefaultEditor::new().expect("could not initialize line editor");
+//     loop {
+//         let input = match rl.readline("> ") {
+//             Ok(line) => {
+//                 rl.add_history_entry(&line)
+//                     .expect("could not add history entry");
+//                 line
+//             }
+//             Err(rustyline::error::ReadlineError::Interrupted) => {
+//                 continue;
+//             }
+//             Err(_) => {
+//                 break;
+//             }
+//         };
 
-    let mut nodes = Vec::new();
+//         if input.trim().is_empty() {
+//             continue;
+//         }
 
-    if let Some(source_path) = source_path {
-        let parent_dir = source_path
-            .parent()
-            .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
+//         nodes.extend(match parse(&mut ctx, &input) {
+//             Ok(nodes) => modules::resolve_imports(
+//                 &mut ctx,
+//                 &nodes,
+//                 parent_dir,
+//                 &mut FxHashSet::default(),
+//                 &mut FxHashSet::default(),
+//             )
+//             .map_err(Error::Void)?,
 
-        let mut visited_modules = FxHashSet::default();
-        visited_modules.insert(PathBuf::from(source_path));
+//             Err(err) => {
+//                 match err {
+//                     parser::Error::Lexer(lexer::Error::InvalidToken(span))
+//                     | parser::Error::Lexer(lexer::Error::Unterminated(span, _))
+//                     | parser::Error::Lexer(lexer::Error::EmptyChar(span))
+//                     | parser::Error::Lexer(lexer::Error::InvalidChar(span))
+//                     | parser::Error::Lexer(lexer::Error::InvalidEscapeChar(span))
+//                     | parser::Error::UnexpectedToken(_, (_, span)) => {
+//                         println!(
+//                             "{}:{}: {}",
+//                             span.start.line,
+//                             span.start.column,
+//                             &err.to_string()
+//                         );
+//                     }
+//                 }
+//                 continue;
+//             }
+//         });
 
-        let contents = fs::read_to_string(source_path)?;
-        nodes.extend(match parse(&mut ctx, &contents) {
-            Ok(nodes) => modules::resolve_imports(
-                &mut ctx,
-                &nodes,
-                parent_dir,
-                &mut visited_modules,
-                &mut FxHashSet::default(),
-            )
-            .map_err(Error::Void)?,
-            Err(err) => {
-                return Err(Error::Void(error::Error::Syntax(
-                    source_path.clone(),
-                    contents,
-                    Box::new(err),
-                )));
-            }
-        });
+//         if let Err(err) = infer(&mut ctx, &nodes) {
+//             match err {
+//                 type_system::Error::TypeMismatch(ty1, ty2, span) => {
+//                     println!(
+//                         "{}:{}: expected type '{ty1}', but found '{ty2}'",
+//                         span.start.line, span.start.column
+//                     );
+//                 }
+//                 type_system::Error::InfiniteType(ty, span) => {
+//                     println!(
+//                         "{}:{}: infinite type '{ty}'",
+//                         span.start.line, span.start.column
+//                     );
+//                 }
+//                 type_system::Error::UnknownIdentifier(id, span) => {
+//                     println!(
+//                         "{}:{}: unknown identifier '{id}'",
+//                         span.start.line, span.start.column
+//                     );
+//                 }
+//                 type_system::Error::UnknownOperator(op, span) => {
+//                     println!(
+//                         "{}:{}: unknown operator '({op})'",
+//                         span.start.line, span.start.column
+//                     );
+//                 }
+//                 type_system::Error::NoInstance(cons, ty, span) => {
+//                     println!(
+//                         "{}:{}: No '{cons}' instance for type '{ty}'",
+//                         span.start.line, span.start.column
+//                     );
+//                 }
+//             }
+//             nodes.pop();
+//             continue;
+//         }
 
-        if let Err(err) = infer(&mut ctx, &nodes) {
-            return Err(Error::Void(error::Error::Type(
-                source_path.clone(),
-                contents,
-                Box::new(err),
-            )));
-        }
-    }
+//         if let Node::Expr(_) = ctx.get_node(*nodes.last().unwrap()) {
+//             let value = match evaluate(&ctx, &nodes) {
+//                 Ok(value) => value,
+//                 Err(err) => {
+//                     match err {
+//                         eval::Error::DivisionByZero(span) => println!(
+//                             "{}:{}: division by zero",
+//                             span.start.line, span.start.column
+//                         ),
+//                         eval::Error::EmptyList(span) => {
+//                             println!("{}:{}: list is empty", span.start.line, span.start.column)
+//                         }
+//                         eval::Error::IO(message, span) => {
+//                             println!("{}:{}: {message}", span.start.line, span.start.column)
+//                         }
+//                     }
+//                     continue;
+//                 }
+//             };
 
-    let cwd = env::current_dir()?;
-    let parent_dir = cwd
-        .parent()
-        .ok_or_else(|| Error::Void(error::Error::InvalidPath(cwd.clone())))?;
+//             println!("{}", value.display(&ctx));
+//             nodes.pop();
+//         }
+//     }
 
-    loop {
-        let input = match rl.readline("> ") {
-            Ok(line) => {
-                rl.add_history_entry(&line)
-                    .expect("could not add history entry");
-                line
-            }
-            Err(rustyline::error::ReadlineError::Interrupted) => {
-                continue;
-            }
-            Err(_) => {
-                break;
-            }
-        };
-
-        if input.trim().is_empty() {
-            continue;
-        }
-
-        nodes.extend(match parse(&mut ctx, &input) {
-            Ok(nodes) => modules::resolve_imports(
-                &mut ctx,
-                &nodes,
-                parent_dir,
-                &mut FxHashSet::default(),
-                &mut FxHashSet::default(),
-            )
-            .map_err(Error::Void)?,
-
-            Err(err) => {
-                match err {
-                    parser::Error::Lexer(lexer::Error::InvalidToken(span))
-                    | parser::Error::Lexer(lexer::Error::Unterminated(span, _))
-                    | parser::Error::Lexer(lexer::Error::EmptyChar(span))
-                    | parser::Error::Lexer(lexer::Error::InvalidChar(span))
-                    | parser::Error::Lexer(lexer::Error::InvalidEscapeChar(span))
-                    | parser::Error::UnexpectedToken(_, (_, span)) => {
-                        println!(
-                            "{}:{}: {}",
-                            span.start.line,
-                            span.start.column,
-                            &err.to_string()
-                        );
-                    }
-                }
-                continue;
-            }
-        });
-
-        if let Err(err) = infer(&mut ctx, &nodes) {
-            match err {
-                type_system::Error::TypeMismatch(ty1, ty2, span) => {
-                    println!(
-                        "{}:{}: expected type '{ty1}', but found '{ty2}'",
-                        span.start.line, span.start.column
-                    );
-                }
-                type_system::Error::InfiniteType(ty, span) => {
-                    println!(
-                        "{}:{}: infinite type '{ty}'",
-                        span.start.line, span.start.column
-                    );
-                }
-                type_system::Error::UnknownIdentifier(id, span) => {
-                    println!(
-                        "{}:{}: unknown identifier '{id}'",
-                        span.start.line, span.start.column
-                    );
-                }
-                type_system::Error::UnknownOperator(op, span) => {
-                    println!(
-                        "{}:{}: unknown operator '({op})'",
-                        span.start.line, span.start.column
-                    );
-                }
-                type_system::Error::NoInstance(cons, ty, span) => {
-                    println!(
-                        "{}:{}: No '{cons}' instance for type '{ty}'",
-                        span.start.line, span.start.column
-                    );
-                }
-            }
-            nodes.pop();
-            continue;
-        }
-
-        if let Node::Expr(_) = ctx.get_node(*nodes.last().unwrap()) {
-            let value = match evaluate(&ctx, &nodes) {
-                Ok(value) => value,
-                Err(err) => {
-                    match err {
-                        eval::Error::DivisionByZero(span) => println!(
-                            "{}:{}: division by zero",
-                            span.start.line, span.start.column
-                        ),
-                        eval::Error::EmptyList(span) => {
-                            println!("{}:{}: list is empty", span.start.line, span.start.column)
-                        }
-                        eval::Error::IO(message, span) => {
-                            println!("{}:{}: {message}", span.start.line, span.start.column)
-                        }
-                    }
-                    continue;
-                }
-            };
-
-            println!("{}", value.display(&ctx));
-            nodes.pop();
-        }
-    }
-
-    Ok(())
-}
+//     Ok(())
+// }

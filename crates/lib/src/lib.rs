@@ -1,6 +1,5 @@
 pub mod context;
 pub mod error;
-pub mod eval;
 pub mod expr;
 pub mod lexer;
 pub mod modules;

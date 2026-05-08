@@ -21,16 +21,6 @@ pub enum Expr {
         func: NodeId,
         arg: NodeId,
     },
-    Nil,
-    Cons {
-        head: NodeId,
-        tail: NodeId,
-    },
-    Infix {
-        lhs: NodeId,
-        op: String,
-        rhs: NodeId,
-    },
 }
 
 #[derive(Debug, Clone)]

@@ -16,10 +16,6 @@ macro_rules! ty  {
     (Bool) => { $crate::type_system::Type::Bool };
     (()) => { Type::Unit };
 
-    ([$inner:tt]) => {
-        $crate::type_system::Type::List(Box::new(ty!($inner)))
-    };
-
     ($param:tt -> $body:tt) => {
         $crate::type_system::Type::Fun(Box::new(ty!($param)), Box::new(ty!($body)))
     };
@@ -105,7 +101,6 @@ pub enum Type {
     Fun(Box<Type>, Box<Type>),
     Poly(FxHashSet<usize>, Vec<Constraint>, Box<Type>),
     Adt(String, Vec<Type>),
-    List(Box<Type>),
 }
 
 impl Type {
@@ -120,7 +115,6 @@ impl Type {
             Type::Var(n) => {
                 vars.insert(*n);
             }
-            Type::List(item) => item.collect_type_vars(vars),
             Type::Fun(param, body) => {
                 param.collect_type_vars(vars);
                 body.collect_type_vars(vars);
@@ -142,11 +136,6 @@ impl Type {
             Type::Char => write!(f, "Char"),
             Type::Bool => write!(f, "Bool"),
             Type::Var(n) => write!(f, "t{}", var_order_map.get(n).unwrap_or(n)),
-            Type::List(item) => {
-                write!(f, "[")?;
-                item.fmt(f, var_order_map)?;
-                write!(f, "]")
-            }
             Type::Fun(param, body) => {
                 match param.as_ref() {
                     Type::Fun(_, _) => {
@@ -247,28 +236,9 @@ impl Env {
         let mut instances = FxHashMap::default();
         instances.insert(
             TypeClass::Eq,
-            Vec::from([
-                ty!(Int),
-                ty!(Bool),
-                ty!(Char),
-                ty!(()),
-                ty!([Int]),
-                ty!([Bool]),
-                ty!([Char]),
-                ty!([()]),
-            ]),
+            Vec::from([ty!(Int), ty!(Bool), ty!(Char), ty!(())]),
         );
-        instances.insert(
-            TypeClass::Ord,
-            Vec::from([
-                ty!(Int),
-                ty!(Bool),
-                ty!(Char),
-                ty!([Int]),
-                ty!([Bool]),
-                ty!([Char]),
-            ]),
-        );
+        instances.insert(TypeClass::Ord, Vec::from([ty!(Int), ty!(Bool), ty!(Char)]));
         instances.insert(TypeClass::Num, Vec::from([ty!(Int)]));
 
         Env {
@@ -303,7 +273,6 @@ impl Env {
     fn check_instance(&self, class: TypeClass, ty: &Type) -> bool {
         match ty {
             Type::Var(_) => true,
-            Type::List(inner) => self.check_instance(class, inner),
             _ => self
                 .instances
                 .get(&class)
@@ -365,11 +334,6 @@ impl Env {
                 self.instantiate_helper(*body, span, substitutions)
             }
             Type::Var(n) => substitutions.get(&n).cloned().unwrap_or(ty),
-            Type::List(item) => Type::List(Box::new(self.instantiate_helper(
-                *item,
-                span,
-                substitutions,
-            ))),
             Type::Fun(param, body) => Type::Fun(
                 Box::new(self.instantiate_helper(*param, span, substitutions)),
                 Box::new(self.instantiate_helper(*body, span, substitutions)),
@@ -392,7 +356,6 @@ impl Env {
                 .get(n)
                 .map(|ty| self.substitute(ty))
                 .unwrap_or(ty.clone()),
-            Type::List(item) => Type::List(Box::new(self.substitute(item))),
             Type::Fun(param, body) => Type::Fun(
                 Box::new(self.substitute(param)),
                 Box::new(self.substitute(body)),
@@ -412,7 +375,6 @@ impl Env {
             | (Type::Unit, Type::Unit)
             | (Type::Char, Type::Char) => Ok(()),
             (Type::Var(a), Type::Var(b)) if a == b => Ok(()),
-            (Type::List(a), Type::List(b)) => self.unify(a.as_ref(), b.as_ref(), span),
             (Type::Fun(p1, b1), Type::Fun(p2, b2)) => {
                 self.unify(p1.as_ref(), p2.as_ref(), span)?;
                 self.unify(b1.as_ref(), b2.as_ref(), span)
@@ -449,7 +411,6 @@ impl Env {
             Type::Var(n) if *n == var => {
                 Err(Error::InfiniteType(self.generalize(ty).to_string(), span))
             }
-            Type::List(item) => self.occurs_check(var, item, span),
             Type::Fun(param, body) => {
                 self.occurs_check(var, param, span)?;
                 self.occurs_check(var, body, span)
@@ -476,23 +437,6 @@ fn infer_expr(
             Node::Expr(Expr::Integer(_)) => Type::Int,
             Node::Expr(Expr::Char(_)) => Type::Char,
             Node::Expr(Expr::Boolean(_)) => Type::Bool,
-            Node::Expr(Expr::Nil) => Type::List(Box::new(env.fresh_var())),
-            Node::Expr(Expr::Cons { head, tail }) => {
-                let head_ty = infer_expr(ctx, env, env_vars, head)?;
-                let mut tail = tail;
-
-                while let Node::Expr(Expr::Cons {
-                    head: next_head,
-                    tail: next_tail,
-                }) = ctx.get_node(tail).clone()
-                {
-                    let next_head_ty = infer_expr(ctx, env, env_vars, next_head)?;
-                    env.unify(&head_ty, &next_head_ty, ctx.get_span(next_head))?;
-                    tail = next_tail;
-                }
-
-                Type::List(Box::new(head_ty))
-            }
             Node::Expr(Expr::Constructor(name)) | Node::Expr(Expr::Identifier(name)) => env
                 .instantiate(
                     env_vars
@@ -508,33 +452,6 @@ fn infer_expr(
                 env.unify(&Type::Bool, &cond_ty, ctx.get_span(cond))?;
                 env.unify(&then_ty, &alt_ty, ctx.get_span(alt))?;
                 alt_ty
-            }
-            Node::Expr(Expr::Infix { lhs, op, rhs }) => {
-                let lhs_ty = infer_expr(ctx, env, env_vars, lhs)?;
-                let rhs_ty = infer_expr(ctx, env, env_vars, rhs)?;
-
-                let op_ty = env.instantiate(
-                    env_vars
-                        .get(&op)
-                        .ok_or(Error::UnknownOperator(op.clone(), ctx.get_span(expr)))?
-                        .clone(),
-                    ctx.get_span(expr),
-                );
-
-                let res_ty = env.fresh_var();
-                env.unify(
-                    &Type::Fun(
-                        Box::new(lhs_ty.clone()),
-                        Box::new(Type::Fun(
-                            Box::new(rhs_ty.clone()),
-                            Box::new(res_ty.clone()),
-                        )),
-                    ),
-                    &op_ty,
-                    ctx.get_span(expr),
-                )?;
-
-                res_ty
             }
             Node::Expr(Expr::Lambda { param, body }) => {
                 let param_ty = env.fresh_var();

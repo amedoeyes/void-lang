@@ -5,7 +5,6 @@ use std::{
 };
 
 use crate::{
-    eval,
     lexer::{self, Token},
     parser,
     span::Span,
@@ -20,7 +19,6 @@ pub enum Error {
     ModuleNotFound(Vec<String>),
     Syntax(PathBuf, String, Box<parser::Error>),
     Type(PathBuf, String, Box<type_system::Error>),
-    Eval(PathBuf, String, eval::Error),
 }
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -95,18 +93,6 @@ impl fmt::Display for Error {
                     *span,
                     &format!("no '{cons}' instance for type '{ty}'"),
                 ),
-            },
-
-            Error::Eval(filename, source, err) => match err {
-                eval::Error::DivisionByZero(span) => {
-                    write_message_and_lines(f, filename, source, *span, "division by zero")
-                }
-                eval::Error::EmptyList(span) => {
-                    write_message_and_lines(f, filename, source, *span, "list is empty")
-                }
-                eval::Error::IO(message, span) => {
-                    write_message_and_lines(f, filename, source, *span, message)
-                }
             },
         }
     }

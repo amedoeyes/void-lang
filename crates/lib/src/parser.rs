@@ -5,12 +5,10 @@ use std::{
 };
 
 use crate::{
-    context::{Associativity, Context, Node, NodeId},
+    context::{Associativity, Context, NodeId},
     expr::{Expr, TypeExpr},
     lexer::{self, Delimiter, Keyword, Lexer, Literal, Token},
     span::Span,
-    ty,
-    type_system::Type,
 };
 
 #[derive(Debug)]
@@ -267,8 +265,8 @@ impl<'a> Parser<'a> {
             Token::Literal(Literal::Bool(_)) => self.parse_bool_lit(),
             Token::Literal(Literal::Integer(_)) => self.parse_integer_lit(),
             Token::Literal(Literal::Char(_)) => self.parse_char_lit(),
-            Token::Literal(Literal::String(_)) => self.parse_string_lit(),
-            Token::Delimiter(Delimiter::BracketLeft) => self.parse_list_lit(),
+            // Token::Literal(Literal::String(_)) => self.parse_string_lit(),
+            // Token::Delimiter(Delimiter::BracketLeft) => self.parse_list_lit(),
             Token::Type(_) => self.parse_type(),
             Token::Identifier(_) => match self.peek(1)? {
                 (Token::Symbol(s), _) if s == "->" => self.parse_lambda_expr(),
@@ -499,64 +497,64 @@ impl<'a> Parser<'a> {
         }
     }
 
-    fn parse_list_lit(&mut self) -> std::result::Result<NodeId, Error> {
-        match self.advance()? {
-            (Token::Delimiter(Delimiter::BracketLeft), start_span) => match self.peek(0)? {
-                (Token::Delimiter(Delimiter::BracketRight), end_span) => {
-                    self.advance()?;
-                    let list = self.context.add_expr(Expr::Nil);
-                    self.context.set_span(list, start_span.merge(end_span));
-                    Ok(list)
-                }
-                _ => {
-                    let mut elems = Vec::new();
-                    loop {
-                        elems.push(self.parse_expr(0)?);
-                        match self.peek(0)? {
-                            (Token::Delimiter(Delimiter::Comma), _) => {
-                                self.advance()?;
-                                continue;
-                            }
-                            _ => break,
-                        }
-                    }
-                    let (_, end_span) = self.expect(Token::Delimiter(Delimiter::BracketRight))?;
-                    let mut list = self.context.add_expr(Expr::Nil);
-                    for elem in elems.into_iter().rev() {
-                        list = self.context.add_expr(Expr::Cons {
-                            head: elem,
-                            tail: list,
-                        });
-                    }
-                    self.context.set_span(list, start_span.merge(end_span));
-                    Ok(list)
-                }
-            },
-            other => Err(Error::UnexpectedToken(
-                Token::Delimiter(Delimiter::BracketLeft).to_string(),
-                other,
-            )),
-        }
-    }
+    // fn parse_list_lit(&mut self) -> std::result::Result<NodeId, Error> {
+    //     match self.advance()? {
+    //         (Token::Delimiter(Delimiter::BracketLeft), start_span) => match self.peek(0)? {
+    //             (Token::Delimiter(Delimiter::BracketRight), end_span) => {
+    //                 self.advance()?;
+    //                 let list = self.context.add_expr(Expr::Nil);
+    //                 self.context.set_span(list, start_span.merge(end_span));
+    //                 Ok(list)
+    //             }
+    //             _ => {
+    //                 let mut elems = Vec::new();
+    //                 loop {
+    //                     elems.push(self.parse_expr(0)?);
+    //                     match self.peek(0)? {
+    //                         (Token::Delimiter(Delimiter::Comma), _) => {
+    //                             self.advance()?;
+    //                             continue;
+    //                         }
+    //                         _ => break,
+    //                     }
+    //                 }
+    //                 let (_, end_span) = self.expect(Token::Delimiter(Delimiter::BracketRight))?;
+    //                 let mut list = self.context.add_expr(Expr::Nil);
+    //                 for elem in elems.into_iter().rev() {
+    //                     list = self.context.add_expr(Expr::Cons {
+    //                         head: elem,
+    //                         tail: list,
+    //                     });
+    //                 }
+    //                 self.context.set_span(list, start_span.merge(end_span));
+    //                 Ok(list)
+    //             }
+    //         },
+    //         other => Err(Error::UnexpectedToken(
+    //             Token::Delimiter(Delimiter::BracketLeft).to_string(),
+    //             other,
+    //         )),
+    //     }
+    // }
 
-    fn parse_string_lit(&mut self) -> std::result::Result<NodeId, Error> {
-        match self.advance()? {
-            (Token::Literal(Literal::String(str)), span) => {
-                let mut list = self.context.add_expr(Expr::Nil);
-                for char in str.chars().rev() {
-                    let expr = self.context.add_expr(Expr::Char(char));
-                    list = self.context.add_expr(Expr::Cons {
-                        head: expr,
-                        tail: list,
-                    });
-                }
-                self.context.set_type(list, ty!([Char]));
-                self.context.set_span(list, span);
-                Ok(list)
-            }
-            other => Err(Error::UnexpectedToken("string".into(), other)),
-        }
-    }
+    // fn parse_string_lit(&mut self) -> std::result::Result<NodeId, Error> {
+    //     match self.advance()? {
+    //         (Token::Literal(Literal::String(str)), span) => {
+    //             let mut list = self.context.add_expr(Expr::Nil);
+    //             for char in str.chars().rev() {
+    //                 let expr = self.context.add_expr(Expr::Char(char));
+    //                 list = self.context.add_expr(Expr::Cons {
+    //                     head: expr,
+    //                     tail: list,
+    //                 });
+    //             }
+    //             self.context.set_type(list, ty!([Char]));
+    //             self.context.set_span(list, span);
+    //             Ok(list)
+    //         }
+    //         other => Err(Error::UnexpectedToken("string".into(), other)),
+    //     }
+    // }
 
     fn parse_char_lit(&mut self) -> std::result::Result<NodeId, Error> {
         match self.advance()? {
