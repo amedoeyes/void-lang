@@ -88,8 +88,18 @@ impl<'a> Parser<'a> {
         let mut consts = Vec::new();
 
         loop {
-            let cons = self.parse_type_expr()?;
-            consts.push(cons);
+            let name = match self.advance()? {
+                (Token::Type(ty), _) => ty,
+                other => {
+                    return Err(Error::UnexpectedToken("constructor".to_string(), other));
+                }
+            };
+
+            let mut args = Vec::new();
+            while let Ok(arg) = self.parse_type_expr() {
+                args.push(arg);
+            }
+            consts.push((name, args));
 
             match self.peek(0)? {
                 (Token::Symbol(val), _) if val == "|" => {
@@ -197,20 +207,6 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type_expr(&mut self) -> Result<NodeId> {
-        let expr = self.parse_primary_type_expr()?;
-        if let Some(TypeExpr::Constructor(..)) = self.context.get_type_expr(expr) {
-            let mut temp = Vec::new();
-            while let Ok(arg) = self.parse_primary_type_expr() {
-                temp.push(arg);
-            }
-            if let Some(TypeExpr::Constructor(_, args)) = self.context.get_type_expr_mut(expr) {
-                args.extend(temp)
-            }
-        }
-        Ok(expr)
-    }
-
-    fn parse_primary_type_expr(&mut self) -> Result<NodeId> {
         match self.peek(0)?.0 {
             Token::Type(_) => match self.advance()? {
                 (Token::Type(ty), span) => {
@@ -241,6 +237,15 @@ impl<'a> Parser<'a> {
                 _ => {
                     let start_span = self.expect(Token::Delimiter(Delimiter::ParenLeft))?.1;
                     let expr = self.parse_type_expr()?;
+                    let mut temp = Vec::new();
+                    while let Ok(arg) = self.parse_type_expr() {
+                        temp.push(arg);
+                    }
+                    if let Some(TypeExpr::Constructor(_, args)) =
+                        self.context.get_type_expr_mut(expr)
+                    {
+                        args.extend(temp)
+                    }
                     let end_span = self.expect(Token::Delimiter(Delimiter::ParenRight))?.1;
                     self.context.set_span(expr, start_span.merge(end_span));
                     Ok(expr)

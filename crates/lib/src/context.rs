@@ -2,6 +2,7 @@ use core::fmt;
 use std::fmt::Formatter;
 
 use fxhash::FxHashMap;
+use itertools::Itertools;
 
 use crate::{
     expr::{Expr, TypeExpr},
@@ -16,7 +17,7 @@ pub struct NodeId(usize);
 pub enum Node {
     TypeExpr(TypeExpr),
     Expr(Expr),
-    Type(String, Vec<String>, Vec<NodeId>),
+    Type(String, Vec<String>, Vec<(String, Vec<NodeId>)>),
     Bind(String, NodeId),
     Import(Vec<String>),
 }
@@ -100,7 +101,7 @@ impl Context {
         &mut self,
         name: String,
         params: Vec<String>,
-        constructors: Vec<NodeId>,
+        constructors: Vec<(String, Vec<NodeId>)>,
     ) -> NodeId {
         self.add(Node::Type(name, params, constructors))
     }
@@ -211,13 +212,15 @@ impl<'a> fmt::Display for Display<'a> {
                 TypeExpr::Constructor(cons, args) => {
                     write!(
                         f,
-                        "{}{}{}",
+                        "{}{}{}{}{}",
+                        if !args.is_empty() { "(" } else { "" },
                         cons,
                         if !args.is_empty() { " " } else { "" },
                         args.iter()
-                            .map(|elem| format!("({})", Display::new(*elem, self.context)))
+                            .map(|a| Display::new(*a, self.context).to_string())
                             .collect::<Vec<String>>()
-                            .join(" ")
+                            .join(" "),
+                        if !args.is_empty() { ")" } else { "" },
                     )
                 }
             },
@@ -249,14 +252,21 @@ impl<'a> fmt::Display for Display<'a> {
             Node::Type(name, params, constructors) => {
                 write!(f, "type {}", name)?;
                 if !params.is_empty() {
-                    write!(f, " {}", params.join(", "),)?;
+                    write!(f, " {}", params.join(" "))?;
                 }
                 write!(
                     f,
                     " = {}",
                     constructors
                         .iter()
-                        .map(|elem| Display::new(*elem, self.context).to_string())
+                        .map(|(c, a)| format!(
+                            "{}{}{}",
+                            c,
+                            if !a.is_empty() { " " } else { "" },
+                            a.iter()
+                                .map(|a| Display::new(*a, self.context).to_string())
+                                .join(" ")
+                        ))
                         .collect::<Vec<String>>()
                         .join(" | ")
                 )
