@@ -117,6 +117,8 @@ impl<'a> Lexer<'a> {
             ("import", Token::Keyword(Keyword::Import)),
             ("type", Token::Keyword(Keyword::Type)),
             ("let", Token::Keyword(Keyword::Let)),
+            ("match", Token::Keyword(Keyword::Match)),
+            ("with", Token::Keyword(Keyword::With)),
             ("if", Token::Keyword(Keyword::If)),
             ("then", Token::Keyword(Keyword::Then)),
             ("else", Token::Keyword(Keyword::Else)),

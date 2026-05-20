@@ -11,7 +11,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy, PartialEq)]
-pub struct NodeId(usize);
+pub struct NodeId(pub usize);
 
 #[derive(Debug, Clone)]
 pub enum Node {
@@ -79,6 +79,10 @@ impl Context {
         ctx.add_operators();
 
         ctx
+    }
+
+    pub fn nodes(&self) -> &[Node] {
+        &self.nodes
     }
 
     pub fn add(&mut self, node: Node) -> NodeId {
@@ -231,7 +235,17 @@ impl<'a> fmt::Display for Display<'a> {
                 Expr::Integer(val) => write!(f, "{val}"),
                 Expr::Constructor(cons) => write!(f, "{cons}"),
                 Expr::Identifier(id) => write!(f, "{id}"),
-                Expr::Match(node_id, items) => todo!(),
+                Expr::Match(scrutinee, branches) => {
+                    write!(
+                        f,
+                        "match {} with {}",
+                        Display::new(*scrutinee, self.context),
+                        branches
+                            .iter()
+                            .map(|(p, b)| format!("{} => {}", p, Display::new(*b, self.context)))
+                            .join(", ")
+                    )
+                }
                 Expr::Condition { cond, then, alt } => write!(
                     f,
                     "if {} then {} else {}",

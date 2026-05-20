@@ -6,7 +6,7 @@ use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 
 use crate::context::{Context, Node, NodeId};
-use crate::expr::TypeExpr;
+use crate::expr::{Pattern, TypeExpr};
 use crate::{expr::Expr, span::Span};
 
 #[macro_export]
@@ -421,6 +421,50 @@ impl Env {
     }
 }
 
+fn infer_pattern(
+    ctx: &mut Context,
+    env: &mut Env,
+    env_vars: &FxHashMap<String, Type>,
+    pattern: &Pattern,
+    expected_ty: &Type,
+    span: Span,
+) -> Result<FxHashMap<String, Type>> {
+    match pattern {
+        Pattern::Wildcard => Ok(FxHashMap::default()),
+        Pattern::Identifier(id) => {
+            let mut map = FxHashMap::default();
+            let ty = env.fresh_var();
+            env.unify(expected_ty, &ty, span)?;
+            map.insert(id.clone(), ty);
+            Ok(map)
+        }
+        Pattern::Constructor(name, subpatterns) => {
+            let mut map = FxHashMap::default();
+            let cons_ty = env.instantiate(
+                env_vars
+                    .get(name)
+                    .ok_or_else(|| Error::UnknownIdentifier(name.clone(), span))?
+                    .clone(),
+                span,
+            );
+            let mut arg_tys = Vec::new();
+            let mut result_ty = cons_ty;
+            while let Type::Fun(param, body) = result_ty {
+                arg_tys.push(param);
+                result_ty = *body;
+            }
+            if arg_tys.len() != subpatterns.len() {
+                todo!();
+            }
+            env.unify(expected_ty, &result_ty, span)?;
+            for (p, a) in subpatterns.iter().zip(arg_tys) {
+                map.extend(infer_pattern(ctx, env, env_vars, p, &a, span)?);
+            }
+            Ok(map)
+        }
+    }
+}
+
 fn infer_expr(
     ctx: &mut Context,
     env: &mut Env,
@@ -445,6 +489,21 @@ fn infer_expr(
                         .clone(),
                     ctx.get_span(expr),
                 ),
+            Node::Expr(Expr::Match(scrutinee, branches)) => {
+                let scrutinee_ty = infer_expr(ctx, env, env_vars, scrutinee)?;
+                let match_ty = env.fresh_var();
+                for (p, b) in branches {
+                    let mut branch_env = env_vars.clone();
+                    let bindings =
+                        infer_pattern(ctx, env, env_vars, &p, &scrutinee_ty, ctx.get_span(expr))?;
+                    for (id, ty) in bindings {
+                        branch_env.insert(id, ty);
+                    }
+                    let body_ty = infer_expr(ctx, env, &branch_env, b)?;
+                    env.unify(&match_ty, &body_ty, ctx.get_span(expr))?;
+                }
+                match_ty
+            }
             Node::Expr(Expr::Condition { cond, then, alt }) => {
                 let cond_ty = infer_expr(ctx, env, env_vars, cond)?;
                 let then_ty = infer_expr(ctx, env, env_vars, then)?;
@@ -521,6 +580,19 @@ pub fn infer(ctx: &mut Context, nodes: &[NodeId]) -> Result<()> {
     //     env_vars.insert(name.clone(), env.generalize(&builtin.ty));
     // }
 
+    env_vars.insert("println".into(), ty!(forall 0 . 0 -> 0));
+    env_vars.insert("+".into(), ty!(forall 0 . (Num 0) => 0 -> 0 -> 0));
+    env_vars.insert("-".into(), ty!(forall 0 . (Num 0) => 0 -> 0 -> 0));
+    env_vars.insert("*".into(), ty!(forall 0 . (Num 0) => 0 -> 0 -> 0));
+    env_vars.insert("/".into(), ty!(forall 0 . (Num 0) => 0 -> 0 -> 0));
+    env_vars.insert("<".into(), ty!(forall 0 . (Ord 0) => 0 -> 0 -> Bool));
+    env_vars.insert(">".into(), ty!(forall 0 . (Ord 0) => 0 -> 0 -> Bool));
+    env_vars.insert("<=".into(), ty!(forall 0 . (Ord 0) => 0 -> 0 -> Bool));
+    env_vars.insert(">=".into(), ty!(forall 0 . (Ord 0) => 0 -> 0 -> Bool));
+    env_vars.insert("==".into(), ty!(forall 0 . (Eq 0) => 0 -> 0 -> Bool));
+    env_vars.insert("&&".into(), ty!(Bool -> Bool -> Bool));
+    env_vars.insert("||".into(), ty!(Bool -> Bool -> Bool));
+
     let mut type_arities = FxHashMap::default();
     type_arities.insert("Int".into(), 0);
     type_arities.insert("Bool".into(), 0);
@@ -574,6 +646,18 @@ pub fn infer(ctx: &mut Context, nodes: &[NodeId]) -> Result<()> {
             }
             Node::Import(_) => continue,
             _ => unreachable!(),
+        }
+    }
+
+    for node in ctx
+        .nodes()
+        .iter()
+        .enumerate()
+        .map(|(i, _)| NodeId(i))
+        .collect::<Vec<NodeId>>()
+    {
+        if let Some(ty) = ctx.get_type(node) {
+            ctx.set_type(node, env.substitute(ty));
         }
     }
 

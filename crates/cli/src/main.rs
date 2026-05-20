@@ -1,15 +1,15 @@
 use clap::{Parser, Subcommand, crate_name, crate_version};
 use core::fmt::{self, Display, Formatter};
-use fxhash::FxHashSet;
+use fxhash::{FxHashMap, FxHashSet};
 use std::{collections::HashMap, env, fs, io, path::PathBuf};
 use void::{
     context::{Context, Node, NodeId},
     error,
-    expr::Expr,
+    expr::{Expr, Pattern},
     lexer::{Lexer, Token},
     modules,
     parser::{self, parse},
-    type_system::infer,
+    type_system::{Type, infer},
 };
 
 #[derive(Debug, Clone)]
@@ -58,6 +58,7 @@ enum GNode {
     Integer(i64),
     Application(Address, Address),
     Global(String, usize, Global),
+    Constructor(usize, Vec<Address>),
     Indirection(Address),
 }
 
@@ -68,10 +69,15 @@ enum Instruction {
     PushGlobal(String),
     Pop(usize),
     Update(usize),
+    Slide(usize),
     MkAp,
+    Pack(usize, usize),
+    Split(usize),
+    Case(FxHashMap<usize, Vec<Instruction>>),
     Cond(Vec<Instruction>, Vec<Instruction>),
     Eval,
     Unwind,
+    Print,
 }
 
 #[derive(Debug)]
@@ -82,6 +88,7 @@ struct GMachine {
     heap: Vec<GNode>,
     stack: Vec<Address>,
     dump: Vec<(Vec<Address>, Vec<Instruction>)>,
+    output: Vec<Value>,
 }
 
 impl GMachine {
@@ -93,6 +100,7 @@ impl GMachine {
             heap: Vec::new(),
             stack: Vec::new(),
             dump: Vec::new(),
+            output: Vec::new(),
         }
     }
 
@@ -103,15 +111,44 @@ impl GMachine {
     }
 
     fn is_whnf(&self, addr: Address) -> bool {
-        match self.heap[addr.0] {
-            GNode::Integer(_) => true,
-            GNode::Application(_, _) => false,
-            GNode::Global(_, _, _) => false,
-            GNode::Indirection(n) => self.is_whnf(n),
+        match &self.heap[addr.0] {
+            GNode::Integer(..) => true,
+            GNode::Application(..) => false,
+            GNode::Global(..) => false,
+            GNode::Indirection(..) => false,
+            GNode::Constructor(..) => true,
         }
     }
 
-    fn run(&mut self) -> Value {
+    fn force(&mut self, addr: Address) -> Address {
+        if self.is_whnf(addr) {
+            return addr;
+        }
+
+        let saved_stack = std::mem::take(&mut self.stack);
+        let saved_dump = std::mem::take(&mut self.dump);
+        let saved_instructions = std::mem::take(&mut self.instructions);
+        let saved_pc = self.pc;
+        let saved_output = std::mem::take(&mut self.output);
+
+        self.stack = Vec::from([addr]);
+        self.instructions = Vec::from([Instruction::Eval]);
+        self.pc = 0;
+
+        self.run();
+
+        let result = self.stack[0];
+
+        self.stack = saved_stack;
+        self.dump = saved_dump;
+        self.instructions = saved_instructions;
+        self.pc = saved_pc;
+        self.output = saved_output;
+
+        result
+    }
+
+    fn run(&mut self) {
         loop {
             if self.pc >= self.instructions.len() {
                 break;
@@ -119,14 +156,21 @@ impl GMachine {
 
             let inst = self.instructions[self.pc].clone();
 
-            println!("------");
-            println!("pc: {}", self.pc);
-            println!("instructions: {:?}", self.instructions);
-            println!("stack: {:?}", self.stack);
-            println!("heap: {:?}", self.heap);
-            println!("dump: {:?}", self.dump);
+            // println!("------");
+            // println!("pc: {}", self.pc);
+            //     println!("instructions: {:?}", self.instructions);
+            // println!(
+            //     "stack: {:?}",
+            //     self.stack
+            //         .iter()
+            //         .map(|a| &self.heap[a.0])
+            //         .collect::<Vec<_>>()
+            // );
+            // println!("heap: {:?}", self.heap);
+            //     println!("dump: {:?}", self.dump);
+            //     println!("output: {:?}", self.output);
 
-            println!("inst: {:?}", inst);
+            // println!("inst: {:?}", inst);
 
             match inst {
                 Instruction::PushInt(i) => {
@@ -154,11 +198,49 @@ impl GMachine {
                     self.heap[root.0] = GNode::Indirection(addr);
                     self.pc += 1;
                 }
+                Instruction::Slide(n) => {
+                    self.stack
+                        .drain(self.stack.len() - n - 1..self.stack.len() - 1);
+                    self.pc += 1;
+                }
                 Instruction::MkAp => {
                     let l = self.stack.pop().unwrap();
                     let r = self.stack.pop().unwrap();
                     let app = self.alloc(GNode::Application(l, r));
                     self.stack.push(app);
+                    self.pc += 1;
+                }
+                Instruction::Pack(tag, arity) => {
+                    let args = self
+                        .stack
+                        .drain(self.stack.len() - arity..self.stack.len())
+                        .rev()
+                        .collect();
+                    let cons = self.alloc(GNode::Constructor(tag, args));
+                    self.stack.push(cons);
+                    self.pc += 1;
+                }
+                Instruction::Split(n) => {
+                    let addr = self.stack.pop().unwrap();
+                    match &self.heap[addr.0] {
+                        GNode::Constructor(_, args) => {
+                            for a in args[..n].iter().rev() {
+                                self.stack.push(*a);
+                            }
+                        }
+                        _ => todo!(),
+                    }
+                    self.pc += 1;
+                }
+                Instruction::Case(mut branches) => {
+                    let addr = self.stack.last().unwrap();
+                    match &self.heap[addr.0] {
+                        GNode::Constructor(tag, _) => {
+                            self.instructions
+                                .splice(self.pc + 1..self.pc + 1, branches.remove(tag).unwrap());
+                        }
+                        _ => todo!(),
+                    }
                     self.pc += 1;
                 }
                 Instruction::Cond(t, f) => {
@@ -170,7 +252,7 @@ impl GMachine {
                         GNode::Integer(i) if i == 0 => {
                             self.instructions.splice(self.pc + 1..self.pc + 1, f);
                         }
-                        _ => unreachable!(),
+                        _ => todo!(),
                     }
                     self.pc += 1;
                 }
@@ -192,8 +274,7 @@ impl GMachine {
                     let top = *self.stack.last().unwrap();
 
                     match self.heap[top.0].clone() {
-                        GNode::Integer(i) => {
-                            println!("Integer({i})");
+                        GNode::Integer(..) | GNode::Constructor(..) => {
                             if !self.dump.is_empty() {
                                 let (stack, instructions) = self.dump.pop().unwrap();
                                 self.stack = stack;
@@ -205,15 +286,15 @@ impl GMachine {
                             }
                         }
                         GNode::Application(l, r) => {
-                            println!("Application({l:?}, {r:?})");
+                            // println!("Application({:?}, {:?})", self.heap[l.0], self.heap[r.0]);
                             self.stack.push(l);
                         }
                         GNode::Indirection(addr) => {
-                            println!("Indirection({addr:?})");
+                            // println!("Indirection({:?})", self.heap[addr.0]);
                             *self.stack.last_mut().unwrap() = addr;
                         }
                         GNode::Global(name, arity, global) => {
-                            println!("Global({name}, {arity}, {global:?})");
+                            // println!("Global({name}, {arity}, {global:?})");
                             if self.stack.len() <= arity {
                                 self.pc += 1;
                             } else {
@@ -229,14 +310,26 @@ impl GMachine {
                                     })
                                     .unwrap();
 
-                                println!("fun: {name}, args: {args:?}");
+                                // println!(
+                                //     "fun: {name}, args: {:?}",
+                                //     args.iter().map(|a| &self.heap[a.0]).collect::<Vec<_>>()
+                                // );
 
                                 let redex_root = self.stack[self.stack.len() - 1 - arity];
                                 match global {
                                     Global::Builtin => match name.as_str() {
+                                        "println" => {
+                                            let val_addr = args.pop().unwrap();
+                                            let val_addr = self.force(val_addr);
+                                            let val = &self.heap[val_addr.0];
+                                            println!("{:?}", val);
+                                            self.stack.push(val_addr);
+                                        }
                                         "+" => {
                                             let lhs_addr = args.pop().unwrap();
                                             let rhs_addr = args.pop().unwrap();
+                                            let lhs_addr = self.force(lhs_addr);
+                                            let rhs_addr = self.force(rhs_addr);
                                             let lhs = &self.heap[lhs_addr.0];
                                             let rhs = &self.heap[rhs_addr.0];
                                             if let (GNode::Integer(l), GNode::Integer(r)) =
@@ -249,6 +342,8 @@ impl GMachine {
                                         "-" => {
                                             let lhs_addr = args.pop().unwrap();
                                             let rhs_addr = args.pop().unwrap();
+                                            let lhs_addr = self.force(lhs_addr);
+                                            let rhs_addr = self.force(rhs_addr);
                                             let lhs = &self.heap[lhs_addr.0];
                                             let rhs = &self.heap[rhs_addr.0];
                                             if let (GNode::Integer(l), GNode::Integer(r)) =
@@ -261,6 +356,8 @@ impl GMachine {
                                         "*" => {
                                             let lhs_addr = args.pop().unwrap();
                                             let rhs_addr = args.pop().unwrap();
+                                            let lhs_addr = self.force(lhs_addr);
+                                            let rhs_addr = self.force(rhs_addr);
                                             let lhs = &self.heap[lhs_addr.0];
                                             let rhs = &self.heap[rhs_addr.0];
                                             if let (GNode::Integer(l), GNode::Integer(r)) =
@@ -273,6 +370,8 @@ impl GMachine {
                                         "==" => {
                                             let lhs_addr = args.pop().unwrap();
                                             let rhs_addr = args.pop().unwrap();
+                                            let lhs_addr = self.force(lhs_addr);
+                                            let rhs_addr = self.force(rhs_addr);
                                             let lhs = &self.heap[lhs_addr.0];
                                             let rhs = &self.heap[rhs_addr.0];
                                             if let (GNode::Integer(l), GNode::Integer(r)) =
@@ -286,6 +385,8 @@ impl GMachine {
                                         "<=" => {
                                             let lhs_addr = args.pop().unwrap();
                                             let rhs_addr = args.pop().unwrap();
+                                            let lhs_addr = self.force(lhs_addr);
+                                            let rhs_addr = self.force(rhs_addr);
                                             let lhs = &self.heap[lhs_addr.0];
                                             let rhs = &self.heap[rhs_addr.0];
                                             if let (GNode::Integer(l), GNode::Integer(r)) =
@@ -294,6 +395,99 @@ impl GMachine {
                                                 let result_addr =
                                                     self.alloc(GNode::Integer((l <= r) as i64));
                                                 self.stack.push(result_addr);
+                                            }
+                                        }
+                                        ">=" => {
+                                            let lhs_addr = args.pop().unwrap();
+                                            let rhs_addr = args.pop().unwrap();
+                                            let lhs_addr = self.force(lhs_addr);
+                                            let rhs_addr = self.force(rhs_addr);
+                                            let lhs = &self.heap[lhs_addr.0];
+                                            let rhs = &self.heap[rhs_addr.0];
+                                            if let (GNode::Integer(l), GNode::Integer(r)) =
+                                                (lhs, rhs)
+                                            {
+                                                let result_addr =
+                                                    self.alloc(GNode::Integer((l >= r) as i64));
+                                                self.stack.push(result_addr);
+                                            }
+                                        }
+                                        "<" => {
+                                            let lhs_addr = args.pop().unwrap();
+                                            let rhs_addr = args.pop().unwrap();
+                                            let lhs_addr = self.force(lhs_addr);
+                                            let rhs_addr = self.force(rhs_addr);
+                                            let lhs = &self.heap[lhs_addr.0];
+                                            let rhs = &self.heap[rhs_addr.0];
+                                            if let (GNode::Integer(l), GNode::Integer(r)) =
+                                                (lhs, rhs)
+                                            {
+                                                let result_addr =
+                                                    self.alloc(GNode::Integer((l < r) as i64));
+                                                self.stack.push(result_addr);
+                                            }
+                                        }
+                                        ">" => {
+                                            let lhs_addr = args.pop().unwrap();
+                                            let rhs_addr = args.pop().unwrap();
+                                            let lhs_addr = self.force(lhs_addr);
+                                            let rhs_addr = self.force(rhs_addr);
+                                            let lhs = &self.heap[lhs_addr.0];
+                                            let rhs = &self.heap[rhs_addr.0];
+                                            if let (GNode::Integer(l), GNode::Integer(r)) =
+                                                (lhs, rhs)
+                                            {
+                                                let result_addr =
+                                                    self.alloc(GNode::Integer((l > r) as i64));
+                                                self.stack.push(result_addr);
+                                            }
+                                        }
+                                        "&&" => {
+                                            let lhs_addr = args.pop().unwrap();
+                                            let lhs_addr = self.force(lhs_addr);
+                                            let lhs = &self.heap[lhs_addr.0];
+                                            if let GNode::Integer(l) = lhs
+                                                && *l == 1
+                                            {
+                                                let rhs_addr = args.pop().unwrap();
+                                                let rhs_addr = self.force(rhs_addr);
+                                                let rhs = &self.heap[rhs_addr.0];
+                                                if let GNode::Integer(r) = rhs
+                                                    && *r == 1
+                                                {
+                                                    let result_addr = self.alloc(GNode::Integer(1));
+                                                    self.stack.push(result_addr);
+                                                } else {
+                                                    let result_addr = self.alloc(GNode::Integer(0));
+                                                    self.stack.push(result_addr);
+                                                }
+                                            } else {
+                                                let result_addr = self.alloc(GNode::Integer(0));
+                                                self.stack.push(result_addr);
+                                            }
+                                        }
+                                        "||" => {
+                                            let lhs_addr = args.pop().unwrap();
+                                            let lhs_addr = self.force(lhs_addr);
+                                            let lhs = &self.heap[lhs_addr.0];
+                                            if let GNode::Integer(l) = lhs
+                                                && *l == 1
+                                            {
+                                                let result_addr = self.alloc(GNode::Integer(1));
+                                                self.stack.push(result_addr);
+                                            } else {
+                                                let rhs_addr = args.pop().unwrap();
+                                                let rhs_addr = self.force(rhs_addr);
+                                                let rhs = &self.heap[rhs_addr.0];
+                                                if let GNode::Integer(r) = rhs
+                                                    && *r == 1
+                                                {
+                                                    let result_addr = self.alloc(GNode::Integer(1));
+                                                    self.stack.push(result_addr);
+                                                } else {
+                                                    let result_addr = self.alloc(GNode::Integer(0));
+                                                    self.stack.push(result_addr);
+                                                }
                                             }
                                         }
                                         _ => unreachable!(),
@@ -310,58 +504,160 @@ impl GMachine {
                         }
                     }
                 }
+                Instruction::Print => {
+                    let result_addr = self.stack.pop().unwrap();
+                    match &self.heap[result_addr.0] {
+                        GNode::Integer(i) => self.output.push(Value::Integer(*i)),
+                        GNode::Constructor(_, args) => {
+                            let mut new_insts = Vec::new();
+                            for a in args.iter().rev() {
+                                self.stack.push(*a);
+                                new_insts.push(Instruction::Eval);
+                                new_insts.push(Instruction::Print);
+                            }
+                            self.instructions.extend(new_insts);
+                        }
+                        _ => unreachable!(),
+                    }
+                    self.pc += 1;
+                }
             }
 
-            println!("instructions: {:?}", self.instructions);
-            println!("stack: {:?}", self.stack);
-            println!("heap: {:?}", self.heap);
-            println!("dump: {:?}", self.dump);
+            //     println!("instructions: {:?}", self.instructions);
+            //     println!(
+            //         "stack: {:?}",
+            //         self.stack
+            //             .iter()
+            //             .map(|a| &self.heap[a.0])
+            //             .collect::<Vec<_>>()
+            //     );
+            //     println!("heap: {:?}", self.heap);
+            //     println!("dump: {:?}", self.dump);
+            //     println!("output: {:?}", self.output);
         }
 
-        let result_addr = *self.stack.last().unwrap();
-        println!("------");
-        println!("result: {:?}", self.heap[result_addr.0]);
-        match self.heap[result_addr.0] {
-            GNode::Integer(i) => Value::Integer(i),
-            _ => Value::Unit,
-        }
+        // println!();
     }
 }
 
 fn compile_expr(
     ctx: &Context,
     node: NodeId,
-    params: &HashMap<String, usize>,
+    types: &FxHashMap<String, FxHashMap<String, usize>>,
+    offsets: &FxHashMap<String, usize>,
     out: &mut Vec<Instruction>,
 ) {
     match ctx.get_node(node) {
         Node::Expr(expr) => match expr {
             Expr::Boolean(b) => out.push(Instruction::PushInt(*b as i64)),
             Expr::Integer(i) => out.push(Instruction::PushInt(*i)),
+            Expr::Constructor(cons) => out.push(Instruction::PushGlobal(cons.clone())),
             Expr::Identifier(id) => {
-                if let Some(offset) = params.get(id) {
+                if let Some(offset) = offsets.get(id) {
                     out.push(Instruction::Push(*offset));
                 } else {
                     out.push(Instruction::PushGlobal(id.clone()));
                 }
             }
             Expr::Application { func, arg } => {
-                compile_expr(&ctx, *arg, params, out);
+                compile_expr(&ctx, *arg, types, offsets, out);
                 compile_expr(
                     &ctx,
                     *func,
-                    &params.iter().map(|(k, v)| (k.clone(), v + 1)).collect(),
+                    types,
+                    &offsets.iter().map(|(k, v)| (k.clone(), v + 1)).collect(),
                     out,
                 );
                 out.push(Instruction::MkAp);
             }
+            Expr::Match(scrutinee, branches) => {
+                let consts = match ctx.get_type(*scrutinee) {
+                    Some(Type::Adt(name, _)) => types.get(name).unwrap(),
+                    _ => todo!(),
+                };
+                let mut consts_used = FxHashSet::default();
+                compile_expr(&ctx, *scrutinee, types, offsets, out);
+                out.push(Instruction::Eval);
+                let mut compiled_branches = FxHashMap::default();
+                for (pattern, body) in branches {
+                    match pattern {
+                        Pattern::Wildcard => {
+                            for cons in consts
+                                .keys()
+                                .collect::<FxHashSet<_>>()
+                                .difference(&consts_used)
+                            {
+                                let mut insts = Vec::new();
+                                compile_expr(
+                                    &ctx,
+                                    *body,
+                                    types,
+                                    &offsets.iter().map(|(k, v)| (k.clone(), v + 1)).collect(),
+                                    &mut insts,
+                                );
+                                insts.push(Instruction::Slide(1));
+                                compiled_branches.insert(*consts.get(*cons).unwrap(), insts);
+                            }
+                        }
+                        Pattern::Identifier(id) => {
+                            for cons in consts
+                                .keys()
+                                .collect::<FxHashSet<_>>()
+                                .difference(&consts_used)
+                            {
+                                let mut insts = Vec::new();
+                                compile_expr(
+                                    &ctx,
+                                    *body,
+                                    types,
+                                    &offsets
+                                        .iter()
+                                        .map(|(k, v)| (k.clone(), v + 1))
+                                        .chain(std::iter::once((id.clone(), offsets.len())))
+                                        .collect(),
+                                    &mut insts,
+                                );
+                                insts.push(Instruction::Slide(1));
+                                compiled_branches.insert(*consts.get(*cons).unwrap(), insts);
+                            }
+                        }
+                        Pattern::Constructor(name, subpatterns) => {
+                            consts_used.insert(name);
+                            let mut insts = Vec::new();
+                            if !subpatterns.is_empty() {
+                                insts.push(Instruction::Split(subpatterns.len()));
+                            }
+                            compile_expr(
+                                &ctx,
+                                *body,
+                                types,
+                                &offsets
+                                    .iter()
+                                    .map(|(k, v)| (k.clone(), v + subpatterns.len().max(1)))
+                                    .chain(subpatterns.iter().enumerate().filter_map(|(i, p)| {
+                                        if let Pattern::Identifier(id) = p {
+                                            Some((id.clone(), i))
+                                        } else {
+                                            None
+                                        }
+                                    }))
+                                    .collect::<FxHashMap<_, _>>(),
+                                &mut insts,
+                            );
+                            insts.push(Instruction::Slide(subpatterns.len().max(1)));
+                            compiled_branches.insert(*consts.get(name).unwrap(), insts);
+                        }
+                    }
+                }
+                out.push(Instruction::Case(compiled_branches));
+            }
             Expr::Condition { cond, then, alt } => {
-                compile_expr(&ctx, *cond, params, out);
+                compile_expr(&ctx, *cond, types, offsets, out);
                 out.push(Instruction::Eval);
                 let mut then_insts = Vec::new();
-                compile_expr(&ctx, *then, &params, &mut then_insts);
+                compile_expr(&ctx, *then, types, &offsets, &mut then_insts);
                 let mut alt_insts = Vec::new();
-                compile_expr(&ctx, *alt, &params, &mut alt_insts);
+                compile_expr(&ctx, *alt, types, &offsets, &mut alt_insts);
                 out.push(Instruction::Cond(then_insts, alt_insts));
             }
             other => todo!("{other:?}"),
@@ -372,22 +668,58 @@ fn compile_expr(
 
 fn compile(ctx: &Context, nodes: &[NodeId]) -> Vec<Super> {
     let mut ir = Vec::new();
+
+    let types = nodes
+        .iter()
+        .filter_map(|n| match ctx.get_node(*n) {
+            Node::Type(name, _, constructors) => Some((
+                name.clone(),
+                constructors
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (c, _))| (c.clone(), i + 1))
+                    .collect::<FxHashMap<_, _>>(),
+            )),
+            _ => None,
+        })
+        .collect::<FxHashMap<_, _>>();
+
     for node in nodes {
         match ctx.get_node(*node).clone() {
+            Node::Type(_, _, constructors) => {
+                for (i, (cons, args)) in constructors.iter().enumerate() {
+                    let mut sc = Super::new(cons.clone());
+                    sc.arity = args.len();
+                    for (i, (j, _)) in args.iter().enumerate().rev().enumerate() {
+                        sc.instructions.push(Instruction::Push(j + i));
+                    }
+                    sc.instructions.push(Instruction::Pack(i + 1, sc.arity));
+                    sc.instructions.push(Instruction::Update(sc.arity));
+                    sc.instructions.push(Instruction::Pop(sc.arity));
+                    sc.instructions.push(Instruction::Unwind);
+                    ir.push(sc);
+                }
+            }
             Node::Bind(name, expr) => {
                 let mut sc = Super::new(name);
                 match ctx.get_node(expr).clone() {
                     Node::Expr(Expr::Lambda { .. }) => {
-                        let mut params = HashMap::new();
+                        let mut offsets = FxHashMap::default();
                         let mut node = expr;
                         while let Node::Expr(Expr::Lambda { param, body }) = ctx.get_node(node) {
-                            params.insert(param.clone(), params.len());
+                            offsets.insert(param.clone(), offsets.len());
                             node = *body;
+                            sc.arity += 1;
                         }
-                        sc.arity = params.len();
-                        compile_expr(ctx, node, &params, &mut sc.instructions);
+                        compile_expr(ctx, node, &types, &offsets, &mut sc.instructions);
                     }
-                    _ => compile_expr(ctx, expr, &HashMap::new(), &mut sc.instructions),
+                    _ => compile_expr(
+                        ctx,
+                        expr,
+                        &types,
+                        &FxHashMap::default(),
+                        &mut sc.instructions,
+                    ),
                 }
                 sc.instructions.push(Instruction::Update(sc.arity));
                 sc.instructions.push(Instruction::Pop(sc.arity));
@@ -541,7 +873,11 @@ fn run_cmd(source_path: &PathBuf) -> Result<()> {
     let ir = compile(&ctx, &nodes);
 
     let mut machine = GMachine::new();
-    machine.instructions = Vec::from([Instruction::PushGlobal("main".into()), Instruction::Eval]);
+    machine.instructions = Vec::from([
+        Instruction::PushGlobal("main".into()),
+        Instruction::Eval,
+        Instruction::Print,
+    ]);
 
     for s in ir {
         let global = machine.alloc(GNode::Global(
@@ -552,20 +888,32 @@ fn run_cmd(source_path: &PathBuf) -> Result<()> {
         machine.globals.insert(s.name.clone(), global);
     }
 
+    let println_global = machine.alloc(GNode::Global("println".into(), 1, Global::Builtin));
     let add_global = machine.alloc(GNode::Global("+".into(), 2, Global::Builtin));
     let sub_global = machine.alloc(GNode::Global("-".into(), 2, Global::Builtin));
     let mul_global = machine.alloc(GNode::Global("*".into(), 2, Global::Builtin));
     let eq_global = machine.alloc(GNode::Global("==".into(), 2, Global::Builtin));
     let le_global = machine.alloc(GNode::Global("<=".into(), 2, Global::Builtin));
+    let ge_global = machine.alloc(GNode::Global(">=".into(), 2, Global::Builtin));
+    let lt_global = machine.alloc(GNode::Global("<".into(), 2, Global::Builtin));
+    let gt_global = machine.alloc(GNode::Global(">".into(), 2, Global::Builtin));
+    let and_global = machine.alloc(GNode::Global("&&".into(), 2, Global::Builtin));
+    let or_global = machine.alloc(GNode::Global("||".into(), 2, Global::Builtin));
+    machine.globals.insert("println".into(), println_global);
     machine.globals.insert("+".into(), add_global);
     machine.globals.insert("-".into(), sub_global);
     machine.globals.insert("*".into(), mul_global);
     machine.globals.insert("==".into(), eq_global);
     machine.globals.insert("<=".into(), le_global);
+    machine.globals.insert(">=".into(), ge_global);
+    machine.globals.insert("<".into(), lt_global);
+    machine.globals.insert(">".into(), gt_global);
+    machine.globals.insert("&&".into(), and_global);
+    machine.globals.insert("||".into(), or_global);
 
-    let res = machine.run();
+    machine.run();
 
-    println!("{res}");
+    println!("result: {:?}", machine.output);
 
     Ok(())
 }

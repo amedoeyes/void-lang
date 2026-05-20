@@ -6,7 +6,7 @@ use std::{
 
 use crate::{
     context::{Associativity, Context, NodeId},
-    expr::{Expr, TypeExpr},
+    expr::{Expr, Pattern, TypeExpr},
     lexer::{self, Delimiter, Keyword, Lexer, Literal, Token},
     span::Span,
 };
@@ -277,6 +277,7 @@ impl<'a> Parser<'a> {
                 (Token::Symbol(s), _) if s == "->" => self.parse_lambda_expr(),
                 _ => self.parse_identifier(),
             },
+            Token::Keyword(Keyword::Match) => self.parse_match_expr(),
             Token::Keyword(Keyword::If) => self.parse_cond_expr(),
             Token::Delimiter(Delimiter::ParenLeft) => match self.peek(1)?.0 {
                 Token::Delimiter(Delimiter::ParenRight) => self.parse_unit_lit(),
@@ -449,6 +450,53 @@ impl<'a> Parser<'a> {
         let start_span = self.expect(Token::Delimiter(Delimiter::ParenLeft))?.1;
         let end_span = self.expect(Token::Delimiter(Delimiter::ParenRight))?.1;
         let expr = self.context.add_expr(Expr::Unit);
+        self.context.set_span(expr, start_span.merge(end_span));
+        Ok(expr)
+    }
+
+    fn parse_pattern(&mut self) -> std::result::Result<Pattern, Error> {
+        match self.peek(0)?.0 {
+            Token::Identifier(id) if id == "_" => {
+                self.advance()?;
+                Ok(Pattern::Wildcard)
+            }
+            Token::Identifier(id) => {
+                self.advance()?;
+                Ok(Pattern::Identifier(id))
+            }
+            Token::Type(ty) => {
+                self.advance()?;
+                let mut args = Vec::new();
+                while let Ok(arg) = self.parse_pattern() {
+                    args.push(arg);
+                }
+                Ok(Pattern::Constructor(ty, args))
+            }
+            _ => Err(Error::UnexpectedToken("pattern".to_string(), self.peek(0)?)),
+        }
+    }
+
+    fn parse_match_expr(&mut self) -> std::result::Result<NodeId, Error> {
+        let start_span = self.expect(Token::Keyword(Keyword::Match))?.1;
+        let cond = self.parse_expr(0)?;
+        self.expect(Token::Keyword(Keyword::With))?;
+        let mut branches = Vec::new();
+        loop {
+            let pattern = self.parse_pattern()?;
+            self.expect(Token::Symbol("=>".into()))?;
+            let body = self.parse_expr(0)?;
+            branches.push((pattern, body));
+            match self.peek(0)?.0 {
+                Token::Delimiter(Delimiter::Comma) => {
+                    self.advance()?;
+                    continue;
+                }
+                _ => break,
+            }
+        }
+
+        let end_span = self.context.get_span(branches.last().unwrap().1);
+        let expr = self.context.add_expr(Expr::Match(cond, branches));
         self.context.set_span(expr, start_span.merge(end_span));
         Ok(expr)
     }
