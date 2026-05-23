@@ -12,7 +12,7 @@ use void::{
     type_system::infer,
     vm::{
         interperter::{GMachine, Global, Node as GNode},
-        ir::{Instruction, compile},
+        ir::{Instruction, generate},
     },
 };
 
@@ -110,11 +110,11 @@ fn ir_cmd(source_path: &PathBuf) -> Result<()> {
         )));
     }
 
-    let ir = compile(&ctx, &nodes);
+    let ir = generate(&ctx);
 
-    for (n, s) in ir {
-        println!("{} {}:", n, s.arity);
-        for i in s.instructions {
+    for (name, (arity, insts)) in ir {
+        println!("{} {}:", name, arity);
+        for i in insts {
             println!("  {i}");
         }
         println!();
@@ -160,7 +160,7 @@ fn run_cmd(source_path: &PathBuf) -> Result<()> {
         )));
     }
 
-    let ir = compile(&ctx, &nodes);
+    let ir = generate(&ctx);
 
     let mut machine = GMachine::new();
     machine.instructions = Vec::from([
@@ -169,13 +169,9 @@ fn run_cmd(source_path: &PathBuf) -> Result<()> {
         Instruction::Print,
     ]);
 
-    for (n, s) in ir {
-        let global = machine.alloc(GNode::Global(
-            n.clone(),
-            s.arity,
-            Global::Super(s.instructions),
-        ));
-        machine.globals.insert(n, global);
+    for (name, (arity, insts)) in ir {
+        let global = machine.alloc(GNode::Global(name.clone(), arity, Global::Super(insts)));
+        machine.globals.insert(name, global);
     }
 
     let println_global = machine.alloc(GNode::Global("println".into(), 1, Global::Builtin));

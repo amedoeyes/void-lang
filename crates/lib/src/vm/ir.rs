@@ -94,184 +94,194 @@ impl Super {
     }
 }
 
-pub fn compile_expr(
-    ctx: &Context,
-    node: NodeId,
-    types: &FxHashMap<String, FxHashMap<String, usize>>,
-    offsets: &FxHashMap<String, usize>,
-    out: &mut Vec<Instruction>,
-) {
-    match ctx.get_node(node) {
-        Node::Expr(expr) => match expr {
-            Expr::Integer(i) => out.push(Instruction::PushInt(*i)),
-            Expr::Constructor(cons) => out.push(Instruction::PushGlobal(cons.clone())),
-            Expr::Identifier(id) => {
-                if let Some(offset) = offsets.get(id) {
-                    out.push(Instruction::Push(*offset));
-                } else {
-                    out.push(Instruction::PushGlobal(id.clone()));
-                }
-            }
-            Expr::Application { func, arg } => {
-                compile_expr(&ctx, *arg, types, offsets, out);
-                compile_expr(
-                    &ctx,
-                    *func,
-                    types,
-                    &offsets.iter().map(|(k, v)| (k.clone(), v + 1)).collect(),
-                    out,
-                );
-                out.push(Instruction::MkAp);
-            }
-            Expr::Match(scrutinee, branches) => {
-                let consts = match ctx.get_type(*scrutinee) {
-                    Some(Type::Adt(name, _)) => types.get(name).unwrap(),
-                    _ => todo!(),
-                };
-                let mut consts_used = FxHashSet::default();
-                compile_expr(&ctx, *scrutinee, types, offsets, out);
-                out.push(Instruction::Eval);
-                let mut compiled_branches = FxHashMap::default();
-                for (pattern, body) in branches {
-                    match pattern {
-                        Pattern::Wildcard => {
-                            for cons in consts
-                                .keys()
-                                .collect::<FxHashSet<_>>()
-                                .difference(&consts_used)
-                            {
-                                let mut insts = Vec::new();
-                                compile_expr(
-                                    &ctx,
-                                    *body,
-                                    types,
-                                    &offsets.iter().map(|(k, v)| (k.clone(), v + 1)).collect(),
-                                    &mut insts,
-                                );
-                                insts.push(Instruction::Slide(1));
-                                compiled_branches.insert(*consts.get(*cons).unwrap(), insts);
-                            }
-                        }
-                        Pattern::Identifier(id) => {
-                            for cons in consts
-                                .keys()
-                                .collect::<FxHashSet<_>>()
-                                .difference(&consts_used)
-                            {
-                                let mut insts = Vec::new();
-                                compile_expr(
-                                    &ctx,
-                                    *body,
-                                    types,
-                                    &offsets
-                                        .iter()
-                                        .map(|(k, v)| (k.clone(), v + 1))
-                                        .chain(std::iter::once((id.clone(), offsets.len())))
-                                        .collect(),
-                                    &mut insts,
-                                );
-                                insts.push(Instruction::Slide(1));
-                                compiled_branches.insert(*consts.get(*cons).unwrap(), insts);
-                            }
-                        }
-                        Pattern::Constructor(name, subpatterns) => {
-                            consts_used.insert(name);
-                            let mut insts = Vec::new();
-                            if !subpatterns.is_empty() {
-                                insts.push(Instruction::Split(subpatterns.len()));
-                            }
-                            compile_expr(
-                                &ctx,
-                                *body,
-                                types,
-                                &offsets
-                                    .iter()
-                                    .map(|(k, v)| (k.clone(), v + subpatterns.len().max(1)))
-                                    .chain(subpatterns.iter().enumerate().filter_map(|(i, p)| {
-                                        if let Pattern::Identifier(id) = p {
-                                            Some((id.clone(), i))
-                                        } else {
-                                            None
-                                        }
-                                    }))
-                                    .collect::<FxHashMap<_, _>>(),
-                                &mut insts,
-                            );
-                            insts.push(Instruction::Slide(subpatterns.len().max(1)));
-                            compiled_branches.insert(*consts.get(name).unwrap(), insts);
-                        }
+#[derive(Debug)]
+pub struct IRGenerator<'a> {
+    pub context: &'a Context,
+    pub symbols: FxHashMap<String, (usize, Vec<Instruction>)>,
+    pub type_consts: FxHashMap<String, FxHashMap<String, usize>>,
+    pub lambda_counter: usize,
+}
+
+impl<'a> IRGenerator<'a> {
+    pub fn new(context: &'a Context) -> Self {
+        let type_consts = context
+            .nodes()
+            .iter()
+            .filter_map(|n| match n {
+                Node::Type(name, _, constructors) => Some((
+                    name.clone(),
+                    constructors
+                        .iter()
+                        .enumerate()
+                        .map(|(i, (c, _))| (c.clone(), i + 1))
+                        .collect::<FxHashMap<_, _>>(),
+                )),
+                _ => None,
+            })
+            .collect::<FxHashMap<_, _>>();
+
+        Self {
+            context,
+            symbols: FxHashMap::default(),
+            type_consts,
+            lambda_counter: 0,
+        }
+    }
+
+    pub fn generate(&self) -> FxHashMap<String, (usize, Vec<Instruction>)> {
+        let mut res = FxHashMap::default();
+
+        for node in self.context.nodes() {
+            match node.clone() {
+                Node::Type(_, _, constructors) => {
+                    for (i, (cons, args)) in constructors.iter().enumerate() {
+                        let mut insts = Vec::new();
+                        let arity = args.len();
+                        insts.push(Instruction::Pack(i + 1, arity));
+                        insts.push(Instruction::Update(0));
+                        insts.push(Instruction::Unwind);
+                        res.insert(cons.clone(), (arity, insts));
                     }
                 }
-                out.push(Instruction::Case(compiled_branches));
+                Node::Bind(name, expr) => {
+                    let mut insts = Vec::new();
+                    let mut arity = 0;
+                    match self.context.get_node(expr).clone() {
+                        Node::Expr(Expr::Lambda { .. }) => {
+                            let mut offsets = FxHashMap::default();
+                            let mut node = expr;
+                            while let Node::Expr(Expr::Lambda { param, body }) =
+                                self.context.get_node(node)
+                            {
+                                offsets.insert(param.clone(), offsets.len());
+                                node = *body;
+                                arity += 1;
+                            }
+                            self.generate_expr(node, &offsets, &mut insts)
+                        }
+                        _ => self.generate_expr(expr, &FxHashMap::default(), &mut insts),
+                    }
+                    insts.push(Instruction::Update(arity));
+                    insts.push(Instruction::Pop(arity));
+                    insts.push(Instruction::Unwind);
+                    res.insert(name, (arity, insts));
+                }
+                _ => continue,
             }
-            other => todo!("{other:?}"),
-        },
-        _ => unreachable!(),
+        }
+        res
+    }
+
+    pub fn generate_expr(
+        &self,
+        node: NodeId,
+        offsets: &FxHashMap<String, usize>,
+        out: &mut Vec<Instruction>,
+    ) {
+        match self.context.get_node(node) {
+            Node::Expr(expr) => match expr {
+                Expr::Integer(i) => out.push(Instruction::PushInt(*i)),
+                Expr::Constructor(cons) => out.push(Instruction::PushGlobal(cons.clone())),
+                Expr::Identifier(id) => {
+                    if let Some(offset) = offsets.get(id) {
+                        out.push(Instruction::Push(*offset));
+                    } else {
+                        out.push(Instruction::PushGlobal(id.clone()));
+                    }
+                }
+                Expr::Application { func, arg } => {
+                    self.generate_expr(*arg, offsets, out);
+                    self.generate_expr(
+                        *func,
+                        &offsets.iter().map(|(k, v)| (k.clone(), v + 1)).collect(),
+                        out,
+                    );
+                    out.push(Instruction::MkAp);
+                }
+                Expr::Match(scrutinee, branches) => {
+                    let consts = match self.context.get_type(*scrutinee) {
+                        Some(Type::Adt(name, _)) => self.type_consts.get(name).unwrap(),
+                        _ => todo!(),
+                    };
+                    let mut consts_used = FxHashSet::default();
+                    self.generate_expr(*scrutinee, offsets, out);
+                    out.push(Instruction::Eval);
+                    let mut compiled_branches = FxHashMap::default();
+                    for (pattern, body) in branches {
+                        match pattern {
+                            Pattern::Wildcard => {
+                                for cons in consts
+                                    .keys()
+                                    .collect::<FxHashSet<_>>()
+                                    .difference(&consts_used)
+                                {
+                                    let mut insts = Vec::new();
+                                    self.generate_expr(
+                                        *body,
+                                        &offsets.iter().map(|(k, v)| (k.clone(), v + 1)).collect(),
+                                        &mut insts,
+                                    );
+                                    insts.push(Instruction::Slide(1));
+                                    compiled_branches.insert(*consts.get(*cons).unwrap(), insts);
+                                }
+                            }
+                            Pattern::Identifier(id) => {
+                                for cons in consts
+                                    .keys()
+                                    .collect::<FxHashSet<_>>()
+                                    .difference(&consts_used)
+                                {
+                                    let mut insts = Vec::new();
+                                    self.generate_expr(
+                                        *body,
+                                        &offsets
+                                            .iter()
+                                            .map(|(k, v)| (k.clone(), v + 1))
+                                            .chain(std::iter::once((id.clone(), offsets.len())))
+                                            .collect(),
+                                        &mut insts,
+                                    );
+                                    insts.push(Instruction::Slide(1));
+                                    compiled_branches.insert(*consts.get(*cons).unwrap(), insts);
+                                }
+                            }
+                            Pattern::Constructor(name, subpatterns) => {
+                                consts_used.insert(name);
+                                let mut insts = Vec::new();
+                                if !subpatterns.is_empty() {
+                                    insts.push(Instruction::Split(subpatterns.len()));
+                                }
+                                self.generate_expr(
+                                    *body,
+                                    &offsets
+                                        .iter()
+                                        .map(|(k, v)| (k.clone(), v + subpatterns.len().max(1)))
+                                        .chain(subpatterns.iter().enumerate().filter_map(
+                                            |(i, p)| {
+                                                if let Pattern::Identifier(id) = p {
+                                                    Some((id.clone(), i))
+                                                } else {
+                                                    None
+                                                }
+                                            },
+                                        ))
+                                        .collect::<FxHashMap<_, _>>(),
+                                    &mut insts,
+                                );
+                                insts.push(Instruction::Slide(subpatterns.len().max(1)));
+                                compiled_branches.insert(*consts.get(name).unwrap(), insts);
+                            }
+                        }
+                    }
+                    out.push(Instruction::Case(compiled_branches));
+                }
+                other => todo!("{other:?}"),
+            },
+            _ => unreachable!(),
+        }
     }
 }
 
-pub fn compile(ctx: &Context, nodes: &[NodeId]) -> FxHashMap<String, Super> {
-    let mut ir = FxHashMap::default();
-
-    let types = nodes
-        .iter()
-        .filter_map(|n| match ctx.get_node(*n) {
-            Node::Type(name, _, constructors) => Some((
-                name.clone(),
-                constructors
-                    .iter()
-                    .enumerate()
-                    .map(|(i, (c, _))| (c.clone(), i + 1))
-                    .collect::<FxHashMap<_, _>>(),
-            )),
-            _ => None,
-        })
-        .collect::<FxHashMap<_, _>>();
-
-    for node in nodes {
-        match ctx.get_node(*node).clone() {
-            Node::Type(_, _, constructors) => {
-                for (i, (cons, args)) in constructors.iter().enumerate() {
-                    let mut sc = Super::new();
-                    sc.arity = args.len();
-                    for (i, (j, _)) in args.iter().enumerate().rev().enumerate() {
-                        sc.instructions.push(Instruction::Push(j + i));
-                    }
-                    sc.instructions.push(Instruction::Pack(i + 1, sc.arity));
-                    sc.instructions.push(Instruction::Update(sc.arity));
-                    sc.instructions.push(Instruction::Pop(sc.arity));
-                    sc.instructions.push(Instruction::Unwind);
-                    ir.insert(cons.clone(), sc);
-                }
-            }
-            Node::Bind(name, expr) => {
-                let mut sc = Super::new();
-                match ctx.get_node(expr).clone() {
-                    Node::Expr(Expr::Lambda { .. }) => {
-                        let mut offsets = FxHashMap::default();
-                        let mut node = expr;
-                        while let Node::Expr(Expr::Lambda { param, body }) = ctx.get_node(node) {
-                            offsets.insert(param.clone(), offsets.len());
-                            node = *body;
-                            sc.arity += 1;
-                        }
-                        compile_expr(ctx, node, &types, &offsets, &mut sc.instructions);
-                    }
-                    _ => compile_expr(
-                        ctx,
-                        expr,
-                        &types,
-                        &FxHashMap::default(),
-                        &mut sc.instructions,
-                    ),
-                }
-                sc.instructions.push(Instruction::Update(sc.arity));
-                sc.instructions.push(Instruction::Pop(sc.arity));
-                sc.instructions.push(Instruction::Unwind);
-                ir.insert(name, sc);
-            }
-            _ => continue,
-        }
-    }
-    ir
+pub fn generate(ctx: &Context) -> FxHashMap<String, (usize, Vec<Instruction>)> {
+    IRGenerator::new(ctx).generate()
 }
