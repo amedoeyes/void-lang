@@ -6,3 +6,4 @@ pub mod modules;
 pub mod parser;
 pub mod span;
 pub mod type_system;
+pub mod vm;
