@@ -200,19 +200,6 @@ impl GMachine {
                     }
                     self.pc += 1;
                 }
-                Instruction::Cond(t, f) => {
-                    let addr = self.stack.pop().unwrap();
-                    match self.heap[addr.0] {
-                        Node::Integer(i) if i == 1 => {
-                            self.instructions.splice(self.pc + 1..self.pc + 1, t);
-                        }
-                        Node::Integer(i) if i == 0 => {
-                            self.instructions.splice(self.pc + 1..self.pc + 1, f);
-                        }
-                        _ => todo!(),
-                    }
-                    self.pc += 1;
-                }
                 Instruction::Eval => {
                     let top = *self.stack.last().unwrap();
                     if !self.is_whnf(top) {

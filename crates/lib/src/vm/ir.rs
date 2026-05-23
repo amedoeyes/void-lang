@@ -20,7 +20,6 @@ pub enum Instruction {
     Pack(usize, usize),
     Split(usize),
     Case(FxHashMap<usize, Vec<Instruction>>),
-    Cond(Vec<Instruction>, Vec<Instruction>),
     Eval,
     Unwind,
     Print,
@@ -55,22 +54,6 @@ impl Display for Instruction {
                                     .join(", ")
                             )
                         })
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            }
-            Instruction::Cond(t_branch, f_branch) => {
-                write!(
-                    f,
-                    "Cond {{ true => {}, false = {} }}",
-                    t_branch
-                        .iter()
-                        .map(|i| format!("{i}"))
-                        .collect::<Vec<_>>()
-                        .join(", "),
-                    f_branch
-                        .iter()
-                        .map(|i| format!("{i}"))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
