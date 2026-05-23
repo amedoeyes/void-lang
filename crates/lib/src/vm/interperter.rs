@@ -2,7 +2,7 @@ use std::fmt::{Display, Formatter};
 
 use fxhash::FxHashMap;
 
-use crate::vm::instructions::Instruction;
+use crate::vm::ir::Instruction;
 
 #[derive(Debug, Clone)]
 pub enum Value {

@@ -11,9 +11,8 @@ use void::{
     parser::{self, parse},
     type_system::infer,
     vm::{
-        compiler::compile,
-        instructions::Instruction,
         interperter::{GMachine, Global, Node as GNode},
+        ir::{Instruction, compile},
     },
 };
 
@@ -54,7 +53,7 @@ enum Commands {
     Parse { file: PathBuf },
     Type { file: PathBuf },
     // Repl { file: Option<PathBuf> },
-    Compile { file: PathBuf },
+    Ir { file: PathBuf },
     Run { file: PathBuf },
 }
 
@@ -64,7 +63,7 @@ fn main() {
         Commands::Parse { file } => parse_cmd(&file),
         Commands::Type { file } => type_cmd(&file),
         // Commands::Repl { file } => repl_cmd(file.as_ref()),
-        Commands::Compile { file } => compile_cmd(&file),
+        Commands::Ir { file } => ir_cmd(&file),
         Commands::Run { file } => run_cmd(&file),
     };
 
@@ -74,7 +73,7 @@ fn main() {
     }
 }
 
-fn compile_cmd(source_path: &PathBuf) -> Result<()> {
+fn ir_cmd(source_path: &PathBuf) -> Result<()> {
     let mut ctx = Context::new();
 
     let parent_dir = source_path
@@ -113,7 +112,13 @@ fn compile_cmd(source_path: &PathBuf) -> Result<()> {
 
     let ir = compile(&ctx, &nodes);
 
-    println!("{ir:#?}");
+    for (n, s) in ir {
+        println!("{} {}:", n, s.arity);
+        for i in s.instructions {
+            println!("  {i}");
+        }
+        println!();
+    }
 
     Ok(())
 }
@@ -164,13 +169,13 @@ fn run_cmd(source_path: &PathBuf) -> Result<()> {
         Instruction::Print,
     ]);
 
-    for s in ir {
+    for (n, s) in ir {
         let global = machine.alloc(GNode::Global(
-            s.name.clone(),
+            n.clone(),
             s.arity,
             Global::Super(s.instructions),
         ));
-        machine.globals.insert(s.name.clone(), global);
+        machine.globals.insert(n, global);
     }
 
     let println_global = machine.alloc(GNode::Global("println".into(), 1, Global::Builtin));
