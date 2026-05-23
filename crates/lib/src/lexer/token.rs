@@ -29,7 +29,6 @@ pub enum Keyword {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Literal {
-    Bool(bool),
     Integer(String),
     Char(char),
     String(String),
@@ -81,7 +80,6 @@ impl Display for Keyword {
 impl Display for Literal {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Literal::Bool(val) => write!(f, "Bool({val})"),
             Literal::Integer(val) => write!(f, "{val}"),
             Literal::Char(val) => write!(f, "'{val}'"),
             Literal::String(val) => write!(f, "\"{val}\""),

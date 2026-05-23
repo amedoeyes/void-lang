@@ -230,7 +230,6 @@ impl<'a> fmt::Display for Display<'a> {
             },
             Node::Expr(expr) => match expr {
                 Expr::Unit => write!(f, "()"),
-                Expr::Boolean(val) => write!(f, "{val}"),
                 Expr::Char(val) => write!(f, "'{}'", val.escape_default()),
                 Expr::Integer(val) => write!(f, "{val}"),
                 Expr::Constructor(cons) => write!(f, "{cons}"),
@@ -246,13 +245,6 @@ impl<'a> fmt::Display for Display<'a> {
                             .join(", ")
                     )
                 }
-                Expr::Condition { cond, then, alt } => write!(
-                    f,
-                    "if {} then {} else {}",
-                    Display::new(*cond, self.context),
-                    Display::new(*then, self.context),
-                    Display::new(*alt, self.context)
-                ),
                 Expr::Lambda { param, body } => {
                     write!(f, "{} -> {}", param, Display::new(*body, self.context))
                 }

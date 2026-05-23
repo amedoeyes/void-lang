@@ -10,35 +10,26 @@ use crate::expr::{Pattern, TypeExpr};
 use crate::{expr::Expr, span::Span};
 
 #[macro_export]
-macro_rules! ty  {
-    (Int) => { $crate::type_system::Type::Int };
-    (Char) => { $crate::type_system::Type::Char };
-    (Bool) => { $crate::type_system::Type::Bool };
+macro_rules! ty {
+    (Int) => { Type::Int };
+    (Char) => { Type::Char };
     (()) => { Type::Unit };
 
-    ($param:tt -> $body:tt) => {
-        $crate::type_system::Type::Fun(Box::new(ty!($param)), Box::new(ty!($body)))
-    };
+    ($param:tt -> $body:tt) => { Type::Fun(Box::new(ty!($param)), Box::new(ty!($body))) };
 
-    ($param:tt -> $body:tt -> $($rest:tt)*) => {
-        $crate::type_system::Type::Fun(Box::new(ty!($param)), Box::new(ty!($body -> $($rest)*)))
-    };
+    ($param:tt -> $body:tt -> $($rest:tt)*) => { Type::Fun(Box::new(ty!($param)), Box::new(ty!($body -> $($rest)*))) };
 
-    ($var:literal) => {
-        $crate::type_system::Type::Var($var)
-    };
+    ($var:literal) => { Type::Var($var) };
 
-    (($($inner:tt)*)) => {
-        ty!($($inner)*)
-    };
+    (($($inner:tt)*)) => { ty!($($inner)*) };
 
     (forall $($vars:literal)* . ($($class:tt $var:literal),*) => $($body:tt)*) => {
-        $crate::type_system::Type::Poly(
+        Type::Poly(
             [$($vars),*].into_iter().collect::<FxHashSet<usize>>(),
             Vec::from([
                 $(Constraint {
-                    class: $crate::type_system::TypeClass::$class,
-                    ty: $crate::type_system::Type::Var($var),
+                    class: TypeClass::$class,
+                    ty: Type::Var($var),
                     span: Span::default()
                 }),*
             ]),
@@ -53,6 +44,8 @@ macro_rules! ty  {
             Box::new(ty!($($body)*))
         )
     };
+
+    ($type:tt $($args:tt)*) => { Type::Adt(stringify!($type).into(), Vec::from([$(ty!($args)),*])) };
 }
 
 #[derive(Debug)]
@@ -96,7 +89,6 @@ pub enum Type {
     Unit,
     Int,
     Char,
-    Bool,
     Var(usize),
     Fun(Box<Type>, Box<Type>),
     Poly(FxHashSet<usize>, Vec<Constraint>, Box<Type>),
@@ -134,7 +126,6 @@ impl Type {
             Type::Unit => write!(f, "Unit"),
             Type::Int => write!(f, "Int"),
             Type::Char => write!(f, "Char"),
-            Type::Bool => write!(f, "Bool"),
             Type::Var(n) => write!(f, "t{}", var_order_map.get(n).unwrap_or(n)),
             Type::Fun(param, body) => {
                 match param.as_ref() {
@@ -370,10 +361,7 @@ impl Env {
 
     fn unify(&mut self, ty1: &Type, ty2: &Type, span: Span) -> Result<()> {
         match (self.substitute(ty1), self.substitute(ty2)) {
-            (Type::Int, Type::Int)
-            | (Type::Bool, Type::Bool)
-            | (Type::Unit, Type::Unit)
-            | (Type::Char, Type::Char) => Ok(()),
+            (Type::Int, Type::Int) | (Type::Unit, Type::Unit) | (Type::Char, Type::Char) => Ok(()),
             (Type::Var(a), Type::Var(b)) if a == b => Ok(()),
             (Type::Fun(p1, b1), Type::Fun(p2, b2)) => {
                 self.unify(p1.as_ref(), p2.as_ref(), span)?;
@@ -480,7 +468,6 @@ fn infer_expr(
             Node::Expr(Expr::Unit) => Type::Unit,
             Node::Expr(Expr::Integer(_)) => Type::Int,
             Node::Expr(Expr::Char(_)) => Type::Char,
-            Node::Expr(Expr::Boolean(_)) => Type::Bool,
             Node::Expr(Expr::Constructor(name)) | Node::Expr(Expr::Identifier(name)) => env
                 .instantiate(
                     env_vars
@@ -503,14 +490,6 @@ fn infer_expr(
                     env.unify(&match_ty, &body_ty, ctx.get_span(expr))?;
                 }
                 match_ty
-            }
-            Node::Expr(Expr::Condition { cond, then, alt }) => {
-                let cond_ty = infer_expr(ctx, env, env_vars, cond)?;
-                let then_ty = infer_expr(ctx, env, env_vars, then)?;
-                let alt_ty = infer_expr(ctx, env, env_vars, alt)?;
-                env.unify(&Type::Bool, &cond_ty, ctx.get_span(cond))?;
-                env.unify(&then_ty, &alt_ty, ctx.get_span(alt))?;
-                alt_ty
             }
             Node::Expr(Expr::Lambda { param, body }) => {
                 let param_ty = env.fresh_var();
@@ -559,7 +538,6 @@ fn eval_type_expr(
 
             match name.as_str() {
                 "Int" => Type::Int,
-                "Bool" => Type::Bool,
                 "Char" => Type::Char,
                 _ => Type::Adt(
                     name.clone(),

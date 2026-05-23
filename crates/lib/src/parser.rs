@@ -267,7 +267,6 @@ impl<'a> Parser<'a> {
 
     fn parse_primary_expr(&mut self) -> Result<NodeId> {
         match self.peek(0)?.0 {
-            Token::Literal(Literal::Bool(_)) => self.parse_bool_lit(),
             Token::Literal(Literal::Integer(_)) => self.parse_integer_lit(),
             Token::Literal(Literal::Char(_)) => self.parse_char_lit(),
             // Token::Literal(Literal::String(_)) => self.parse_string_lit(),
@@ -505,11 +504,17 @@ impl<'a> Parser<'a> {
         let start_span = self.expect(Token::Keyword(Keyword::If))?.1;
         let cond = self.parse_expr(0)?;
         self.expect(Token::Keyword(Keyword::Then))?;
-        let then = self.parse_expr(0)?;
+        let true_body = self.parse_expr(0)?;
         self.expect(Token::Keyword(Keyword::Else))?;
-        let alt = self.parse_expr(0)?;
-        let end_span = self.context.get_span(alt);
-        let expr = self.context.add_expr(Expr::Condition { cond, then, alt });
+        let false_body = self.parse_expr(0)?;
+        let end_span = self.context.get_span(false_body);
+        let expr = self.context.add_expr(Expr::Match(
+            cond,
+            Vec::from([
+                (Pattern::Constructor("True".into(), Vec::new()), true_body),
+                (Pattern::Constructor("False".into(), Vec::new()), false_body),
+            ]),
+        ));
         self.context.set_span(expr, start_span.merge(end_span));
         Ok(expr)
     }
@@ -630,17 +635,6 @@ impl<'a> Parser<'a> {
                 Ok(expr)
             }
             other => Err(Error::UnexpectedToken("integer".into(), other)),
-        }
-    }
-
-    fn parse_bool_lit(&mut self) -> Result<NodeId> {
-        match self.advance()? {
-            (Token::Literal(Literal::Bool(bool)), span) => {
-                let expr = self.context.add_expr(Expr::Boolean(bool));
-                self.context.set_span(expr, span);
-                Ok(expr)
-            }
-            other => Err(Error::UnexpectedToken("true or false".into(), other)),
         }
     }
 

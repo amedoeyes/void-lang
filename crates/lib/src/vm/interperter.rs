@@ -330,8 +330,10 @@ impl GMachine {
                                             let rhs = &self.heap[rhs_addr.0];
                                             if let (Node::Integer(l), Node::Integer(r)) = (lhs, rhs)
                                             {
-                                                let result_addr =
-                                                    self.alloc(Node::Integer((l == r) as i64));
+                                                let result_addr = self.alloc(Node::Constructor(
+                                                    ((l == r) as usize) + 1,
+                                                    Vec::new(),
+                                                ));
                                                 self.stack.push(result_addr);
                                             }
                                         }
@@ -344,8 +346,10 @@ impl GMachine {
                                             let rhs = &self.heap[rhs_addr.0];
                                             if let (Node::Integer(l), Node::Integer(r)) = (lhs, rhs)
                                             {
-                                                let result_addr =
-                                                    self.alloc(Node::Integer((l <= r) as i64));
+                                                let result_addr = self.alloc(Node::Constructor(
+                                                    ((l <= r) as usize) + 1,
+                                                    Vec::new(),
+                                                ));
                                                 self.stack.push(result_addr);
                                             }
                                         }
@@ -358,8 +362,10 @@ impl GMachine {
                                             let rhs = &self.heap[rhs_addr.0];
                                             if let (Node::Integer(l), Node::Integer(r)) = (lhs, rhs)
                                             {
-                                                let result_addr =
-                                                    self.alloc(Node::Integer((l >= r) as i64));
+                                                let result_addr = self.alloc(Node::Constructor(
+                                                    ((l >= r) as usize) + 1,
+                                                    Vec::new(),
+                                                ));
                                                 self.stack.push(result_addr);
                                             }
                                         }
@@ -372,8 +378,10 @@ impl GMachine {
                                             let rhs = &self.heap[rhs_addr.0];
                                             if let (Node::Integer(l), Node::Integer(r)) = (lhs, rhs)
                                             {
-                                                let result_addr =
-                                                    self.alloc(Node::Integer((l < r) as i64));
+                                                let result_addr = self.alloc(Node::Constructor(
+                                                    ((l < r) as usize) + 1,
+                                                    Vec::new(),
+                                                ));
                                                 self.stack.push(result_addr);
                                             }
                                         }
@@ -386,57 +394,11 @@ impl GMachine {
                                             let rhs = &self.heap[rhs_addr.0];
                                             if let (Node::Integer(l), Node::Integer(r)) = (lhs, rhs)
                                             {
-                                                let result_addr =
-                                                    self.alloc(Node::Integer((l > r) as i64));
+                                                let result_addr = self.alloc(Node::Constructor(
+                                                    ((l > r) as usize) + 1,
+                                                    Vec::new(),
+                                                ));
                                                 self.stack.push(result_addr);
-                                            }
-                                        }
-                                        "&&" => {
-                                            let lhs_addr = args.pop().unwrap();
-                                            let lhs_addr = self.force(lhs_addr);
-                                            let lhs = &self.heap[lhs_addr.0];
-                                            if let Node::Integer(l) = lhs
-                                                && *l == 1
-                                            {
-                                                let rhs_addr = args.pop().unwrap();
-                                                let rhs_addr = self.force(rhs_addr);
-                                                let rhs = &self.heap[rhs_addr.0];
-                                                if let Node::Integer(r) = rhs
-                                                    && *r == 1
-                                                {
-                                                    let result_addr = self.alloc(Node::Integer(1));
-                                                    self.stack.push(result_addr);
-                                                } else {
-                                                    let result_addr = self.alloc(Node::Integer(0));
-                                                    self.stack.push(result_addr);
-                                                }
-                                            } else {
-                                                let result_addr = self.alloc(Node::Integer(0));
-                                                self.stack.push(result_addr);
-                                            }
-                                        }
-                                        "||" => {
-                                            let lhs_addr = args.pop().unwrap();
-                                            let lhs_addr = self.force(lhs_addr);
-                                            let lhs = &self.heap[lhs_addr.0];
-                                            if let Node::Integer(l) = lhs
-                                                && *l == 1
-                                            {
-                                                let result_addr = self.alloc(Node::Integer(1));
-                                                self.stack.push(result_addr);
-                                            } else {
-                                                let rhs_addr = args.pop().unwrap();
-                                                let rhs_addr = self.force(rhs_addr);
-                                                let rhs = &self.heap[rhs_addr.0];
-                                                if let Node::Integer(r) = rhs
-                                                    && *r == 1
-                                                {
-                                                    let result_addr = self.alloc(Node::Integer(1));
-                                                    self.stack.push(result_addr);
-                                                } else {
-                                                    let result_addr = self.alloc(Node::Integer(0));
-                                                    self.stack.push(result_addr);
-                                                }
                                             }
                                         }
                                         _ => unreachable!(),

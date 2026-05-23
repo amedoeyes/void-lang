@@ -103,7 +103,6 @@ pub fn compile_expr(
 ) {
     match ctx.get_node(node) {
         Node::Expr(expr) => match expr {
-            Expr::Boolean(b) => out.push(Instruction::PushInt(*b as i64)),
             Expr::Integer(i) => out.push(Instruction::PushInt(*i)),
             Expr::Constructor(cons) => out.push(Instruction::PushGlobal(cons.clone())),
             Expr::Identifier(id) => {
@@ -204,15 +203,6 @@ pub fn compile_expr(
                     }
                 }
                 out.push(Instruction::Case(compiled_branches));
-            }
-            Expr::Condition { cond, then, alt } => {
-                compile_expr(&ctx, *cond, types, offsets, out);
-                out.push(Instruction::Eval);
-                let mut then_insts = Vec::new();
-                compile_expr(&ctx, *then, types, &offsets, &mut then_insts);
-                let mut alt_insts = Vec::new();
-                compile_expr(&ctx, *alt, types, &offsets, &mut alt_insts);
-                out.push(Instruction::Cond(then_insts, alt_insts));
             }
             other => todo!("{other:?}"),
         },

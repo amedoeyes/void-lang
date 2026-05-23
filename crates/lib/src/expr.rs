@@ -5,25 +5,13 @@ use std::fmt::Display;
 #[derive(Debug, Clone)]
 pub enum Expr {
     Unit,
-    Boolean(bool),
     Char(char),
     Integer(i64),
     Constructor(String),
     Identifier(String),
     Match(NodeId, Vec<(Pattern, NodeId)>),
-    Condition {
-        cond: NodeId,
-        then: NodeId,
-        alt: NodeId,
-    },
-    Lambda {
-        param: String,
-        body: NodeId,
-    },
-    Application {
-        func: NodeId,
-        arg: NodeId,
-    },
+    Lambda { param: String, body: NodeId },
+    Application { func: NodeId, arg: NodeId },
 }
 
 #[derive(Debug, Clone)]

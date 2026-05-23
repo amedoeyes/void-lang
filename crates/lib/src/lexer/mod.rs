@@ -27,7 +27,6 @@ impl<'a> Lexer<'a> {
             Self::match_symbol,
             Self::match_delimiter,
             Self::match_keyword,
-            Self::match_bool,
             Self::match_integer,
             Self::match_char,
             Self::match_string,
@@ -122,22 +121,6 @@ impl<'a> Lexer<'a> {
             ("if", Token::Keyword(Keyword::If)),
             ("then", Token::Keyword(Keyword::Then)),
             ("else", Token::Keyword(Keyword::Else)),
-        ]
-        .iter()
-        .find(|(p, _)| {
-            self.remaining_buffer().starts_with(p)
-                && self.remaining_buffer()[p.len()..]
-                    .chars()
-                    .next()
-                    .is_none_or(|c| !c.is_alphanumeric() && c != '_')
-        })
-        .map(|(p, t)| Ok((t.clone(), self.advance(p.len()))))
-    }
-
-    fn match_bool(&mut self) -> Option<Result<(Token, Span)>> {
-        [
-            ("true", Token::Literal(Literal::Bool(true))),
-            ("false", Token::Literal(Literal::Bool(false))),
         ]
         .iter()
         .find(|(p, _)| {
@@ -364,7 +347,6 @@ mod tests {
         (@token Identifier $id:expr) => { Token::Identifier($id.into()) };
         (@token Eof) => { Token::Eof };
 
-        (@literal Bool ( $val:literal )) => { Token::Literal(Literal::Bool($val)) };
         (@literal Integer ( $val:literal )) => { Token::Literal(Literal::Integer($val.into())) };
         (@literal Char ( $val:literal )) => { Token::Literal(Literal::Char($val)) };
         (@literal String ( $val:literal )) => { Token::Literal(Literal::String($val.into())) };
@@ -565,20 +547,6 @@ mod tests {
                 17:1-17:7: Identifier("lettuce")
                 18:1-18:1: Eof
             },
-        );
-    }
-    #[test]
-    fn test_bool_literals() {
-        assert_tokens!(
-            indoc! {"
-                true
-                false
-            "},
-            {
-                1:1-1:4: Literal(Bool(true))
-                2:1-2:5: Literal(Bool(false))
-                3:1-3:1: Eof
-            }
         );
     }
 

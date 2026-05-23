@@ -187,8 +187,6 @@ fn run_cmd(source_path: &PathBuf) -> Result<()> {
     let ge_global = machine.alloc(GNode::Global(">=".into(), 2, Global::Builtin));
     let lt_global = machine.alloc(GNode::Global("<".into(), 2, Global::Builtin));
     let gt_global = machine.alloc(GNode::Global(">".into(), 2, Global::Builtin));
-    let and_global = machine.alloc(GNode::Global("&&".into(), 2, Global::Builtin));
-    let or_global = machine.alloc(GNode::Global("||".into(), 2, Global::Builtin));
     machine.globals.insert("println".into(), println_global);
     machine.globals.insert("+".into(), add_global);
     machine.globals.insert("-".into(), sub_global);
@@ -198,8 +196,6 @@ fn run_cmd(source_path: &PathBuf) -> Result<()> {
     machine.globals.insert(">=".into(), ge_global);
     machine.globals.insert("<".into(), lt_global);
     machine.globals.insert(">".into(), gt_global);
-    machine.globals.insert("&&".into(), and_global);
-    machine.globals.insert("||".into(), or_global);
 
     machine.run();
 
