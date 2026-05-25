@@ -65,18 +65,6 @@ impl Display for Instruction {
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct Super {
-    pub arity: usize,
-    pub instructions: Vec<Instruction>,
-}
-
-impl Super {
-    pub fn new() -> Self {
-        Self::default()
-    }
-}
-
 #[derive(Debug)]
 pub struct IRGenerator<'a> {
     pub context: &'a Context,
@@ -111,9 +99,7 @@ impl<'a> IRGenerator<'a> {
         }
     }
 
-    pub fn generate(&self) -> FxHashMap<String, (usize, Vec<Instruction>)> {
-        let mut res = FxHashMap::default();
-
+    pub fn generate(&mut self) {
         for node in self.context.nodes() {
             match node.clone() {
                 Node::Type(_, _, constructors) => {
@@ -123,7 +109,7 @@ impl<'a> IRGenerator<'a> {
                         insts.push(Instruction::Pack(i + 1, arity));
                         insts.push(Instruction::Update(0));
                         insts.push(Instruction::Unwind);
-                        res.insert(cons.clone(), (arity, insts));
+                        self.symbols.insert(cons.clone(), (arity, insts));
                     }
                 }
                 Node::Bind(name, expr) => {
@@ -147,16 +133,42 @@ impl<'a> IRGenerator<'a> {
                     insts.push(Instruction::Update(arity));
                     insts.push(Instruction::Pop(arity));
                     insts.push(Instruction::Unwind);
-                    res.insert(name, (arity, insts));
+                    self.symbols.insert(name, (arity, insts));
                 }
                 _ => continue,
             }
         }
-        res
+    }
+
+    fn collect_free_vars(&self, node: NodeId, bound: &FxHashSet<String>, out: &mut Vec<NodeId>) {
+        match self.context.get_node(node) {
+            Node::Expr(Expr::Identifier(id)) => {
+                if !bound.contains(id) {
+                    out.push(node);
+                }
+            }
+            Node::Expr(Expr::Application { func, arg }) => {
+                self.collect_free_vars(*func, bound, out);
+                self.collect_free_vars(*arg, bound, out);
+            }
+            Node::Expr(Expr::Match(scrutinee, branches)) => {
+                self.collect_free_vars(*scrutinee, bound, out);
+                for (_, body) in branches {
+                    self.collect_free_vars(*body, bound, out);
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    fn create_lambda_name(&mut self) -> String {
+        let name = format!("__lambda_{}", self.lambda_counter);
+        self.lambda_counter += 1;
+        name
     }
 
     pub fn generate_expr(
-        &self,
+        &mut self,
         node: NodeId,
         offsets: &FxHashMap<String, usize>,
         out: &mut Vec<Instruction>,
@@ -183,7 +195,7 @@ impl<'a> IRGenerator<'a> {
                 }
                 Expr::Match(scrutinee, branches) => {
                     let consts = match self.context.get_type(*scrutinee) {
-                        Some(Type::Adt(name, _)) => self.type_consts.get(name).unwrap(),
+                        Some(Type::Adt(name, _)) => self.type_consts.get(name).unwrap().clone(),
                         _ => todo!(),
                     };
                     let mut consts_used = FxHashSet::default();
@@ -258,6 +270,51 @@ impl<'a> IRGenerator<'a> {
                     }
                     out.push(Instruction::Case(compiled_branches));
                 }
+                Expr::Lambda { .. } => {
+                    let lambda_name = self.create_lambda_name();
+                    let mut lambda_offsets = FxHashMap::default();
+                    let mut lambda_arity = 0;
+                    let mut lambda_insts = Vec::new();
+                    let mut lambda_body = node;
+                    while let Node::Expr(Expr::Lambda { param, body }) =
+                        self.context.get_node(lambda_body)
+                    {
+                        lambda_offsets.insert(param.clone(), lambda_offsets.len());
+                        lambda_body = *body;
+                        lambda_arity += 1;
+                    }
+                    let mut free_vars = Vec::new();
+                    self.collect_free_vars(
+                        lambda_body,
+                        &lambda_offsets.iter().map(|(p, _)| p.clone()).collect(),
+                        &mut free_vars,
+                    );
+                    lambda_arity += free_vars.len();
+                    for (i, v) in free_vars.iter().enumerate() {
+                        for (_, o) in &mut lambda_offsets {
+                            *o += 1;
+                        }
+                        match self.context.get_node(*v) {
+                            Node::Expr(Expr::Identifier(id)) => {
+                                lambda_offsets.insert(id.clone(), i);
+                            }
+                            _ => unreachable!(),
+                        }
+                    }
+                    self.generate_expr(lambda_body, &lambda_offsets, &mut lambda_insts);
+                    lambda_insts.push(Instruction::Update(lambda_arity));
+                    lambda_insts.push(Instruction::Pop(lambda_arity));
+                    lambda_insts.push(Instruction::Unwind);
+                    self.symbols
+                        .insert(lambda_name.clone(), (lambda_arity, lambda_insts));
+                    for v in &free_vars {
+                        self.generate_expr(*v, &offsets, out)
+                    }
+                    out.push(Instruction::PushGlobal(lambda_name));
+                    for _ in &free_vars {
+                        out.push(Instruction::MkAp)
+                    }
+                }
                 other => todo!("{other:?}"),
             },
             _ => unreachable!(),
@@ -266,5 +323,7 @@ impl<'a> IRGenerator<'a> {
 }
 
 pub fn generate(ctx: &Context) -> FxHashMap<String, (usize, Vec<Instruction>)> {
-    IRGenerator::new(ctx).generate()
+    let mut generator = IRGenerator::new(ctx);
+    generator.generate();
+    generator.symbols
 }
