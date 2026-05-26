@@ -15,6 +15,7 @@ pub struct NodeId(pub usize);
 
 #[derive(Debug, Clone)]
 pub enum Node {
+    Module(Vec<NodeId>),
     TypeExpr(TypeExpr),
     Expr(Expr),
     Type(String, Vec<String>, Vec<(String, Vec<NodeId>)>),
@@ -91,6 +92,10 @@ impl Context {
         self.spans.push(Span::default());
         self.types.push(None);
         id
+    }
+
+    pub fn add_module(&mut self, nodes: &[NodeId]) -> NodeId {
+        self.add(Node::Module(nodes.into()))
     }
 
     pub fn add_type_expr(&mut self, expr: TypeExpr) -> NodeId {
@@ -210,6 +215,14 @@ impl<'a> Display<'a> {
 impl<'a> fmt::Display for Display<'a> {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self.context.get_node(self.id) {
+            Node::Module(nodes) => write!(
+                f,
+                "{}",
+                nodes
+                    .iter()
+                    .map(|n| Display::new(*n, self.context))
+                    .join(" ")
+            ),
             Node::TypeExpr(expr) => match expr {
                 TypeExpr::Unit => write!(f, "()"),
                 TypeExpr::Identifier(id) => write!(f, "{id}"),

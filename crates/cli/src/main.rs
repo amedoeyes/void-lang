@@ -76,39 +76,30 @@ fn main() {
 fn ir_cmd(source_path: &PathBuf) -> Result<()> {
     let mut ctx = Context::new();
 
-    let parent_dir = source_path
-        .parent()
-        .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
+    // let parent_dir = source_path
+    //     .parent()
+    //     .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
 
     let mut visited_modules = FxHashSet::default();
     visited_modules.insert(PathBuf::from(source_path));
 
     let contents = fs::read_to_string(source_path)?;
-    let nodes = match parse(&mut ctx, &contents) {
-        Ok(nodes) => modules::resolve_imports(
-            &mut ctx,
-            &nodes,
-            parent_dir,
-            &mut visited_modules,
-            &mut FxHashSet::default(),
-        )
-        .map_err(Error::Void)?,
-        Err(err) => {
-            return Err(Error::Void(error::Error::Syntax(
-                source_path.clone(),
-                contents,
-                Box::new(err),
-            )));
-        }
-    };
 
-    if let Err(err) = infer(&mut ctx, &nodes) {
-        return Err(Error::Void(error::Error::Type(
+    parse(&mut ctx, &contents).map_err(|err| {
+        Error::Void(error::Error::Syntax(
+            source_path.clone(),
+            contents.clone(),
+            Box::new(err),
+        ))
+    })?;
+
+    infer(&mut ctx).map_err(|err| {
+        Error::Void(error::Error::Type(
             source_path.clone(),
             contents,
             Box::new(err),
-        )));
-    }
+        ))
+    })?;
 
     let ir = generate(&ctx);
 
@@ -126,39 +117,30 @@ fn ir_cmd(source_path: &PathBuf) -> Result<()> {
 fn run_cmd(source_path: &PathBuf) -> Result<()> {
     let mut ctx = Context::new();
 
-    let parent_dir = source_path
-        .parent()
-        .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
+    // let parent_dir = source_path
+    //     .parent()
+    //     .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
 
     let mut visited_modules = FxHashSet::default();
     visited_modules.insert(PathBuf::from(source_path));
 
     let contents = fs::read_to_string(source_path)?;
-    let nodes = match parse(&mut ctx, &contents) {
-        Ok(nodes) => modules::resolve_imports(
-            &mut ctx,
-            &nodes,
-            parent_dir,
-            &mut visited_modules,
-            &mut FxHashSet::default(),
-        )
-        .map_err(Error::Void)?,
-        Err(err) => {
-            return Err(Error::Void(error::Error::Syntax(
-                source_path.clone(),
-                contents,
-                Box::new(err),
-            )));
-        }
-    };
 
-    if let Err(err) = infer(&mut ctx, &nodes) {
-        return Err(Error::Void(error::Error::Type(
+    parse(&mut ctx, &contents).map_err(|err| {
+        Error::Void(error::Error::Syntax(
+            source_path.clone(),
+            contents.clone(),
+            Box::new(err),
+        ))
+    })?;
+
+    infer(&mut ctx).map_err(|err| {
+        Error::Void(error::Error::Type(
             source_path.clone(),
             contents,
             Box::new(err),
-        )));
-    }
+        ))
+    })?;
 
     let ir = generate(&ctx);
 
@@ -234,34 +216,36 @@ fn lex_cmd(source_path: &PathBuf) -> Result<()> {
 fn parse_cmd(source_path: &PathBuf) -> Result<()> {
     let mut ctx = Context::new();
 
-    let parent_dir = source_path
-        .parent()
-        .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
+    // let parent_dir = source_path
+    //     .parent()
+    //     .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
 
     let mut visited_modules = FxHashSet::default();
     visited_modules.insert(PathBuf::from(source_path));
 
     let contents = fs::read_to_string(source_path)?;
-    let nodes = match parse(&mut ctx, &contents) {
-        Ok(nodes) => modules::resolve_imports(
-            &mut ctx,
-            &nodes,
-            parent_dir,
-            &mut visited_modules,
-            &mut FxHashSet::default(),
-        )
-        .map_err(Error::Void)?,
-        Err(err) => {
-            return Err(Error::Void(error::Error::Syntax(
-                source_path.clone(),
-                contents,
-                Box::new(err),
-            )));
-        }
-    };
 
-    for node in nodes {
-        println!("{}", node.display(&ctx));
+    parse(&mut ctx, &contents).map_err(|err| {
+        Error::Void(error::Error::Syntax(
+            source_path.clone(),
+            contents,
+            Box::new(err),
+        ))
+    })?;
+
+    let modules = ctx
+        .nodes()
+        .iter()
+        .filter_map(|n| match n {
+            Node::Module(nodes) => Some(nodes.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    for module in modules {
+        for node in module {
+            println!("{}", node.display(&ctx));
+        }
     }
 
     Ok(())
@@ -270,59 +254,63 @@ fn parse_cmd(source_path: &PathBuf) -> Result<()> {
 fn type_cmd(source_path: &PathBuf) -> Result<()> {
     let mut ctx = Context::new();
 
-    let parent_dir = source_path
-        .parent()
-        .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
+    // let parent_dir = source_path
+    //     .parent()
+    //     .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
 
     let mut visited_modules = FxHashSet::default();
     visited_modules.insert(PathBuf::from(source_path));
 
     let contents = fs::read_to_string(source_path)?;
-    let nodes = match parse(&mut ctx, &contents) {
-        Ok(nodes) => modules::resolve_imports(
-            &mut ctx,
-            &nodes,
-            parent_dir,
-            &mut visited_modules,
-            &mut FxHashSet::default(),
-        )
-        .map_err(Error::Void)?,
-        Err(err) => {
-            return Err(Error::Void(error::Error::Syntax(
-                source_path.clone(),
-                contents,
-                Box::new(err),
-            )));
-        }
-    };
 
-    if let Err(err) = infer(&mut ctx, &nodes) {
-        return Err(Error::Void(error::Error::Type(
+    parse(&mut ctx, &contents).map_err(|err| {
+        Error::Void(error::Error::Syntax(
+            source_path.clone(),
+            contents.clone(),
+            Box::new(err),
+        ))
+    })?;
+
+    infer(&mut ctx).map_err(|err| {
+        Error::Void(error::Error::Type(
             source_path.clone(),
             contents,
             Box::new(err),
-        )));
-    }
+        ))
+    })?;
 
-    for node in nodes {
-        match ctx.get_node(node) {
-            Node::TypeExpr(..) => todo!(),
-            Node::Expr(..) => {
-                println!(
-                    "{} : {}",
-                    node.display(&ctx),
-                    ctx.get_type(node).as_ref().unwrap()
-                )
+    let modules = ctx
+        .nodes()
+        .iter()
+        .filter_map(|n| match n {
+            Node::Module(nodes) => Some(nodes.clone()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+
+    for module in modules {
+        for node in module {
+            match ctx.get_node(node) {
+                Node::TypeExpr(..) => todo!(),
+                Node::Expr(..) => {
+                    println!(
+                        "{} : {}",
+                        node.display(&ctx),
+                        ctx.get_type(node).as_ref().unwrap()
+                    )
+                }
+                Node::Type(..) => {
+                    println!(
+                        "{} : {}",
+                        node.display(&ctx),
+                        ctx.get_type(node).as_ref().unwrap()
+                    )
+                }
+                Node::Bind(name, _) => {
+                    println!("{} : {}", name, ctx.get_type(node).as_ref().unwrap())
+                }
+                _ => continue,
             }
-            Node::Type(..) => {
-                println!(
-                    "{} : {}",
-                    node.display(&ctx),
-                    ctx.get_type(node).as_ref().unwrap()
-                )
-            }
-            Node::Bind(name, _) => println!("{} : {}", name, ctx.get_type(node).as_ref().unwrap()),
-            Node::Import(..) => continue,
         }
     }
 

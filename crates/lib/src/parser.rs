@@ -46,7 +46,7 @@ impl<'a> Parser<'a> {
         }
     }
 
-    pub fn parse(mut self) -> Result<Vec<NodeId>> {
+    pub fn parse(mut self) -> Result<()> {
         let mut nodes = Vec::new();
         while let (token, span) = self.peek(0)?.clone()
             && token != Token::Eof
@@ -64,7 +64,8 @@ impl<'a> Parser<'a> {
                 }
             }
         }
-        Ok(nodes)
+        self.context.add_module(&nodes);
+        Ok(())
     }
 
     fn parse_type_decl(&mut self) -> Result<NodeId> {
@@ -706,6 +707,6 @@ impl<'a> Parser<'a> {
     }
 }
 
-pub fn parse(ctx: &mut Context, input: &str) -> Result<Vec<NodeId>> {
+pub fn parse(ctx: &mut Context, input: &str) -> Result<()> {
     Parser::new(ctx, input).parse()
 }

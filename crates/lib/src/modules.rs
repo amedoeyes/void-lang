@@ -93,16 +93,13 @@ pub fn resolve_imports(
                     &fs::read_to_string(&import_path)?
                 };
 
-                let imported_nodes = match parser::parse(ctx, contents) {
-                    Ok(nodes) => resolve_imports(ctx, &nodes, parent_dir, visited, imported)?,
-                    Err(err) => {
-                        return Err(Error::Syntax(
-                            import_path,
-                            contents.to_string(),
-                            Box::new(err),
-                        ));
-                    }
-                };
+                parser::parse(ctx, &contents).map_err(|err| {
+                    Error::Syntax(import_path, contents.to_string(), Box::new(err))
+                })?;
+
+                let imported_nodes = todo!() as Vec<_>;
+
+                // resolve_imports(ctx, &nodes, parent_dir, visited, imported)?;
 
                 visited.remove(&import_path);
 

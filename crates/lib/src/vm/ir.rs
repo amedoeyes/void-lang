@@ -100,42 +100,54 @@ impl<'a> IRGenerator<'a> {
     }
 
     pub fn generate(&mut self) {
-        for node in self.context.nodes() {
-            match node.clone() {
-                Node::Type(_, _, constructors) => {
-                    for (i, (cons, args)) in constructors.iter().enumerate() {
-                        let mut insts = Vec::new();
-                        let arity = args.len();
-                        insts.push(Instruction::Pack(i + 1, arity));
-                        insts.push(Instruction::Update(0));
-                        insts.push(Instruction::Unwind);
-                        self.symbols.insert(cons.clone(), (arity, insts));
-                    }
-                }
-                Node::Bind(name, expr) => {
-                    let mut insts = Vec::new();
-                    let mut arity = 0;
-                    match self.context.get_node(expr).clone() {
-                        Node::Expr(Expr::Lambda { .. }) => {
-                            let mut offsets = FxHashMap::default();
-                            let mut node = expr;
-                            while let Node::Expr(Expr::Lambda { param, body }) =
-                                self.context.get_node(node)
-                            {
-                                offsets.insert(param.clone(), offsets.len());
-                                node = *body;
-                                arity += 1;
-                            }
-                            self.generate_expr(node, &offsets, &mut insts)
+        let modules = self
+            .context
+            .nodes()
+            .iter()
+            .filter_map(|n| match n {
+                Node::Module(nodes) => Some(nodes.clone()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+
+        for module in modules {
+            for node in module {
+                match self.context.get_node(node) {
+                    Node::Type(_, _, constructors) => {
+                        for (i, (cons, args)) in constructors.iter().enumerate() {
+                            let mut insts = Vec::new();
+                            let arity = args.len();
+                            insts.push(Instruction::Pack(i + 1, arity));
+                            insts.push(Instruction::Update(0));
+                            insts.push(Instruction::Unwind);
+                            self.symbols.insert(cons.clone(), (arity, insts));
                         }
-                        _ => self.generate_expr(expr, &FxHashMap::default(), &mut insts),
                     }
-                    insts.push(Instruction::Update(arity));
-                    insts.push(Instruction::Pop(arity));
-                    insts.push(Instruction::Unwind);
-                    self.symbols.insert(name, (arity, insts));
+                    Node::Bind(name, expr) => {
+                        let mut insts = Vec::new();
+                        let mut arity = 0;
+                        match self.context.get_node(*expr).clone() {
+                            Node::Expr(Expr::Lambda { .. }) => {
+                                let mut offsets = FxHashMap::default();
+                                let mut node = *expr;
+                                while let Node::Expr(Expr::Lambda { param, body }) =
+                                    self.context.get_node(node)
+                                {
+                                    offsets.insert(param.clone(), offsets.len());
+                                    node = *body;
+                                    arity += 1;
+                                }
+                                self.generate_expr(node, &offsets, &mut insts)
+                            }
+                            _ => self.generate_expr(*expr, &FxHashMap::default(), &mut insts),
+                        }
+                        insts.push(Instruction::Update(arity));
+                        insts.push(Instruction::Pop(arity));
+                        insts.push(Instruction::Unwind);
+                        self.symbols.insert(name.clone(), (arity, insts));
+                    }
+                    _ => continue,
                 }
-                _ => continue,
             }
         }
     }
@@ -157,7 +169,7 @@ impl<'a> IRGenerator<'a> {
                     self.collect_free_vars(*body, bound, out);
                 }
             }
-            _ => unreachable!(),
+            _ => {}
         }
     }
 
