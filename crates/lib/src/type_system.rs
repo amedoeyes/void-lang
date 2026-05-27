@@ -121,6 +121,14 @@ impl Type {
         }
     }
 
+    pub fn arity(&self) -> usize {
+        match self {
+            Type::Fun(_, rhs) => 1 + rhs.arity(),
+            Type::Poly(_, _, fun) => fun.arity(),
+            _ => 0,
+        }
+    }
+
     fn fmt(&self, f: &mut fmt::Formatter, var_order_map: &FxHashMap<usize, usize>) -> fmt::Result {
         match self {
             Type::Unit => write!(f, "Unit"),
