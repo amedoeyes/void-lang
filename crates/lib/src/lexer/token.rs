@@ -36,11 +36,13 @@ pub enum Literal {
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum Delimiter {
-    ParenLeft,
-    ParenRight,
+    BraceLeft,
+    BraceRight,
     BracketLeft,
     BracketRight,
     Comma,
+    ParenLeft,
+    ParenRight,
     Semicolon,
 }
 
@@ -90,11 +92,13 @@ impl Display for Literal {
 impl Display for Delimiter {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            Delimiter::ParenLeft => write!(f, "("),
-            Delimiter::ParenRight => write!(f, ")"),
+            Delimiter::BraceLeft => write!(f, "{{"),
+            Delimiter::BraceRight => write!(f, "}}"),
             Delimiter::BracketLeft => write!(f, "["),
             Delimiter::BracketRight => write!(f, "]"),
             Delimiter::Comma => write!(f, ","),
+            Delimiter::ParenLeft => write!(f, "("),
+            Delimiter::ParenRight => write!(f, ")"),
             Delimiter::Semicolon => write!(f, ";"),
         }
     }

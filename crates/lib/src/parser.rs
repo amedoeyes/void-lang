@@ -279,6 +279,7 @@ impl<'a> Parser<'a> {
             },
             Token::Keyword(Keyword::Match) => self.parse_match_expr(),
             Token::Keyword(Keyword::If) => self.parse_cond_expr(),
+            Token::Delimiter(Delimiter::BraceLeft) => self.parse_block_expr(),
             Token::Delimiter(Delimiter::ParenLeft) => match self.peek(1)?.0 {
                 Token::Delimiter(Delimiter::ParenRight) => self.parse_unit_lit(),
                 Token::Symbol(_) => match self.peek(2)?.0 {
@@ -516,6 +517,25 @@ impl<'a> Parser<'a> {
                 (Pattern::Constructor("False".into(), Vec::new()), false_body),
             ]),
         ));
+        self.context.set_span(expr, start_span.merge(end_span));
+        Ok(expr)
+    }
+
+    fn parse_block_expr(&mut self) -> std::result::Result<NodeId, Error> {
+        let (_, start_span) = self.expect(Token::Delimiter(Delimiter::BraceLeft))?;
+        let mut nodes = Vec::new();
+        loop {
+            match self.peek(0)?.0 {
+                Token::Delimiter(Delimiter::BraceRight) => break,
+                Token::Keyword(Keyword::Let) => nodes.push(self.parse_bind_decl()?),
+                _ => {
+                    nodes.push(self.parse_expr(0)?);
+                    break;
+                }
+            }
+        }
+        let (_, end_span) = self.expect(Token::Delimiter(Delimiter::BraceRight))?;
+        let expr = self.context.add_expr(Expr::Block(nodes));
         self.context.set_span(expr, start_span.merge(end_span));
         Ok(expr)
     }

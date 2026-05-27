@@ -491,6 +491,28 @@ fn infer_expr(
                 }
                 match_ty
             }
+            Node::Expr(Expr::Block(nodes)) => {
+                let mut new_env_vars = env_vars.clone();
+                let mut ty = Type::Unit;
+                for n in nodes {
+                    match ctx.get_node(n).clone() {
+                        Node::Bind(name, expr) => {
+                            let ty = env.fresh_var();
+                            new_env_vars.insert(name.clone(), ty);
+                            let expr_ty = infer_expr(ctx, env, &new_env_vars, expr)?;
+                            let expr_ty = env.generalize(&env.substitute(&expr_ty));
+                            new_env_vars.insert(name, expr_ty.clone());
+                            ctx.set_type(expr, expr_ty.clone());
+                            ctx.set_type(n, expr_ty);
+                        }
+                        Node::Expr(..) => {
+                            ty = infer_expr(ctx, env, &new_env_vars, n)?;
+                        }
+                        _ => unreachable!(),
+                    }
+                }
+                ty
+            }
             Node::Expr(Expr::Lambda { param, body }) => {
                 let param_ty = env.fresh_var();
                 let mut new_env_vars = env_vars.clone();

@@ -101,6 +101,8 @@ impl<'a> Lexer<'a> {
             (";", Token::Delimiter(Delimiter::Semicolon)),
             ("[", Token::Delimiter(Delimiter::BracketLeft)),
             ("]", Token::Delimiter(Delimiter::BracketRight)),
+            ("{", Token::Delimiter(Delimiter::BraceLeft)),
+            ("}", Token::Delimiter(Delimiter::BraceRight)),
         ]
         .iter()
         .find(|(p, _)| self.remaining_buffer().starts_with(p))

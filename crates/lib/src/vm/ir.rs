@@ -11,6 +11,7 @@ use crate::{
 #[derive(Debug, Clone)]
 pub enum Instruction {
     PushInt(i64),
+    Alloc(usize),
     Push(usize),
     PushGlobal(String),
     Pop(usize),
@@ -29,6 +30,7 @@ impl Display for Instruction {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
             Instruction::PushInt(i) => write!(f, "PushInt {i}"),
+            Instruction::Alloc(n) => write!(f, "Alloc {n}"),
             Instruction::Push(n) => write!(f, "Push {n}"),
             Instruction::PushGlobal(name) => write!(f, "PushGlobal \"{name}\""),
             Instruction::Pop(n) => write!(f, "Pop {n}"),
@@ -282,6 +284,38 @@ impl<'a> IRGenerator<'a> {
                     }
                     out.push(Instruction::Case(compiled_branches));
                 }
+                Expr::Block(nodes) => {
+                    let mut new_offsets = offsets.clone();
+                    let mut binds = 0;
+                    for n in nodes {
+                        match self.context.get_node(*n) {
+                            Node::Bind(name, expr) => {
+                                match self.context.get_node(*expr) {
+                                    Node::Expr(Expr::Lambda { .. }) => {
+                                        for (_, o) in &mut new_offsets {
+                                            *o += 1;
+                                        }
+                                        new_offsets.insert(name.clone(), 0);
+                                        out.push(Instruction::Alloc(1));
+                                        self.generate_expr(*expr, &new_offsets, out);
+                                        out.push(Instruction::Update(0));
+                                    }
+                                    _ => {
+                                        self.generate_expr(*expr, &new_offsets, out);
+                                        for (_, o) in &mut new_offsets {
+                                            *o += 1;
+                                        }
+                                        new_offsets.insert(name.clone(), 0);
+                                    }
+                                };
+                                binds += 1;
+                            }
+                            Node::Expr(..) => self.generate_expr(*n, &new_offsets, out),
+                            _ => unreachable!(),
+                        }
+                    }
+                    out.push(Instruction::Slide(binds))
+                }
                 Expr::Lambda { .. } => {
                     let lambda_name = self.create_lambda_name();
                     let mut lambda_offsets = FxHashMap::default();
@@ -302,13 +336,13 @@ impl<'a> IRGenerator<'a> {
                         &mut free_vars,
                     );
                     lambda_arity += free_vars.len();
-                    for (i, v) in free_vars.iter().enumerate() {
+                    for v in &free_vars {
                         for (_, o) in &mut lambda_offsets {
                             *o += 1;
                         }
                         match self.context.get_node(*v) {
                             Node::Expr(Expr::Identifier(id)) => {
-                                lambda_offsets.insert(id.clone(), i);
+                                lambda_offsets.insert(id.clone(), 0);
                             }
                             _ => unreachable!(),
                         }
@@ -319,8 +353,12 @@ impl<'a> IRGenerator<'a> {
                     lambda_insts.push(Instruction::Unwind);
                     self.symbols
                         .insert(lambda_name.clone(), (lambda_arity, lambda_insts));
+                    let mut offsets = offsets.clone();
                     for v in &free_vars {
-                        self.generate_expr(*v, &offsets, out)
+                        self.generate_expr(*v, &offsets, out);
+                        for (_, o) in &mut offsets {
+                            *o += 1;
+                        }
                     }
                     out.push(Instruction::PushGlobal(lambda_name));
                     for _ in &free_vars {

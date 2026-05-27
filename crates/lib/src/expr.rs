@@ -10,6 +10,7 @@ pub enum Expr {
     Constructor(String),
     Identifier(String),
     Match(NodeId, Vec<(Pattern, NodeId)>),
+    Block(Vec<NodeId>),
     Lambda { param: String, body: NodeId },
     Application { func: NodeId, arg: NodeId },
 }

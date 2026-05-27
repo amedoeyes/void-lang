@@ -54,7 +54,7 @@ impl GMachine {
             pc: 0,
             instructions: Vec::new(),
             globals: FxHashMap::default(),
-            heap: Vec::new(),
+            heap: Vec::from([Node::Indirection(Address(0))]),
             stack: Vec::new(),
             dump: Vec::new(),
             output: Vec::new(),
@@ -133,6 +133,13 @@ impl GMachine {
                 Instruction::PushInt(i) => {
                     let addr = self.alloc(Node::Integer(i));
                     self.stack.push(addr);
+                    self.pc += 1;
+                }
+                Instruction::Alloc(n) => {
+                    for _ in 0..n {
+                        let addr = self.alloc(Node::Indirection(Address(0)));
+                        self.stack.push(addr)
+                    }
                     self.pc += 1;
                 }
                 Instruction::PushGlobal(name) => {

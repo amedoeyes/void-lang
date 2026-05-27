@@ -258,6 +258,14 @@ impl<'a> fmt::Display for Display<'a> {
                             .join(", ")
                     )
                 }
+                Expr::Block(nodes) => write!(
+                    f,
+                    "{{ {} }}",
+                    nodes
+                        .iter()
+                        .map(|n| Display::new(*n, self.context))
+                        .join(" ")
+                ),
                 Expr::Lambda { param, body } => {
                     write!(f, "{} -> {}", param, Display::new(*body, self.context))
                 }
@@ -275,7 +283,7 @@ impl<'a> fmt::Display for Display<'a> {
                 }
                 write!(
                     f,
-                    " = {}",
+                    " = {};",
                     constructors
                         .iter()
                         .map(|(c, a)| format!(
@@ -291,7 +299,7 @@ impl<'a> fmt::Display for Display<'a> {
                 )
             }
             Node::Bind(name, expr) => {
-                write!(f, "{} = {}", name, Display::new(*expr, self.context))
+                write!(f, "let {} = {};", name, Display::new(*expr, self.context))
             }
             Node::Import(module) => write!(f, "import {}", module.join(".")),
         }
