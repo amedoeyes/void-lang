@@ -126,27 +126,40 @@ impl<'a> IRGenerator<'a> {
                         }
                     }
                     Node::Bind(name, expr) => {
-                        let mut insts = Vec::new();
-                        let mut arity = 0;
-                        match self.context.get_node(*expr).clone() {
-                            Node::Expr(Expr::Lambda { .. }) => {
-                                let mut offsets = FxHashMap::default();
-                                let mut node = *expr;
-                                while let Node::Expr(Expr::Lambda { param, body }) =
-                                    self.context.get_node(node)
-                                {
-                                    offsets.insert(param.clone(), offsets.len());
-                                    node = *body;
-                                    arity += 1;
+                        if let Some(ty) = self.context.get_type(*expr) {
+                            let arity = ty.arity();
+                            let mut insts = Vec::new();
+                            match self.context.get_node(*expr) {
+                                Node::Expr(Expr::Lambda { .. }) => {
+                                    let mut offsets = FxHashMap::default();
+                                    let mut node = *expr;
+                                    while let Node::Expr(Expr::Lambda { param, body }) =
+                                        self.context.get_node(node)
+                                    {
+                                        offsets.insert(param.clone(), offsets.len());
+                                        node = *body;
+                                    }
+                                    self.generate_expr(node, &offsets, &mut insts)
                                 }
-                                self.generate_expr(node, &offsets, &mut insts)
+                                _ => {
+                                    if arity > 0 {
+                                        insts.extend(
+                                            (0..arity).map(|_| Instruction::Push(arity - 1)),
+                                        );
+                                    }
+                                    self.generate_expr(*expr, &FxHashMap::default(), &mut insts);
+                                    if arity > 0 {
+                                        insts.extend((0..arity).map(|_| Instruction::MkAp));
+                                    }
+                                }
                             }
-                            _ => self.generate_expr(*expr, &FxHashMap::default(), &mut insts),
+                            insts.extend([
+                                Instruction::Update(arity),
+                                Instruction::Pop(arity),
+                                Instruction::Unwind,
+                            ]);
+                            self.symbols.insert(name.clone(), (arity, insts));
                         }
-                        insts.push(Instruction::Update(arity));
-                        insts.push(Instruction::Pop(arity));
-                        insts.push(Instruction::Unwind);
-                        self.symbols.insert(name.clone(), (arity, insts));
                     }
                     _ => continue,
                 }
