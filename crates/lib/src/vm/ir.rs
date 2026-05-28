@@ -167,7 +167,7 @@ impl<'a> IRGenerator<'a> {
         }
     }
 
-    fn collect_free_vars(&self, node: NodeId, bound: &FxHashSet<String>, out: &mut Vec<NodeId>) {
+    fn collect_free_vars(&self, node: NodeId, bound: &mut Vec<String>, out: &mut Vec<NodeId>) {
         match self.context.get_node(node) {
             Node::Expr(Expr::Identifier(id)) => {
                 if !bound.contains(id) {
@@ -180,8 +180,11 @@ impl<'a> IRGenerator<'a> {
             }
             Node::Expr(Expr::Match(scrutinee, branches)) => {
                 self.collect_free_vars(*scrutinee, bound, out);
-                for (_, body) in branches {
+                for (pat, body) in branches {
+                    let original_len = bound.len();
+                    pat.collect_bound_vars(bound);
                     self.collect_free_vars(*body, bound, out);
+                    bound.truncate(original_len);
                 }
             }
             _ => {}
@@ -345,7 +348,7 @@ impl<'a> IRGenerator<'a> {
                     let mut free_vars = Vec::new();
                     self.collect_free_vars(
                         lambda_body,
-                        &lambda_offsets.iter().map(|(p, _)| p.clone()).collect(),
+                        &mut lambda_offsets.iter().map(|(p, _)| p.clone()).collect(),
                         &mut free_vars,
                     );
                     lambda_arity += free_vars.len();

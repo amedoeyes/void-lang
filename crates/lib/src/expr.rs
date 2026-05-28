@@ -22,6 +22,20 @@ pub enum Pattern {
     Constructor(String, Vec<Pattern>),
 }
 
+impl Pattern {
+    pub fn collect_bound_vars(&self, vars: &mut Vec<String>) {
+        match self {
+            Pattern::Wildcard => {}
+            Pattern::Identifier(id) => vars.push(id.clone()),
+            Pattern::Constructor(_, patterns) => {
+                for p in patterns {
+                    p.collect_bound_vars(vars);
+                }
+            }
+        }
+    }
+}
+
 impl Display for Pattern {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
