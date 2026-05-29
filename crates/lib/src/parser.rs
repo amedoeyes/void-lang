@@ -72,48 +72,50 @@ impl<'a> Parser<'a> {
         let (_, start_span) = self.expect(Token::Keyword(Keyword::Type))?;
         let name = match self.advance()? {
             (Token::Type(ty), _) => ty,
-            other => {
-                return Err(Error::UnexpectedToken("type".to_string(), other));
-            }
+            other => return Err(Error::UnexpectedToken("type".to_string(), other)),
         };
 
-        let mut params = Vec::new();
-
-        while let (Token::Identifier(id), _) = self.peek(0)? {
-            params.push(id);
-            self.advance()?;
-        }
+        let params = if let Token::Symbol(sym) = self.peek(0)?.0
+            && sym == "<"
+        {
+            self.parse_delimited_list(
+                Token::Symbol("<".into()),
+                Token::Symbol(">".into()),
+                Token::Delimiter(Delimiter::Comma),
+                |p| match p.advance()? {
+                    (Token::Identifier(id), _) => Ok(id),
+                    other => Err(Error::UnexpectedToken("identifier".to_string(), other)),
+                },
+            )?
+        } else {
+            Vec::new()
+        };
 
         self.expect(Token::Symbol("=".into()))?;
 
-        let mut consts = Vec::new();
-
-        loop {
-            let name = match self.advance()? {
-                (Token::Type(ty), _) => ty,
-                other => {
-                    return Err(Error::UnexpectedToken("constructor".to_string(), other));
-                }
-            };
-
-            let mut args = Vec::new();
-            while let Ok(arg) = self.parse_type_expr() {
-                args.push(arg);
-            }
-            consts.push((name, args));
-
-            match self.peek(0)? {
-                (Token::Symbol(val), _) if val == "|" => {
-                    self.advance()?;
-                    continue;
-                }
-                _ => break,
-            }
-        }
+        let consts = match self.advance()? {
+            (Token::Keyword(Keyword::Enum), _) => self.parse_delimited_list(
+                Token::Delimiter(Delimiter::BraceLeft),
+                Token::Delimiter(Delimiter::BraceRight),
+                Token::Delimiter(Delimiter::Comma),
+                |p| match p.advance()? {
+                    (Token::Type(ty), _) => {
+                        let mut args = Vec::new();
+                        while let Ok(arg) = p.parse_type_expr() {
+                            args.push(arg);
+                        }
+                        Ok((ty, args))
+                    }
+                    other => Err(Error::UnexpectedToken("variant".to_string(), other)),
+                },
+            ),
+            other => Err(Error::UnexpectedToken("enum".to_string(), other)),
+        }?;
 
         let (_, end_span) = self.expect(Token::Delimiter(Delimiter::Semicolon))?;
 
         let ty = self.context.add_type(name, params, consts);
+        self.context.set_span(ty, start_span.merge(end_span));
         Ok(ty)
     }
 
@@ -701,6 +703,29 @@ impl<'a> Parser<'a> {
             self.context.set_span(func, start_span.merge(end_span));
         }
         Ok(func)
+    }
+
+    pub fn parse_delimited_list<T>(
+        &mut self,
+        open: Token,
+        close: Token,
+        sep: Token,
+        mut parser: impl FnMut(&mut Self) -> Result<T>,
+    ) -> Result<Vec<T>> {
+        self.expect(open)?;
+        let mut res = Vec::new();
+        if self.peek(0)?.0 != close {
+            res.push(parser(self)?);
+            while self.peek(0)?.0 == sep {
+                self.advance()?;
+                if self.peek(0)?.0 == close {
+                    break;
+                }
+                res.push(parser(self)?);
+            }
+        }
+        self.expect(close)?;
+        Ok(res)
     }
 
     fn peek(&mut self, n: usize) -> Result<(Token, Span)> {
