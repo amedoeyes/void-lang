@@ -26,6 +26,11 @@
               lockFile = "${src}/Cargo.lock";
             };
 
+            nativeBuildInputs = with pkgs; [
+              binutils
+              nasm
+            ];
+
             meta = {
               mainProgram = "void";
               description = "void-lang";
@@ -49,6 +54,9 @@
               rust-analyzer
               rustc
               rustfmt
+              binutils
+              nasm
+              gdb
             ];
           };
         }
