@@ -6,14 +6,14 @@ use fxhash::FxHashSet;
 use void::{
     context::{Context, Node},
     error,
+    ir::{
+        generate,
+        instructions::Instruction,
+        interperter::{GMachine, Global, Node as GNode},
+    },
     lexer::{Lexer, Token},
-    modules,
     parser::{self, parse},
     type_system::infer,
-    vm::{
-        interperter::{GMachine, Global, Node as GNode},
-        ir::{Instruction, generate},
-    },
 };
 
 #[derive(Debug)]

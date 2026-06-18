@@ -1,9 +1,9 @@
 pub mod context;
 pub mod error;
 pub mod expr;
+pub mod ir;
 pub mod lexer;
 pub mod modules;
 pub mod parser;
 pub mod span;
 pub mod type_system;
-pub mod vm;
