@@ -11,43 +11,21 @@ const RUNTIME: &str = r#"
 default rel
 
 section .bss
-stack_base resq 1024
-dump_base resq 2048
-heap_start resq 4096
-heap_free_ptr resq 1
+__stack_base resq 1024
+__dump_base resq 2048
+__heap_start resq 4096
+__heap_free_ptr resq 1
 
-TAG_INT equ 0
-TAG_CNST equ 1
-TAG_IND equ 2
-TAG_APP equ 3
-TAG_GLBL equ 4
+__TAG_INT equ 0
+__TAG_CNST equ 1
+__TAG_IND equ 2
+__TAG_APP equ 3
+__TAG_GLBL equ 4
 
 section .text
 global  _start
 
-%macro stack_push 1
-	sub r15, 8
-	mov [r15], %1
-%endmacro
-
-%macro stack_pop 1
-	mov %1, [r15]
-	add r15, 8
-%endmacro
-
-%macro dump_push 2
-	sub r14, 16
-	mov [r14], %1
-	mov [r14+8], %2
-%endmacro
-
-%macro dump_pop 2
-	mov %1, [r14]
-	mov %2, [r14+8]
-	add r14, 16
-%endmacro
-
-unwind:
+__unwind:
 	mov rdi, [r15]
 	mov rsi, [rdi]
 
@@ -61,20 +39,25 @@ unwind:
 
 	.tag_int:
 	.tag_cnst:
-		dump_pop rsi, rdx
+		mov rsi, [r14]
+		mov rdx, [r14+8]
+		add r14, 16
+
 		mov r15, rdx
-		stack_push rdi
+		sub r15, 8
+		mov [r15], rdi
 		jmp rsi
 
 	.tag_ind:
 		mov rdi, [rdi+8]
 		mov qword [r15], rdi
-		jmp unwind
+		jmp __unwind
 
 	.tag_app:
 		mov rdi, [rdi+8]
-		stack_push rdi
-		jmp unwind
+		sub r15, 8
+		mov [r15], rdi
+		jmp __unwind
 
 	.tag_glbl:
 		mov rsi, [rdi+8]
@@ -95,56 +78,63 @@ unwind:
 		.done:
 		jmp rsi
 
-force:
-	stack_push rdi
+__force:
+	sub r15, 8
+	mov [r15], rdi
 
 	mov rdi, .return
 	mov rsi, r15
 	add rsi, 8
-	dump_push rdi, rsi
 
-	jmp unwind
+	sub r14, 16
+	mov [r14], rdi
+	mov [r14+8], rsi
+
+	jmp __unwind
 
 	.return:
-	stack_pop rax
+
+	mov rax, [r15]
+	add r15, 8
+
 	ret
 
-print:
-	call force
+__print:
+	call __force
 	mov r8, rax
 
-	cmp [r8], TAG_INT
+	cmp [r8], __TAG_INT
 	je .tag_int
-	cmp [r8], TAG_CNST
+	cmp [r8], __TAG_CNST
 	je .tag_cnst
 
 	jmp .done
 
 	.tag_int:
 		mov rdi, [r8+8]
-		call print_int
+		call __print_int
 		jmp .done
 
 	.tag_cnst:
 		mov rdi, '<'
-		call print_char
+		call __print_char
 
 		mov rdi, [r8+8]
-		call print_int
+		call __print_int
 
 		mov rdi, '>'
-		call print_char
+		call __print_char
 
 		mov rdi, [r8+16]
 		test rdi, rdi
 		jz .done
 
 		mov rdi, '('
-		call print_char
+		call __print_char
 
 		push r8
 		mov rdi, [r8+24]
-		call print
+		call __print
 		pop r8
 
 		mov r9, 1
@@ -153,15 +143,15 @@ print:
 			je .loop_end
 
 			mov rdi, ','
-			call print_char
+			call __print_char
 
 			mov rdi, ' '
-			call print_char
+			call __print_char
 
 			push r8
 			push r9
 			mov rdi, [r8+24+r9*8]
-			call print
+			call __print
 			pop r9
 			pop r8
 
@@ -171,7 +161,7 @@ print:
 		.loop_end:
 
 		mov rdi, ')'
-		call print_char
+		call __print_char
 
 		jmp .done
 
@@ -179,67 +169,67 @@ print:
 
 	ret
 
-println:
-	call print
+__println:
+	call __print
 	mov rdi, 10
-	call print_char
+	call __print_char
 
-runtime_init:
-	mov r15, stack_base + 1024*8
-	mov r14, dump_base + 2048*8
-	mov rdi, heap_start
-	mov [heap_free_ptr], rdi
+__runtime_init:
+	mov r15, __stack_base + 1024*8
+	mov r14, __dump_base + 2048*8
+	mov rdi, __heap_start
+	mov [__heap_free_ptr], rdi
 	ret
 
-heap_alloc:
-	mov rax, [heap_free_ptr]
-	add [heap_free_ptr], rdi
+__heap_alloc:
+	mov rax, [__heap_free_ptr]
+	add [__heap_free_ptr], rdi
 	ret
 
-heap_make_int:
+__heap_make_int:
 	mov  rsi, rdi
 	mov  rdi, 16
-	call heap_alloc
-	mov  qword [rax], TAG_INT
+	call __heap_alloc
+	mov  qword [rax], __TAG_INT
 	mov  qword [rax+8], rsi
 	ret
 
-heap_make_ind:
+__heap_make_ind:
 	mov  rsi, rdi
 	mov  rdi, 16
-	call heap_alloc
-	mov  qword [rax], TAG_IND
+	call __heap_alloc
+	mov  qword [rax], __TAG_IND
 	mov  qword [rax+8], rsi
 	ret
 
-heap_make_app:
+__heap_make_app:
 	mov  rdx, rdi
 	mov  rdi, 24
-	call heap_alloc
-	mov  qword [rax], TAG_APP
+	call __heap_alloc
+	mov  qword [rax], __TAG_APP
 	mov  qword [rax+8], rdx
 	mov  qword [rax+16], rsi
 	ret
 
-heap_make_global:
+__heap_make_global:
 	mov  rdx, rdi
 	mov  rdi, 24
-	call heap_alloc
-	mov  qword [rax], TAG_GLBL
+	call __heap_alloc
+	mov  qword [rax], __TAG_GLBL
 	mov  qword [rax+8], rdx
 	mov  qword [rax+16], rsi
 	ret
 
-heap_make_constr:
+__heap_make_constr:
 	mov rcx, rsi
 	mov rsi, rdi
 
 	mov rdi, rcx
 	shl rdi, 3
 	add rdi, 24
-	call heap_alloc
+	call __heap_alloc
 
-	mov qword [rax], TAG_CNST
+	mov qword [rax], __TAG_CNST
 	mov qword [rax+8], rsi
 	mov qword [rax+16], rcx
 
@@ -250,7 +240,7 @@ heap_make_constr:
 
 	ret
 
-print_int:
+__print_int:
 	mov rax, rdi
 
 	lea rsi, [rsp-1]
@@ -275,7 +265,7 @@ print_int:
 	syscall
 	ret
 
-print_char:
+__print_char:
 	mov [rsp-1], dil
 	mov rax, 1
 	mov rdi, 1
@@ -284,7 +274,7 @@ print_char:
 	syscall
 	ret
 
-print_str:
+__print_str:
 	mov rdx, rsi
 	mov rsi, rdi
 	mov rax, 1
@@ -292,25 +282,38 @@ print_str:
 	syscall
 	ret
 
-_start:
-	call runtime_init
-
+__start_main:
 	; PUSHGLOBAL main, 0
 	mov rdi, main
 	mov rsi, 0
-	call heap_make_global
-	stack_push rax
+	call __heap_make_global
+	sub r15, 8
+	mov [r15], rax
 
 	; EVAL
 	mov rdi, .return
 	mov rsi, r15
 	add rsi, 8
-	dump_push rdi, rsi
-	jmp unwind
+
+	sub r14, 16
+	mov [r14], rdi
+	mov [r14+8], rsi
+
+	jmp __unwind
+
 	.return:
 
-	stack_pop rdi
-	call println
+	mov rdi, [r15]
+	add r15, 8
+
+	call __println
+
+	ret
+
+_start:
+	call __runtime_init
+
+	call __start_main
 
 	mov rdi, 0
 	mov rax, 60
@@ -342,8 +345,9 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
     fn emit_push_int(&mut self, int: i64) -> Result<()> {
         writeln!(self.writer, "	; PUSHINT {int}")?;
         writeln!(self.writer, "	mov rdi, {int}")?;
-        writeln!(self.writer, "	call heap_make_int")?;
-        writeln!(self.writer, "	stack_push rax")?;
+        writeln!(self.writer, "	call __heap_make_int")?;
+        writeln!(self.writer, "	sub r15, 8")?;
+        writeln!(self.writer, "	mov [r15], rax")?;
         writeln!(self.writer)?;
         Ok(())
     }
@@ -352,8 +356,9 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
         writeln!(self.writer, "	; PUSHGLOBAL {name}")?;
         writeln!(self.writer, "	mov rdi, {name}")?;
         writeln!(self.writer, "	mov rsi, {arity}")?;
-        writeln!(self.writer, "	call heap_make_global")?;
-        writeln!(self.writer, "	stack_push rax")?;
+        writeln!(self.writer, "	call __heap_make_global")?;
+        writeln!(self.writer, "	sub r15, 8")?;
+        writeln!(self.writer, "	mov [r15], rax")?;
         writeln!(self.writer)?;
         Ok(())
     }
@@ -361,8 +366,9 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
     fn emit_alloc(&mut self) -> Result<()> {
         writeln!(self.writer, "	; ALLOC")?;
         writeln!(self.writer, "	mov rdi, 0")?;
-        writeln!(self.writer, "	call heap_make_ind")?;
-        writeln!(self.writer, "	stack_push rax")?;
+        writeln!(self.writer, "	call __heap_make_ind")?;
+        writeln!(self.writer, "	sub r15, 8")?;
+        writeln!(self.writer, "	mov [r15], rax")?;
         writeln!(self.writer)?;
         Ok(())
     }
@@ -370,7 +376,8 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
     fn emit_push(&mut self, n: usize) -> Result<()> {
         writeln!(self.writer, "	; PUSH {n}")?;
         writeln!(self.writer, "	mov rdi, [r15+{}]", n * 8)?;
-        writeln!(self.writer, "	stack_push rdi")?;
+        writeln!(self.writer, "	sub r15, 8")?;
+        writeln!(self.writer, "	mov [r15], rdi")?;
         writeln!(self.writer)?;
         Ok(())
     }
@@ -393,9 +400,10 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
 
     fn emit_update(&mut self, n: usize) -> Result<()> {
         writeln!(self.writer, "	; UPDATE {n}")?;
-        writeln!(self.writer, "	stack_pop rdi")?;
+        writeln!(self.writer, "	mov rdi, [r15]")?;
+        writeln!(self.writer, "	add r15, 8")?;
         writeln!(self.writer, "	mov rsi, [r15+{}]", n * 8)?;
-        writeln!(self.writer, "	mov qword [rsi], TAG_IND")?;
+        writeln!(self.writer, "	mov qword [rsi], __TAG_IND")?;
         writeln!(self.writer, "	mov [rsi+8], rdi")?;
         writeln!(self.writer)?;
         Ok(())
@@ -403,10 +411,12 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
 
     fn emit_mkap(&mut self) -> Result<()> {
         writeln!(self.writer, "	; MKAP")?;
-        writeln!(self.writer, "	stack_pop rdi")?;
-        writeln!(self.writer, "	stack_pop rsi")?;
-        writeln!(self.writer, "	call heap_make_app")?;
-        writeln!(self.writer, "	stack_push rax")?;
+        writeln!(self.writer, "	mov rdi, [r15]")?;
+        writeln!(self.writer, "	mov rsi, [r15+8]")?;
+        writeln!(self.writer, "	add r15, 16")?;
+        writeln!(self.writer, "	call __heap_make_app")?;
+        writeln!(self.writer, "	sub r15, 8")?;
+        writeln!(self.writer, "	mov [r15], rax")?;
         writeln!(self.writer)?;
         Ok(())
     }
@@ -416,17 +426,19 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
         writeln!(self.writer, "	mov rdi, {tag}")?;
         writeln!(self.writer, "	mov rsi, {arity}")?;
         writeln!(self.writer, "	mov rdx, r15")?;
-        writeln!(self.writer, "	call heap_make_constr")?;
+        writeln!(self.writer, "	call __heap_make_constr")?;
         writeln!(self.writer, "	mov rdi, {}", arity * 8)?;
         writeln!(self.writer, "	add r15, rdi")?;
-        writeln!(self.writer, "	stack_push rax")?;
+        writeln!(self.writer, "	sub r15, 8")?;
+        writeln!(self.writer, "	mov [r15], rax")?;
         writeln!(self.writer)?;
         Ok(())
     }
 
     fn emit_split(&mut self, n: usize) -> Result<()> {
         writeln!(self.writer, "	; SPLIT {n}")?;
-        writeln!(self.writer, "	stack_pop rsi")?;
+        writeln!(self.writer, "	mov rsi, [r15]")?;
+        writeln!(self.writer, "	add r15, 8")?;
         writeln!(self.writer, "	add rsi, 24")?;
         writeln!(self.writer, "	mov rcx, {n}")?;
         writeln!(self.writer, "	mov rdx, {}", n * 8)?;
@@ -467,8 +479,8 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
     }
 
     fn emit_unwind(&mut self) -> Result<()> {
-        writeln!(self.writer, "	; UNWIND")?;
-        writeln!(self.writer, "	jmp unwind")?;
+        writeln!(self.writer, "	; __UNWIND")?;
+        writeln!(self.writer, "	jmp __unwind")?;
         writeln!(self.writer)?;
         Ok(())
     }
@@ -481,8 +493,10 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
         writeln!(self.writer, "	mov rdi, {eval_label}")?;
         writeln!(self.writer, "	mov rsi, r15")?;
         writeln!(self.writer, "	add rsi, 8")?;
-        writeln!(self.writer, "	dump_push rdi, rsi")?;
-        writeln!(self.writer, "	jmp unwind")?;
+        writeln!(self.writer, "	sub r14, 16")?;
+        writeln!(self.writer, "	mov [r14], rdi")?;
+        writeln!(self.writer, "	mov [r14+8], rsi")?;
+        writeln!(self.writer, "	jmp __unwind")?;
         writeln!(self.writer, "	{eval_label}:")?;
         writeln!(self.writer)?;
         Ok(())
