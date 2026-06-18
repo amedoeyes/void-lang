@@ -1,3 +1,4 @@
+pub mod codegen;
 pub mod context;
 pub mod error;
 pub mod expr;
