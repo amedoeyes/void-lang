@@ -1,9 +1,16 @@
 use core::fmt::{self, Display, Formatter};
-use std::{env, fs, io, path::PathBuf};
+use std::{
+    env,
+    fs::{self, File},
+    io::{self, BufWriter},
+    path::PathBuf,
+    process::Command,
+};
 
 use clap::{Parser, Subcommand, crate_name, crate_version};
 use fxhash::FxHashSet;
 use void::{
+    codegen::{self},
     context::{Context, Node},
     error,
     ir::{
@@ -54,6 +61,7 @@ enum Commands {
     Type { file: PathBuf },
     // Repl { file: Option<PathBuf> },
     Ir { file: PathBuf },
+    Compile { file: PathBuf },
     Run { file: PathBuf },
 }
 
@@ -64,6 +72,7 @@ fn main() {
         Commands::Type { file } => type_cmd(&file),
         // Commands::Repl { file } => repl_cmd(file.as_ref()),
         Commands::Ir { file } => ir_cmd(&file),
+        Commands::Compile { file } => compile_cmd(&file),
         Commands::Run { file } => run_cmd(&file),
     };
 
@@ -110,6 +119,72 @@ fn ir_cmd(source_path: &PathBuf) -> Result<()> {
         }
         println!();
     }
+
+    Ok(())
+}
+
+fn compile_cmd(source_path: &PathBuf) -> Result<()> {
+    let mut ctx = Context::new();
+
+    // let parent_dir = source_path
+    //     .parent()
+    //     .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
+
+    let mut visited_modules = FxHashSet::default();
+    visited_modules.insert(PathBuf::from(source_path));
+
+    let contents = fs::read_to_string(source_path)?;
+
+    parse(&mut ctx, &contents).map_err(|err| {
+        Error::Void(error::Error::Syntax(
+            source_path.clone(),
+            contents.clone(),
+            Box::new(err),
+        ))
+    })?;
+
+    infer(&mut ctx).map_err(|err| {
+        Error::Void(error::Error::Type(
+            source_path.clone(),
+            contents,
+            Box::new(err),
+        ))
+    })?;
+
+    let symbols = generate(&ctx);
+
+    let asm_path = source_path
+        .clone()
+        .file_stem()
+        .map(|p| PathBuf::from(p).with_extension("nasm"))
+        .unwrap();
+    let obj_path = asm_path.with_extension("o");
+    let asm_file = File::create(&asm_path)?;
+    let mut asm_buf = BufWriter::new(&asm_file);
+
+    codegen::x86_64::emit(&mut asm_buf, &symbols)?;
+
+    let status = Command::new("nasm")
+        .args(&["-f", "elf64"])
+        .arg(&asm_path)
+        .status()
+        .expect("Failed to execute nasm");
+
+    if !status.success() {
+        return Ok(());
+    }
+
+    let status = Command::new("ld")
+        .arg(&obj_path)
+        .status()
+        .expect("Failed to execute ld");
+
+    if !status.success() {
+        return Ok(());
+    }
+
+    fs::remove_file(&asm_path)?;
+    fs::remove_file(&obj_path)?;
 
     Ok(())
 }
@@ -293,13 +368,6 @@ fn type_cmd(source_path: &PathBuf) -> Result<()> {
             match ctx.get_node(node) {
                 Node::TypeExpr(..) => todo!(),
                 Node::Expr(..) => {
-                    println!(
-                        "{} : {}",
-                        node.display(&ctx),
-                        ctx.get_type(node).as_ref().unwrap()
-                    )
-                }
-                Node::Type(..) => {
                     println!(
                         "{} : {}",
                         node.display(&ctx),
