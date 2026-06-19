@@ -13,11 +13,7 @@ use void::{
     codegen::{self},
     context::{Context, Node},
     error,
-    ir::{
-        generate,
-        instructions::Instruction,
-        interperter::{GMachine, Global, Node as GNode},
-    },
+    ir::{generate, instructions::Instruction, interperter::GMachine},
     lexer::{Lexer, Token},
     parser::{self, parse},
     type_system::infer,
@@ -112,8 +108,8 @@ fn ir_cmd(source_path: &PathBuf) -> Result<()> {
 
     let ir = generate(&ctx);
 
-    for (name, (arity, insts)) in ir {
-        println!("{} {}:", name, arity);
+    for (name, insts) in ir {
+        println!("{}:", name);
         for i in insts {
             println!("  {i}");
         }
@@ -217,42 +213,17 @@ fn run_cmd(source_path: &PathBuf) -> Result<()> {
         ))
     })?;
 
-    let ir = generate(&ctx);
+    let symbols = generate(&ctx);
 
-    let mut machine = GMachine::new();
-    machine.instructions = Vec::from([
-        Instruction::PushGlobal("main".into()),
-        Instruction::Eval,
-        Instruction::Print,
-    ]);
-
-    for (name, (arity, insts)) in ir {
-        let global = machine.alloc(GNode::Global(name.clone(), arity, Global::Super(insts)));
-        machine.globals.insert(name, global);
-    }
-
-    let println_global = machine.alloc(GNode::Global("println".into(), 1, Global::Builtin));
-    let add_global = machine.alloc(GNode::Global("+".into(), 2, Global::Builtin));
-    let sub_global = machine.alloc(GNode::Global("-".into(), 2, Global::Builtin));
-    let mul_global = machine.alloc(GNode::Global("*".into(), 2, Global::Builtin));
-    let eq_global = machine.alloc(GNode::Global("==".into(), 2, Global::Builtin));
-    let le_global = machine.alloc(GNode::Global("<=".into(), 2, Global::Builtin));
-    let ge_global = machine.alloc(GNode::Global(">=".into(), 2, Global::Builtin));
-    let lt_global = machine.alloc(GNode::Global("<".into(), 2, Global::Builtin));
-    let gt_global = machine.alloc(GNode::Global(">".into(), 2, Global::Builtin));
-    machine.globals.insert("println".into(), println_global);
-    machine.globals.insert("+".into(), add_global);
-    machine.globals.insert("-".into(), sub_global);
-    machine.globals.insert("*".into(), mul_global);
-    machine.globals.insert("==".into(), eq_global);
-    machine.globals.insert("<=".into(), le_global);
-    machine.globals.insert(">=".into(), ge_global);
-    machine.globals.insert("<".into(), lt_global);
-    machine.globals.insert(">".into(), gt_global);
+    let mut machine = GMachine::new(&symbols);
+    machine.instructions =
+        Vec::from([Instruction::PushGlobal("main".into(), 0), Instruction::Eval]);
 
     machine.run();
 
-    println!("result: {:?}", machine.output);
+    if let Some(res) = machine.stack.last() {
+        machine.println(*res)
+    }
 
     Ok(())
 }

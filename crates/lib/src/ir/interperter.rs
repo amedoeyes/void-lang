@@ -23,41 +23,33 @@ impl Display for Value {
 pub struct Address(usize);
 
 #[derive(Debug, Clone)]
-pub enum Global {
-    Builtin,
-    Super(Vec<Instruction>),
-}
-
-#[derive(Debug, Clone)]
 pub enum Node {
     Integer(i64),
-    Application(Address, Address),
-    Global(String, usize, Global),
     Constructor(usize, Vec<Address>),
     Indirection(Address),
+    Application(Address, Address),
+    Global(String, usize),
 }
 
 #[derive(Debug)]
-pub struct GMachine {
+pub struct GMachine<'a> {
     pub pc: usize,
     pub instructions: Vec<Instruction>,
-    pub globals: FxHashMap<String, Address>,
+    pub symbols: &'a FxHashMap<String, Vec<Instruction>>,
     pub heap: Vec<Node>,
     pub stack: Vec<Address>,
     pub dump: Vec<(Vec<Address>, Vec<Instruction>)>,
-    pub output: Vec<Value>,
 }
 
-impl GMachine {
-    pub fn new() -> Self {
+impl<'a> GMachine<'a> {
+    pub fn new(symbols: &'a FxHashMap<String, Vec<Instruction>>) -> Self {
         Self {
             pc: 0,
             instructions: Vec::new(),
-            globals: FxHashMap::default(),
+            symbols,
             heap: Vec::from([Node::Indirection(Address(0))]),
             stack: Vec::new(),
             dump: Vec::new(),
-            output: Vec::new(),
         }
     }
 
@@ -86,7 +78,6 @@ impl GMachine {
         let saved_dump = std::mem::take(&mut self.dump);
         let saved_instructions = std::mem::take(&mut self.instructions);
         let saved_pc = self.pc;
-        let saved_output = std::mem::take(&mut self.output);
 
         self.stack = Vec::from([addr]);
         self.instructions = Vec::from([Instruction::Eval]);
@@ -100,7 +91,6 @@ impl GMachine {
         self.dump = saved_dump;
         self.instructions = saved_instructions;
         self.pc = saved_pc;
-        self.output = saved_output;
 
         result
     }
@@ -113,7 +103,7 @@ impl GMachine {
 
             let inst = self.instructions[self.pc].clone();
 
-            println!("------");
+            // println!("------");
             // println!("pc: {}", self.pc);
             //     println!("instructions: {:?}", self.instructions);
             // println!(
@@ -127,7 +117,7 @@ impl GMachine {
             //     println!("dump: {:?}", self.dump);
             //     println!("output: {:?}", self.output);
 
-            println!("inst: {:?}", inst);
+            // println!("inst: {:?}", inst);
 
             match inst {
                 Instruction::PushInt(i) => {
@@ -135,15 +125,13 @@ impl GMachine {
                     self.stack.push(addr);
                     self.pc += 1;
                 }
-                Instruction::Alloc(n) => {
-                    for _ in 0..n {
-                        let addr = self.alloc(Node::Indirection(Address(0)));
-                        self.stack.push(addr)
-                    }
+                Instruction::Alloc => {
+                    let addr = self.alloc(Node::Indirection(Address(0)));
+                    self.stack.push(addr);
                     self.pc += 1;
                 }
-                Instruction::PushGlobal(name) => {
-                    let addr = *self.globals.get(&name).unwrap();
+                Instruction::PushGlobal(name, arity) => {
+                    let addr = self.alloc(Node::Global(name, arity));
                     self.stack.push(addr);
                     self.pc += 1;
                 }
@@ -244,7 +232,7 @@ impl GMachine {
                             // println!("Indirection({:?})", self.heap[addr.0]);
                             *self.stack.last_mut().unwrap() = addr;
                         }
-                        Node::Global(name, arity, global) => {
+                        Node::Global(name, arity) => {
                             // println!("Global({name}, {arity}, {global:?})");
                             let mut args = self.stack[..arity].iter().fold(
                                 Vec::with_capacity(arity),
@@ -260,13 +248,19 @@ impl GMachine {
 
                             let redex_root = self.stack[self.stack.len() - 1 - arity];
 
-                            println!(
-                                "fun: {name}, args: {:?}, redex: {:?}",
-                                args.iter().map(|a| &self.heap[a.0]).collect::<Vec<_>>(),
-                                self.heap[redex_root.0]
-                            );
-                            match global {
-                                Global::Builtin => match name.as_str() {
+                            // println!(
+                            //     "fun: {name}, args: {:?}, redex: {:?}",
+                            //     args.iter().map(|a| &self.heap[a.0]).collect::<Vec<_>>(),
+                            //     self.heap[redex_root.0]
+                            // );
+                            if let Some(insts) = self.symbols.get(&name) {
+                                self.pc = 0;
+                                self.instructions = insts.clone();
+                                self.stack = Vec::with_capacity(arity + 1);
+                                self.stack.push(redex_root);
+                                self.stack.extend(args);
+                            } else {
+                                match name.as_str() {
                                     "println" => {
                                         let val_addr = args.pop().unwrap();
                                         let val_addr = self.force(val_addr);
@@ -386,50 +380,52 @@ impl GMachine {
                                         }
                                     }
                                     _ => unreachable!(),
-                                },
-                                Global::Super(instructions) => {
-                                    self.pc = 0;
-                                    self.instructions = instructions;
-                                    self.stack = Vec::with_capacity(arity + 1);
-                                    self.stack.push(redex_root);
-                                    self.stack.extend(args);
                                 }
                             }
                         }
                     }
                 }
-                Instruction::Print => {
-                    let result_addr = self.stack.pop().unwrap();
-                    match &self.heap[result_addr.0] {
-                        Node::Integer(i) => self.output.push(Value::Integer(*i)),
-                        Node::Constructor(_, args) => {
-                            let mut new_insts = Vec::new();
-                            for a in args.iter().rev() {
-                                self.stack.push(*a);
-                                new_insts.push(Instruction::Eval);
-                                new_insts.push(Instruction::Print);
-                            }
-                            self.instructions.extend(new_insts);
-                        }
-                        _ => unreachable!(),
-                    }
-                    self.pc += 1;
-                }
             }
 
             //     println!("instructions: {:?}", self.instructions);
-            println!(
-                "stack: {:?}",
-                self.stack
-                    .iter()
-                    .map(|a| &self.heap[a.0])
-                    .collect::<Vec<_>>()
-            );
+            // println!(
+            //     "stack: {:?}",
+            //     self.stack
+            //         .iter()
+            //         .map(|a| &self.heap[a.0])
+            //         .collect::<Vec<_>>()
+            // );
             //     println!("heap: {:?}", self.heap);
             //     println!("dump: {:?}", self.dump);
             //     println!("output: {:?}", self.output);
         }
 
         // println!();
+    }
+
+    pub fn print(&mut self, addr: Address) {
+        let addr = self.force(addr);
+        match self.heap[addr.0].clone() {
+            Node::Integer(i) => print!("{i}"),
+            Node::Constructor(tag, args) => {
+                print!("<{tag}>");
+                if !args.is_empty() {
+                    let mut args = args.iter();
+                    print!("(");
+                    self.print(*args.next().unwrap());
+                    for a in args {
+                        print!(", ");
+                        self.print(*a);
+                    }
+                    print!(")");
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn println(&mut self, addr: Address) {
+        self.print(addr);
+        println!();
     }
 }
