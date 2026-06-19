@@ -1,8 +1,6 @@
 pub mod instructions;
 pub mod interperter;
 
-use std::fmt::{Display, Formatter};
-
 use fxhash::{FxHashMap, FxHashSet};
 
 use crate::{
@@ -15,7 +13,8 @@ use crate::{
 #[derive(Debug)]
 pub struct IRGenerator<'a> {
     pub context: &'a Context,
-    pub symbols: FxHashMap<String, (usize, Vec<Instruction>)>,
+    pub symbols: FxHashMap<String, Vec<Instruction>>,
+    pub symbols_arity: FxHashMap<String, usize>,
     pub type_consts: FxHashMap<String, FxHashMap<String, usize>>,
     pub lambda_counter: usize,
 }
@@ -41,6 +40,7 @@ impl<'a> IRGenerator<'a> {
         Self {
             context,
             symbols: FxHashMap::default(),
+            symbols_arity: FxHashMap::default(),
             type_consts,
             lambda_counter: 0,
         }
@@ -57,6 +57,24 @@ impl<'a> IRGenerator<'a> {
             })
             .collect::<Vec<_>>();
 
+        for module in &modules {
+            for node in module {
+                match self.context.get_node(*node) {
+                    Node::Type(_, _, constructors) => {
+                        for (cons, args) in constructors {
+                            self.symbols_arity.insert(cons.clone(), args.len());
+                        }
+                    }
+                    Node::Bind(name, expr) => {
+                        if let Some(ty) = self.context.get_type(*expr) {
+                            self.symbols_arity.insert(name.clone(), ty.arity());
+                        }
+                    }
+                    _ => continue,
+                }
+            }
+        }
+
         for module in modules {
             for node in module {
                 match self.context.get_node(node) {
@@ -67,7 +85,7 @@ impl<'a> IRGenerator<'a> {
                             insts.push(Instruction::Pack(i + 1, arity));
                             insts.push(Instruction::Update(0));
                             insts.push(Instruction::Unwind);
-                            self.symbols.insert(cons.clone(), (arity, insts));
+                            self.symbols.insert(cons.clone(), insts);
                         }
                     }
                     Node::Bind(name, expr) => {
@@ -103,7 +121,7 @@ impl<'a> IRGenerator<'a> {
                                 Instruction::Pop(arity),
                                 Instruction::Unwind,
                             ]);
-                            self.symbols.insert(name.clone(), (arity, insts));
+                            self.symbols.insert(name.clone(), insts);
                         }
                     }
                     _ => continue,
@@ -151,12 +169,18 @@ impl<'a> IRGenerator<'a> {
         match self.context.get_node(node) {
             Node::Expr(expr) => match expr {
                 Expr::Integer(i) => out.push(Instruction::PushInt(*i)),
-                Expr::Constructor(cons) => out.push(Instruction::PushGlobal(cons.clone())),
+                Expr::Constructor(cons) => out.push(Instruction::PushGlobal(
+                    cons.clone(),
+                    *self.symbols_arity.get(cons).unwrap(),
+                )),
                 Expr::Identifier(id) => {
                     if let Some(offset) = offsets.get(id) {
                         out.push(Instruction::Push(*offset));
                     } else {
-                        out.push(Instruction::PushGlobal(id.clone()));
+                        out.push(Instruction::PushGlobal(
+                            id.clone(),
+                            *self.symbols_arity.get(id).unwrap(),
+                        ));
                     }
                 }
                 Expr::Application { func, arg } => {
@@ -257,7 +281,7 @@ impl<'a> IRGenerator<'a> {
                                             *o += 1;
                                         }
                                         new_offsets.insert(name.clone(), 0);
-                                        out.push(Instruction::Alloc(1));
+                                        out.push(Instruction::Alloc);
                                         self.generate_expr(*expr, &new_offsets, out);
                                         out.push(Instruction::Update(0));
                                     }
@@ -312,8 +336,8 @@ impl<'a> IRGenerator<'a> {
                     lambda_insts.push(Instruction::Update(lambda_arity));
                     lambda_insts.push(Instruction::Pop(lambda_arity));
                     lambda_insts.push(Instruction::Unwind);
-                    self.symbols
-                        .insert(lambda_name.clone(), (lambda_arity, lambda_insts));
+                    self.symbols.insert(lambda_name.clone(), lambda_insts);
+                    self.symbols_arity.insert(lambda_name.clone(), lambda_arity);
                     let mut offsets = offsets.clone();
                     for v in &free_vars {
                         self.generate_expr(*v, &offsets, out);
@@ -321,7 +345,7 @@ impl<'a> IRGenerator<'a> {
                             *o += 1;
                         }
                     }
-                    out.push(Instruction::PushGlobal(lambda_name));
+                    out.push(Instruction::PushGlobal(lambda_name, lambda_arity));
                     for _ in &free_vars {
                         out.push(Instruction::MkAp)
                     }
@@ -333,7 +357,7 @@ impl<'a> IRGenerator<'a> {
     }
 }
 
-pub fn generate(ctx: &Context) -> FxHashMap<String, (usize, Vec<Instruction>)> {
+pub fn generate(ctx: &Context) -> FxHashMap<String, Vec<Instruction>> {
     let mut generator = IRGenerator::new(ctx);
     generator.generate();
     generator.symbols

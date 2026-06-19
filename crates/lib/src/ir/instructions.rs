@@ -5,9 +5,9 @@ use fxhash::FxHashMap;
 #[derive(Debug, Clone)]
 pub enum Instruction {
     PushInt(i64),
-    Alloc(usize),
+    Alloc,
     Push(usize),
-    PushGlobal(String),
+    PushGlobal(String, usize),
     Pop(usize),
     Update(usize),
     Slide(usize),
@@ -17,22 +17,21 @@ pub enum Instruction {
     Case(FxHashMap<usize, Vec<Instruction>>),
     Eval,
     Unwind,
-    Print,
 }
 
 impl Display for Instruction {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
-            Instruction::PushInt(i) => write!(f, "PushInt {i}"),
-            Instruction::Alloc(n) => write!(f, "Alloc {n}"),
-            Instruction::Push(n) => write!(f, "Push {n}"),
-            Instruction::PushGlobal(name) => write!(f, "PushGlobal \"{name}\""),
-            Instruction::Pop(n) => write!(f, "Pop {n}"),
-            Instruction::Update(n) => write!(f, "Update {n}"),
-            Instruction::Slide(n) => write!(f, "Slide {n}"),
-            Instruction::MkAp => write!(f, "MkAp"),
-            Instruction::Pack(t, a) => write!(f, "Pack {t} {a}"),
-            Instruction::Split(n) => write!(f, "Split {n}"),
+            Instruction::PushInt(i) => write!(f, "PUSHINT {i}"),
+            Instruction::Alloc => write!(f, "ALLOC"),
+            Instruction::Push(n) => write!(f, "PUSH {n}"),
+            Instruction::PushGlobal(name, arity) => write!(f, "PUSHGLOBAL {name}, {arity}"),
+            Instruction::Pop(n) => write!(f, "POP {n}"),
+            Instruction::Update(n) => write!(f, "UPDATE {n}"),
+            Instruction::Slide(n) => write!(f, "SLIDE {n}"),
+            Instruction::MkAp => write!(f, "MKAP"),
+            Instruction::Pack(t, a) => write!(f, "PACK {t} {a}"),
+            Instruction::Split(n) => write!(f, "SPLIT {n}"),
             Instruction::Case(branches) => {
                 write!(
                     f,
@@ -54,9 +53,8 @@ impl Display for Instruction {
                         .join(", ")
                 )
             }
-            Instruction::Eval => write!(f, "Eval"),
-            Instruction::Unwind => write!(f, "Unwind"),
-            Instruction::Print => write!(f, "Print"),
+            Instruction::Eval => write!(f, "EVAL"),
+            Instruction::Unwind => write!(f, "UNWIND"),
         }
     }
 }

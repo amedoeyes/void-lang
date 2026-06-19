@@ -322,16 +322,13 @@ _start:
 
 pub struct X86_64<'a, 'b, W: Write> {
     writer: &'a mut W,
-    symbols: &'b FxHashMap<String, (usize, Vec<Instruction>)>,
+    symbols: &'b FxHashMap<String, Vec<Instruction>>,
     case_counter: usize,
     eval_counter: usize,
 }
 
 impl<'a, 'b, W: Write> X86_64<'a, 'b, W> {
-    pub fn new(
-        writer: &'a mut W,
-        symbols: &'b FxHashMap<String, (usize, Vec<Instruction>)>,
-    ) -> Self {
+    pub fn new(writer: &'a mut W, symbols: &'b FxHashMap<String, Vec<Instruction>>) -> Self {
         Self {
             writer,
             symbols,
@@ -505,10 +502,8 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
     fn emit_instruction(&mut self, inst: &Instruction) -> Result<()> {
         match inst {
             Instruction::PushInt(i) => self.emit_push_int(*i),
-            Instruction::PushGlobal(name) => {
-                self.emit_push_global(name.as_str(), self.symbols.get(name).unwrap().0)
-            }
-            Instruction::Alloc(_) => self.emit_alloc(),
+            Instruction::PushGlobal(name, arity) => self.emit_push_global(name.as_str(), *arity),
+            Instruction::Alloc => self.emit_alloc(),
             Instruction::Push(n) => self.emit_push(*n),
             Instruction::Pop(n) => self.emit_pop(*n),
             Instruction::Slide(n) => self.emit_slide(*n),
@@ -519,7 +514,6 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
             Instruction::Case(branches) => self.emit_case(&branches),
             Instruction::Eval => self.emit_eval(),
             Instruction::Unwind => self.emit_unwind(),
-            Instruction::Print => todo!(),
         }
     }
 
@@ -539,7 +533,7 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
 
 pub fn emit<'a, 'b, W: Write>(
     writer: &'a mut W,
-    symbols: &'b FxHashMap<String, (usize, Vec<Instruction>)>,
+    symbols: &'b FxHashMap<String, Vec<Instruction>>,
 ) -> Result<()> {
     X86_64::new(writer, symbols).emit()
 }
