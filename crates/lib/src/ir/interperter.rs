@@ -34,18 +34,21 @@ pub enum Node {
 #[derive(Debug)]
 pub struct GMachine<'a> {
     pub pc: usize,
-    pub instructions: Vec<Instruction>,
+    pub instructions: Vec<&'a Instruction>,
     pub symbols: &'a FxHashMap<String, Vec<Instruction>>,
-    pub heap: Vec<Node>,
     pub stack: Vec<Address>,
-    pub dump: Vec<(Vec<Address>, Vec<Instruction>)>,
+    pub heap: Vec<Node>,
+    pub dump: Vec<(usize, usize, Vec<&'a Instruction>)>,
 }
 
 impl<'a> GMachine<'a> {
-    pub fn new(symbols: &'a FxHashMap<String, Vec<Instruction>>) -> Self {
+    pub fn new(
+        symbols: &'a FxHashMap<String, Vec<Instruction>>,
+        instructions: &[&'a Instruction],
+    ) -> Self {
         Self {
             pc: 0,
-            instructions: Vec::new(),
+            instructions: instructions.to_vec(),
             symbols,
             heap: Vec::from([Node::Indirection(Address(0))]),
             stack: Vec::new(),
@@ -61,11 +64,8 @@ impl<'a> GMachine<'a> {
 
     pub fn is_whnf(&self, addr: Address) -> bool {
         match &self.heap[addr.0] {
-            Node::Integer(..) => true,
-            Node::Application(..) => false,
-            Node::Global(..) => false,
-            Node::Indirection(..) => false,
-            Node::Constructor(..) => true,
+            Node::Integer(..) | Node::Constructor(..) => true,
+            _ => false,
         }
     }
 
@@ -74,25 +74,19 @@ impl<'a> GMachine<'a> {
             return addr;
         }
 
-        let saved_stack = std::mem::take(&mut self.stack);
-        let saved_dump = std::mem::take(&mut self.dump);
-        let saved_instructions = std::mem::take(&mut self.instructions);
-        let saved_pc = self.pc;
+        self.dump.push((
+            self.stack.len().saturating_sub(1),
+            self.pc,
+            self.instructions.clone(),
+        ));
 
-        self.stack = Vec::from([addr]);
-        self.instructions = Vec::from([Instruction::Eval]);
+        self.stack.push(addr);
         self.pc = 0;
+        self.instructions = Vec::from([&Instruction::Unwind]);
 
         self.run();
 
-        let result = self.stack[0];
-
-        self.stack = saved_stack;
-        self.dump = saved_dump;
-        self.instructions = saved_instructions;
-        self.pc = saved_pc;
-
-        result
+        self.stack.pop().unwrap()
     }
 
     pub fn run(&mut self) {
@@ -101,27 +95,9 @@ impl<'a> GMachine<'a> {
                 break;
             }
 
-            let inst = self.instructions[self.pc].clone();
-
-            // println!("------");
-            // println!("pc: {}", self.pc);
-            //     println!("instructions: {:?}", self.instructions);
-            // println!(
-            //     "stack: {:?}",
-            //     self.stack
-            //         .iter()
-            //         .map(|a| &self.heap[a.0])
-            //         .collect::<Vec<_>>()
-            // );
-            // println!("heap: {:?}", self.heap);
-            //     println!("dump: {:?}", self.dump);
-            //     println!("output: {:?}", self.output);
-
-            // println!("inst: {:?}", inst);
-
-            match inst {
+            match self.instructions[self.pc] {
                 Instruction::PushInt(i) => {
-                    let addr = self.alloc(Node::Integer(i));
+                    let addr = self.alloc(Node::Integer(*i));
                     self.stack.push(addr);
                     self.pc += 1;
                 }
@@ -131,7 +107,7 @@ impl<'a> GMachine<'a> {
                     self.pc += 1;
                 }
                 Instruction::PushGlobal(name, arity) => {
-                    let addr = self.alloc(Node::Global(name, arity));
+                    let addr = self.alloc(Node::Global(name.clone(), *arity));
                     self.stack.push(addr);
                     self.pc += 1;
                 }
@@ -168,7 +144,7 @@ impl<'a> GMachine<'a> {
                         .drain(self.stack.len() - arity..self.stack.len())
                         .rev()
                         .collect();
-                    let cons = self.alloc(Node::Constructor(tag, args));
+                    let cons = self.alloc(Node::Constructor(*tag, args));
                     self.stack.push(cons);
                     self.pc += 1;
                 }
@@ -176,7 +152,7 @@ impl<'a> GMachine<'a> {
                     let addr = self.stack.pop().unwrap();
                     match &self.heap[addr.0] {
                         Node::Constructor(_, args) => {
-                            for a in args[..n].iter().rev() {
+                            for a in args[..*n].iter().rev() {
                                 self.stack.push(*a);
                             }
                         }
@@ -184,12 +160,12 @@ impl<'a> GMachine<'a> {
                     }
                     self.pc += 1;
                 }
-                Instruction::Case(mut branches) => {
+                Instruction::Case(branches) => {
                     let addr = self.stack.last().unwrap();
                     match &self.heap[addr.0] {
                         Node::Constructor(tag, _) => {
                             self.instructions
-                                .splice(self.pc + 1..self.pc + 1, branches.remove(tag).unwrap());
+                                .splice(self.pc + 1..self.pc + 1, branches.get(tag).unwrap());
                         }
                         _ => todo!(),
                     }
@@ -199,12 +175,12 @@ impl<'a> GMachine<'a> {
                     let top = *self.stack.last().unwrap();
                     if !self.is_whnf(top) {
                         self.dump.push((
-                            self.stack[..self.stack.len().saturating_sub(1)].to_vec(),
-                            self.instructions[self.pc + 1..].to_vec(),
+                            self.stack.len().saturating_sub(1),
+                            self.pc,
+                            self.instructions.clone(),
                         ));
                         self.pc = 0;
-                        self.instructions = Vec::from([Instruction::Unwind]);
-                        self.stack = Vec::from([top]);
+                        self.instructions = Vec::from([&Instruction::Unwind]);
                     } else {
                         self.pc += 1;
                     }
@@ -214,193 +190,35 @@ impl<'a> GMachine<'a> {
 
                     match self.heap[top.0].clone() {
                         Node::Integer(..) | Node::Constructor(..) => {
-                            if !self.dump.is_empty() {
-                                let (stack, instructions) = self.dump.pop().unwrap();
-                                self.stack = stack;
-                                self.stack.push(top);
-                                self.instructions = instructions;
-                                self.pc = 0;
-                            } else {
-                                self.pc += 1;
-                            }
+                            let (stack, pc, instructions) = self.dump.pop().unwrap();
+                            self.stack.truncate(stack);
+                            self.stack.push(top);
+                            self.instructions = instructions;
+                            self.pc = pc;
                         }
-                        Node::Application(l, r) => {
-                            // println!("Application({:?}, {:?})", self.heap[l.0], self.heap[r.0]);
-                            self.stack.push(l);
-                        }
-                        Node::Indirection(addr) => {
-                            // println!("Indirection({:?})", self.heap[addr.0]);
-                            *self.stack.last_mut().unwrap() = addr;
-                        }
+                        Node::Application(l, _) => self.stack.push(l),
+                        Node::Indirection(addr) => *self.stack.last_mut().unwrap() = addr,
                         Node::Global(name, arity) => {
-                            // println!("Global({name}, {arity}, {global:?})");
-                            let mut args = self.stack[..arity].iter().fold(
-                                Vec::with_capacity(arity),
-                                |mut acc, a| {
-                                    if let Node::Application(_, r) = self.heap[a.0] {
-                                        acc.push(r);
-                                        acc
-                                    } else {
-                                        unreachable!()
+                            if arity > 0 {
+                                for i in (self.stack.len() - arity..self.stack.len()).rev() {
+                                    match self.heap[self.stack[i - 1].0] {
+                                        Node::Application(_, r) => self.stack[i] = r,
+                                        _ => unreachable!(),
                                     }
-                                },
-                            );
-
-                            let redex_root = self.stack[self.stack.len() - 1 - arity];
-
-                            // println!(
-                            //     "fun: {name}, args: {:?}, redex: {:?}",
-                            //     args.iter().map(|a| &self.heap[a.0]).collect::<Vec<_>>(),
-                            //     self.heap[redex_root.0]
-                            // );
-                            if let Some(insts) = self.symbols.get(&name) {
-                                self.pc = 0;
-                                self.instructions = insts.clone();
-                                self.stack = Vec::with_capacity(arity + 1);
-                                self.stack.push(redex_root);
-                                self.stack.extend(args);
-                            } else {
-                                match name.as_str() {
-                                    "println" => {
-                                        let val_addr = args.pop().unwrap();
-                                        let val_addr = self.force(val_addr);
-                                        let val = &self.heap[val_addr.0];
-                                        println!("{:?}", val);
-                                        self.stack.push(val_addr);
-                                    }
-                                    "+" => {
-                                        let lhs_addr = args.pop().unwrap();
-                                        let rhs_addr = args.pop().unwrap();
-                                        let lhs_addr = self.force(lhs_addr);
-                                        let rhs_addr = self.force(rhs_addr);
-                                        let lhs = &self.heap[lhs_addr.0];
-                                        let rhs = &self.heap[rhs_addr.0];
-                                        if let (Node::Integer(l), Node::Integer(r)) = (lhs, rhs) {
-                                            let result_addr = self.alloc(Node::Integer(l + r));
-                                            self.stack.push(result_addr);
-                                        }
-                                    }
-                                    "-" => {
-                                        let lhs_addr = args.pop().unwrap();
-                                        let rhs_addr = args.pop().unwrap();
-                                        let lhs_addr = self.force(lhs_addr);
-                                        let rhs_addr = self.force(rhs_addr);
-                                        let lhs = &self.heap[lhs_addr.0];
-                                        let rhs = &self.heap[rhs_addr.0];
-                                        if let (Node::Integer(l), Node::Integer(r)) = (lhs, rhs) {
-                                            let result_addr = self.alloc(Node::Integer(l - r));
-                                            self.stack.push(result_addr);
-                                        }
-                                    }
-                                    "*" => {
-                                        let lhs_addr = args.pop().unwrap();
-                                        let rhs_addr = args.pop().unwrap();
-                                        let lhs_addr = self.force(lhs_addr);
-                                        let rhs_addr = self.force(rhs_addr);
-                                        let lhs = &self.heap[lhs_addr.0];
-                                        let rhs = &self.heap[rhs_addr.0];
-                                        if let (Node::Integer(l), Node::Integer(r)) = (lhs, rhs) {
-                                            let result_addr = self.alloc(Node::Integer(l * r));
-                                            self.stack.push(result_addr);
-                                        }
-                                    }
-                                    "==" => {
-                                        let lhs_addr = args.pop().unwrap();
-                                        let rhs_addr = args.pop().unwrap();
-                                        let lhs_addr = self.force(lhs_addr);
-                                        let rhs_addr = self.force(rhs_addr);
-                                        let lhs = &self.heap[lhs_addr.0];
-                                        let rhs = &self.heap[rhs_addr.0];
-                                        if let (Node::Integer(l), Node::Integer(r)) = (lhs, rhs) {
-                                            let result_addr = self.alloc(Node::Constructor(
-                                                ((l == r) as usize) + 1,
-                                                Vec::new(),
-                                            ));
-                                            self.stack.push(result_addr);
-                                        }
-                                    }
-                                    "<=" => {
-                                        let lhs_addr = args.pop().unwrap();
-                                        let rhs_addr = args.pop().unwrap();
-                                        let lhs_addr = self.force(lhs_addr);
-                                        let rhs_addr = self.force(rhs_addr);
-                                        let lhs = &self.heap[lhs_addr.0];
-                                        let rhs = &self.heap[rhs_addr.0];
-                                        if let (Node::Integer(l), Node::Integer(r)) = (lhs, rhs) {
-                                            let result_addr = self.alloc(Node::Constructor(
-                                                ((l <= r) as usize) + 1,
-                                                Vec::new(),
-                                            ));
-                                            self.stack.push(result_addr);
-                                        }
-                                    }
-                                    ">=" => {
-                                        let lhs_addr = args.pop().unwrap();
-                                        let rhs_addr = args.pop().unwrap();
-                                        let lhs_addr = self.force(lhs_addr);
-                                        let rhs_addr = self.force(rhs_addr);
-                                        let lhs = &self.heap[lhs_addr.0];
-                                        let rhs = &self.heap[rhs_addr.0];
-                                        if let (Node::Integer(l), Node::Integer(r)) = (lhs, rhs) {
-                                            let result_addr = self.alloc(Node::Constructor(
-                                                ((l >= r) as usize) + 1,
-                                                Vec::new(),
-                                            ));
-                                            self.stack.push(result_addr);
-                                        }
-                                    }
-                                    "<" => {
-                                        let lhs_addr = args.pop().unwrap();
-                                        let rhs_addr = args.pop().unwrap();
-                                        let lhs_addr = self.force(lhs_addr);
-                                        let rhs_addr = self.force(rhs_addr);
-                                        let lhs = &self.heap[lhs_addr.0];
-                                        let rhs = &self.heap[rhs_addr.0];
-                                        if let (Node::Integer(l), Node::Integer(r)) = (lhs, rhs) {
-                                            let result_addr = self.alloc(Node::Constructor(
-                                                ((l < r) as usize) + 1,
-                                                Vec::new(),
-                                            ));
-                                            self.stack.push(result_addr);
-                                        }
-                                    }
-                                    ">" => {
-                                        let lhs_addr = args.pop().unwrap();
-                                        let rhs_addr = args.pop().unwrap();
-                                        let lhs_addr = self.force(lhs_addr);
-                                        let rhs_addr = self.force(rhs_addr);
-                                        let lhs = &self.heap[lhs_addr.0];
-                                        let rhs = &self.heap[rhs_addr.0];
-                                        if let (Node::Integer(l), Node::Integer(r)) = (lhs, rhs) {
-                                            let result_addr = self.alloc(Node::Constructor(
-                                                ((l > r) as usize) + 1,
-                                                Vec::new(),
-                                            ));
-                                            self.stack.push(result_addr);
-                                        }
-                                    }
-                                    _ => unreachable!(),
                                 }
+                            }
+                            match self.symbols.get(&name) {
+                                Some(insts) => {
+                                    self.pc = 0;
+                                    self.instructions = insts.iter().map(|i| i).collect();
+                                }
+                                None => unreachable!(),
                             }
                         }
                     }
                 }
             }
-
-            //     println!("instructions: {:?}", self.instructions);
-            // println!(
-            //     "stack: {:?}",
-            //     self.stack
-            //         .iter()
-            //         .map(|a| &self.heap[a.0])
-            //         .collect::<Vec<_>>()
-            // );
-            //     println!("heap: {:?}", self.heap);
-            //     println!("dump: {:?}", self.dump);
-            //     println!("output: {:?}", self.output);
         }
-
-        // println!();
     }
 
     pub fn print(&mut self, addr: Address) {

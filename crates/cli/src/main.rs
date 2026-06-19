@@ -215,9 +215,12 @@ fn run_cmd(source_path: &PathBuf) -> Result<()> {
 
     let symbols = generate(&ctx);
 
-    let mut machine = GMachine::new(&symbols);
-    machine.instructions =
-        Vec::from([Instruction::PushGlobal("main".into(), 0), Instruction::Eval]);
+    let start_instructions = &[
+        &Instruction::PushGlobal("main".into(), 0),
+        &Instruction::Eval,
+    ];
+
+    let mut machine = GMachine::new(&symbols, start_instructions);
 
     machine.run();
 
