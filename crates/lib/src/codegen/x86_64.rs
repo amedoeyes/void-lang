@@ -25,6 +25,65 @@ __TAG_GLBL equ 4
 section .text
 global  _start
 
+__heap_alloc:
+	mov rax, [__heap_free_ptr]
+	add [__heap_free_ptr], rdi
+	ret
+
+__heap_make_int:
+	mov  rsi, rdi
+	mov  rdi, 16
+	call __heap_alloc
+	mov  qword [rax], __TAG_INT
+	mov  qword [rax+8], rsi
+	ret
+
+__heap_make_ind:
+	mov  rsi, rdi
+	mov  rdi, 16
+	call __heap_alloc
+	mov  qword [rax], __TAG_IND
+	mov  qword [rax+8], rsi
+	ret
+
+__heap_make_app:
+	mov  rdx, rdi
+	mov  rdi, 24
+	call __heap_alloc
+	mov  qword [rax], __TAG_APP
+	mov  qword [rax+8], rdx
+	mov  qword [rax+16], rsi
+	ret
+
+__heap_make_global:
+	mov  rdx, rdi
+	mov  rdi, 24
+	call __heap_alloc
+	mov  qword [rax], __TAG_GLBL
+	mov  qword [rax+8], rdx
+	mov  qword [rax+16], rsi
+	ret
+
+__heap_make_constr:
+	mov rcx, rsi
+	mov rsi, rdi
+
+	mov rdi, rcx
+	shl rdi, 3
+	add rdi, 24
+	call __heap_alloc
+
+	mov qword [rax], __TAG_CNST
+	mov qword [rax+8], rsi
+	mov qword [rax+16], rcx
+
+	lea rdi, [rax+24]
+	mov rsi, rdx
+	cld
+	rep movsq
+
+	ret
+
 __unwind:
 	mov rdi, [r15]
 	mov rsi, [rdi]
@@ -97,6 +156,48 @@ __force:
 	mov rax, [r15]
 	add r15, 8
 
+	ret
+
+__print_int:
+	mov rax, rdi
+
+	lea rsi, [rsp-1]
+
+	mov rcx, 10
+
+	.convert:
+		xor rdx, rdx
+		div rcx
+		add dl, '0'
+		mov [rsi], dl
+		dec rsi
+		test rax, rax
+		jnz .convert
+
+	inc rsi
+	mov rdx, rsp
+	sub rdx, rsi
+
+	mov rax, 1
+	mov rdi, 1
+	syscall
+	ret
+
+__print_char:
+	mov [rsp-1], dil
+	mov rax, 1
+	mov rdi, 1
+	lea rsi, [rsp-1]
+	mov rdx, 1
+	syscall
+	ret
+
+__print_str:
+	mov rdx, rsi
+	mov rsi, rdi
+	mov rax, 1
+	mov rdi, 1
+	syscall
 	ret
 
 __print:
@@ -179,107 +280,6 @@ __runtime_init:
 	mov r14, __dump_base + 2048*8
 	mov rdi, __heap_start
 	mov [__heap_free_ptr], rdi
-	ret
-
-__heap_alloc:
-	mov rax, [__heap_free_ptr]
-	add [__heap_free_ptr], rdi
-	ret
-
-__heap_make_int:
-	mov  rsi, rdi
-	mov  rdi, 16
-	call __heap_alloc
-	mov  qword [rax], __TAG_INT
-	mov  qword [rax+8], rsi
-	ret
-
-__heap_make_ind:
-	mov  rsi, rdi
-	mov  rdi, 16
-	call __heap_alloc
-	mov  qword [rax], __TAG_IND
-	mov  qword [rax+8], rsi
-	ret
-
-__heap_make_app:
-	mov  rdx, rdi
-	mov  rdi, 24
-	call __heap_alloc
-	mov  qword [rax], __TAG_APP
-	mov  qword [rax+8], rdx
-	mov  qword [rax+16], rsi
-	ret
-
-__heap_make_global:
-	mov  rdx, rdi
-	mov  rdi, 24
-	call __heap_alloc
-	mov  qword [rax], __TAG_GLBL
-	mov  qword [rax+8], rdx
-	mov  qword [rax+16], rsi
-	ret
-
-__heap_make_constr:
-	mov rcx, rsi
-	mov rsi, rdi
-
-	mov rdi, rcx
-	shl rdi, 3
-	add rdi, 24
-	call __heap_alloc
-
-	mov qword [rax], __TAG_CNST
-	mov qword [rax+8], rsi
-	mov qword [rax+16], rcx
-
-	lea rdi, [rax+24]
-	mov rsi, rdx
-	cld
-	rep movsq
-
-	ret
-
-__print_int:
-	mov rax, rdi
-
-	lea rsi, [rsp-1]
-
-	mov rcx, 10
-
-	.convert:
-		xor rdx, rdx
-		div rcx
-		add dl, '0'
-		mov [rsi], dl
-		dec rsi
-		test rax, rax
-		jnz .convert
-
-	inc rsi
-	mov rdx, rsp
-	sub rdx, rsi
-
-	mov rax, 1
-	mov rdi, 1
-	syscall
-	ret
-
-__print_char:
-	mov [rsp-1], dil
-	mov rax, 1
-	mov rdi, 1
-	lea rsi, [rsp-1]
-	mov rdx, 1
-	syscall
-	ret
-
-__print_str:
-	mov rdx, rsi
-	mov rsi, rdi
-	mov rax, 1
-	mov rdi, 1
-	syscall
 	ret
 
 __start_main:
