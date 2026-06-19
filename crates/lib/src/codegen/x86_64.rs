@@ -524,7 +524,8 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
 
     fn emit(mut self) -> Result<()> {
         writeln!(self.writer, "{RUNTIME}")?;
-        for (symbol, (_, insts)) in self.symbols {
+
+        for (symbol, insts) in self.symbols {
             writeln!(self.writer, "{symbol}:")?;
             for inst in insts {
                 self.emit_instruction(inst)?
