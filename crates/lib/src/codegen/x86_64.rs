@@ -487,6 +487,11 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
         self.eval_counter += 1;
 
         writeln!(self.writer, "	; EVAL")?;
+        writeln!(self.writer, "	mov rdi, [r15]")?;
+        writeln!(self.writer, "	cmp rdi, __TAG_INT")?;
+        writeln!(self.writer, "	je {eval_label}")?;
+        writeln!(self.writer, "	cmp rdi, __TAG_CNST")?;
+        writeln!(self.writer, "	je {eval_label}")?;
         writeln!(self.writer, "	mov rdi, {eval_label}")?;
         writeln!(self.writer, "	mov rsi, r15")?;
         writeln!(self.writer, "	add rsi, 8")?;
