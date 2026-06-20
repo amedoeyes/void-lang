@@ -535,8 +535,131 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
         }
     }
 
+    fn emit_primitives(&mut self) -> Result<()> {
+        writeln!(self.writer, "__int_add:")?;
+        self.emit_push(1)?;
+        self.emit_eval()?;
+        self.emit_push(1)?;
+        self.emit_eval()?;
+        writeln!(self.writer, "	; add")?;
+        writeln!(self.writer, "	mov rdi, [r15]")?;
+        writeln!(self.writer, "	mov rsi, [r15+8]")?;
+        writeln!(self.writer, "	add r15, 16")?;
+        writeln!(self.writer, "	mov rdi, [rdi+8]")?;
+        writeln!(self.writer, "	add rdi, [rsi+8]")?;
+        writeln!(self.writer, "	call __heap_make_int")?;
+        writeln!(self.writer, "	sub r15, 8")?;
+        writeln!(self.writer, "	mov [r15], rax")?;
+        writeln!(self.writer)?;
+        self.emit_update(2)?;
+        self.emit_pop(2)?;
+        self.emit_unwind()?;
+
+        writeln!(self.writer, "__int_sub:")?;
+        self.emit_push(1)?;
+        self.emit_eval()?;
+        self.emit_push(1)?;
+        self.emit_eval()?;
+        writeln!(self.writer, "	; sub")?;
+        writeln!(self.writer, "	mov rdi, [r15]")?;
+        writeln!(self.writer, "	mov rsi, [r15+8]")?;
+        writeln!(self.writer, "	add r15, 16")?;
+        writeln!(self.writer, "	mov rdi, [rdi+8]")?;
+        writeln!(self.writer, "	sub rdi, [rsi+8]")?;
+        writeln!(self.writer, "	call __heap_make_int")?;
+        writeln!(self.writer, "	sub r15, 8")?;
+        writeln!(self.writer, "	mov [r15], rax")?;
+        writeln!(self.writer)?;
+        self.emit_update(2)?;
+        self.emit_pop(2)?;
+        self.emit_unwind()?;
+
+        writeln!(self.writer, "__int_mul:")?;
+        self.emit_push(1)?;
+        self.emit_eval()?;
+        self.emit_push(1)?;
+        self.emit_eval()?;
+        writeln!(self.writer, "	; mul")?;
+        writeln!(self.writer, "	mov rdi, [r15]")?;
+        writeln!(self.writer, "	mov rsi, [r15+8]")?;
+        writeln!(self.writer, "	add r15, 16")?;
+        writeln!(self.writer, "	mov rdi, [rdi+8]")?;
+        writeln!(self.writer, "	imul rdi, [rsi+8]")?;
+        writeln!(self.writer, "	call __heap_make_int")?;
+        writeln!(self.writer, "	sub r15, 8")?;
+        writeln!(self.writer, "	mov [r15], rax")?;
+        writeln!(self.writer)?;
+        self.emit_update(2)?;
+        self.emit_pop(2)?;
+        self.emit_unwind()?;
+
+        writeln!(self.writer, "__int_div:")?;
+        self.emit_push(1)?;
+        self.emit_eval()?;
+        self.emit_push(1)?;
+        self.emit_eval()?;
+        writeln!(self.writer, "	; sub")?;
+        writeln!(self.writer, "	mov rdi, [r15]")?;
+        writeln!(self.writer, "	mov rsi, [r15+8]")?;
+        writeln!(self.writer, "	add r15, 16")?;
+        writeln!(self.writer, "	mov rdi, [rdi+8]")?;
+        writeln!(self.writer, "	mov rax, rdi")?;
+        writeln!(self.writer, "	cqo")?;
+        writeln!(self.writer, "	idiv qword [rsi+8]")?;
+        writeln!(self.writer, "	mov rdi, rax")?;
+        writeln!(self.writer, "	call __heap_make_int")?;
+        writeln!(self.writer, "	sub r15, 8")?;
+        writeln!(self.writer, "	mov [r15], rax")?;
+        writeln!(self.writer)?;
+        self.emit_update(2)?;
+        self.emit_pop(2)?;
+        self.emit_unwind()?;
+
+        writeln!(self.writer, "__int_mod:")?;
+        self.emit_push(1)?;
+        self.emit_eval()?;
+        self.emit_push(1)?;
+        self.emit_eval()?;
+        writeln!(self.writer, "	; mod")?;
+        writeln!(self.writer, "	mov rdi, [r15]")?;
+        writeln!(self.writer, "	mov rsi, [r15+8]")?;
+        writeln!(self.writer, "	add r15, 16")?;
+        writeln!(self.writer, "	mov rdi, [rdi+8]")?;
+        writeln!(self.writer, "	mov rax, rdi")?;
+        writeln!(self.writer, "	cqo")?;
+        writeln!(self.writer, "	idiv qword [rsi+8]")?;
+        writeln!(self.writer, "	mov rdi, rdx")?;
+        writeln!(self.writer, "	call __heap_make_int")?;
+        writeln!(self.writer, "	sub r15, 8")?;
+        writeln!(self.writer, "	mov [r15], rax")?;
+        writeln!(self.writer)?;
+        self.emit_update(2)?;
+        self.emit_pop(2)?;
+        self.emit_unwind()?;
+
+        writeln!(self.writer, "__int_neg:")?;
+        self.emit_push(0)?;
+        self.emit_eval()?;
+        writeln!(self.writer, "	; neg")?;
+        writeln!(self.writer, "	mov rdi, [r15]")?;
+        writeln!(self.writer, "	add r15, 8")?;
+        writeln!(self.writer, "	mov rdi, [rdi+8]")?;
+        writeln!(self.writer, "	neg rdi")?;
+        writeln!(self.writer, "	call __heap_make_int")?;
+        writeln!(self.writer, "	sub r15, 8")?;
+        writeln!(self.writer, "	mov [r15], rax")?;
+        writeln!(self.writer)?;
+        self.emit_update(1)?;
+        self.emit_pop(1)?;
+        self.emit_unwind()?;
+
+        Ok(())
+    }
+
     fn emit(mut self) -> Result<()> {
         writeln!(self.writer, "{RUNTIME}")?;
+
+        self.emit_primitives()?;
 
         for (symbol, insts) in self.symbols {
             writeln!(self.writer, "{symbol}:")?;

@@ -19,6 +19,7 @@ pub enum Node {
     TypeExpr(TypeExpr),
     Expr(Expr),
     Type(String, Vec<String>, Vec<(String, Vec<NodeId>)>),
+    Primitive(String, NodeId, String),
     Bind(String, NodeId),
     Import(Vec<String>),
 }
@@ -113,6 +114,10 @@ impl Context {
         constructors: Vec<(String, Vec<NodeId>)>,
     ) -> NodeId {
         self.add(Node::Type(name, params, constructors))
+    }
+
+    pub fn add_primitive(&mut self, name: &str, type_expr: NodeId, link_name: &str) -> NodeId {
+        self.add(Node::Primitive(name.into(), type_expr, link_name.into()))
     }
 
     pub fn add_bind(&mut self, name: &str, expr: NodeId) -> NodeId {
@@ -306,6 +311,15 @@ impl<'a> fmt::Display for Display<'a> {
             }
             Node::Bind(name, expr) => {
                 write!(f, "let {} = {};", name, Display::new(*expr, self.context))
+            }
+            Node::Primitive(name, type_expr, link_name) => {
+                write!(
+                    f,
+                    "primitive {} : {} = {};",
+                    name,
+                    Display::new(*type_expr, self.context),
+                    link_name
+                )
             }
             Node::Import(module) => write!(f, "import {}", module.join(".")),
         }

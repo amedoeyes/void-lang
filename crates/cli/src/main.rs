@@ -342,15 +342,7 @@ fn type_cmd(source_path: &PathBuf) -> Result<()> {
     for module in modules {
         for node in module {
             match ctx.get_node(node) {
-                Node::TypeExpr(..) => todo!(),
-                Node::Expr(..) => {
-                    println!(
-                        "{} : {}",
-                        node.display(&ctx),
-                        ctx.get_type(node).as_ref().unwrap()
-                    )
-                }
-                Node::Bind(name, _) => {
+                Node::Primitive(name, ..) | Node::Bind(name, ..) => {
                     println!("{} : {}", name, ctx.get_type(node).as_ref().unwrap())
                 }
                 _ => continue,

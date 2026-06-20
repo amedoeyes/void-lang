@@ -54,11 +54,12 @@ impl<'a> Parser<'a> {
             match token {
                 Token::Keyword(Keyword::Op) => self.parse_operator_decl()?,
                 Token::Keyword(Keyword::Type) => nodes.push(self.parse_type_decl()?),
+                Token::Keyword(Keyword::Primitive) => nodes.push(self.parse_extern_decl()?),
                 Token::Keyword(Keyword::Let) => nodes.push(self.parse_bind_decl()?),
                 Token::Keyword(Keyword::Import) => nodes.push(self.parse_import_decl()?),
                 _ => {
                     return Err(Error::UnexpectedToken(
-                        "let|import|op".into(),
+                        "top-level declaration".into(),
                         (token, span),
                     ));
                 }
@@ -117,6 +118,25 @@ impl<'a> Parser<'a> {
         let ty = self.context.add_type(name, params, consts);
         self.context.set_span(ty, start_span.merge(end_span));
         Ok(ty)
+    }
+
+    fn parse_extern_decl(&mut self) -> Result<NodeId> {
+        let (_, start_span) = self.expect(Token::Keyword(Keyword::Primitive))?;
+        let name = match self.advance()? {
+            (Token::Identifier(id), ..) => id,
+            other => return Err(Error::UnexpectedToken("Identifier".into(), other)),
+        };
+        self.expect(Token::Symbol(":".into()))?;
+        let type_expr = self.parse_type_expr()?;
+        self.expect(Token::Symbol("=".into()))?;
+        let link_name = match self.advance()? {
+            (Token::Literal(Literal::String(name)), ..) => name,
+            other => return Err(Error::UnexpectedToken("link symbol".into(), other)),
+        };
+        let (_, end_span) = self.expect(Token::Delimiter(Delimiter::Semicolon))?;
+        let primitive = self.context.add_primitive(&name, type_expr, &link_name);
+        self.context.set_span(primitive, start_span.merge(end_span));
+        Ok(primitive)
     }
 
     fn parse_bind_decl(&mut self) -> Result<NodeId> {

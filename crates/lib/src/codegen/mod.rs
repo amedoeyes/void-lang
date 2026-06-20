@@ -23,5 +23,6 @@ pub trait Backend<'a> {
     fn emit_unwind(&mut self) -> Result<()>;
     fn emit_eval(&mut self) -> Result<()>;
     fn emit_instruction(&mut self, inst: &Instruction) -> Result<()>;
+    fn emit_primitives(&mut self) -> Result<()>;
     fn emit(self) -> Result<()>;
 }

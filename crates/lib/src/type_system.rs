@@ -669,6 +669,12 @@ pub fn infer(ctx: &mut Context) -> Result<()> {
                     ctx.set_type(expr, expr_ty.clone());
                     ctx.set_type(*node, expr_ty);
                 }
+                Node::Primitive(name, type_expr, ..) => {
+                    let ty = eval_type_expr(ctx, &FxHashMap::default(), &type_arities, type_expr);
+                    env_vars.insert(name.clone(), ty.clone());
+                    ctx.set_type(type_expr, ty.clone());
+                    ctx.set_type(*node, ty);
+                }
                 Node::Import(_) => continue,
                 _ => unreachable!(),
             }

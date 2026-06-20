@@ -15,6 +15,7 @@ pub struct IRGenerator<'a> {
     pub context: &'a Context,
     pub symbols: FxHashMap<String, Vec<Instruction>>,
     pub symbols_arity: FxHashMap<String, usize>,
+    pub symbols_alias: FxHashMap<String, String>,
     pub type_consts: FxHashMap<String, FxHashMap<String, usize>>,
     pub lambda_counter: usize,
 }
@@ -41,6 +42,7 @@ impl<'a> IRGenerator<'a> {
             context,
             symbols: FxHashMap::default(),
             symbols_arity: FxHashMap::default(),
+            symbols_alias: FxHashMap::default(),
             type_consts,
             lambda_counter: 0,
         }
@@ -65,8 +67,8 @@ impl<'a> IRGenerator<'a> {
                             self.symbols_arity.insert(cons.clone(), args.len());
                         }
                     }
-                    Node::Bind(name, expr) => {
-                        if let Some(ty) = self.context.get_type(*expr) {
+                    Node::Primitive(name, ..) | Node::Bind(name, ..) => {
+                        if let Some(ty) = self.context.get_type(*node) {
                             self.symbols_arity.insert(name.clone(), ty.arity());
                         }
                     }
@@ -86,6 +88,13 @@ impl<'a> IRGenerator<'a> {
                             insts.push(Instruction::Update(0));
                             insts.push(Instruction::Unwind);
                             self.symbols.insert(cons.clone(), insts);
+                        }
+                    }
+                    Node::Primitive(name, _, link_name) => {
+                        if let Some(ty) = self.context.get_type(node) {
+                            self.symbols_alias.insert(name.clone(), link_name.clone());
+                            self.symbols_arity.insert(name.clone(), ty.arity());
+                            self.symbols_arity.insert(link_name.clone(), ty.arity());
                         }
                     }
                     Node::Bind(name, expr) => {
@@ -174,6 +183,7 @@ impl<'a> IRGenerator<'a> {
                     *self.symbols_arity.get(cons).unwrap(),
                 )),
                 Expr::Identifier(id) => {
+                    let id = self.symbols_alias.get(id).unwrap_or(id);
                     if let Some(offset) = offsets.get(id) {
                         out.push(Instruction::Push(*offset));
                     } else {
@@ -243,7 +253,7 @@ impl<'a> IRGenerator<'a> {
                                 consts_used.insert(name);
                                 let mut insts = Vec::new();
                                 if !subpatterns.is_empty() {
-                                    insts.push(Instruction::Split(subpatterns.len()));
+                                    insts.push(Instruction::Unpack(subpatterns.len()));
                                 }
                                 self.generate_expr(
                                     *body,

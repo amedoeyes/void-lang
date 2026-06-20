@@ -116,6 +116,7 @@ impl<'a> Lexer<'a> {
             ("right", Token::Keyword(Keyword::Right)),
             ("none", Token::Keyword(Keyword::None)),
             ("import", Token::Keyword(Keyword::Import)),
+            ("primitive", Token::Keyword(Keyword::Primitive)),
             ("type", Token::Keyword(Keyword::Type)),
             ("enum", Token::Keyword(Keyword::Enum)),
             ("let", Token::Keyword(Keyword::Let)),
