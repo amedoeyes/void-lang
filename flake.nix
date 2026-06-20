@@ -27,8 +27,8 @@
             };
 
             nativeBuildInputs = with pkgs; [
-              binutils
               nasm
+              mold
             ];
 
             meta = {
@@ -54,8 +54,8 @@
               rust-analyzer
               rustc
               rustfmt
-              binutils
               nasm
+              mold
               gdb
             ];
           };

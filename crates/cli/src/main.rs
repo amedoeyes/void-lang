@@ -4,7 +4,7 @@ use std::{
     fs::{self, File},
     io::{self, BufWriter},
     path::PathBuf,
-    process::Command,
+    process::{self, Command},
 };
 
 use clap::{Parser, Subcommand, crate_name, crate_version};
@@ -161,26 +161,28 @@ fn compile_cmd(source_path: &PathBuf) -> Result<()> {
     codegen::x86_64::emit(&mut asm_buf, &symbols)?;
 
     let status = Command::new("nasm")
-        .args(&["-f", "elf64"])
+        .args(&["-f", "elf64", "-g", "-F", "dwarf"])
         .arg(&asm_path)
         .status()
         .expect("Failed to execute nasm");
 
+    fs::remove_file(&asm_path)?;
+
     if !status.success() {
-        return Ok(());
+        process::exit(1);
     }
 
-    let status = Command::new("ld")
+    let status = Command::new("mold")
+        .arg("-static")
         .arg(&obj_path)
         .status()
         .expect("Failed to execute ld");
 
-    if !status.success() {
-        return Ok(());
-    }
-
-    fs::remove_file(&asm_path)?;
     fs::remove_file(&obj_path)?;
+
+    if !status.success() {
+        process::exit(1);
+    }
 
     Ok(())
 }
