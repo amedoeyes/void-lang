@@ -210,55 +210,77 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_type_expr(&mut self) -> Result<NodeId> {
-        match self.peek(0)?.0 {
-            Token::Type(_) => match self.advance()? {
-                (Token::Type(ty), span) => {
-                    let expr = self
-                        .context
-                        .add_type_expr(TypeExpr::Constructor(ty, Vec::new()));
-                    self.context.set_span(expr, span);
-                    Ok(expr)
-                }
-                other => Err(Error::UnexpectedToken("type".into(), other)),
-            },
-            Token::Identifier(_) => match self.advance()? {
-                (Token::Identifier(id), span) => {
-                    let expr = self.context.add_type_expr(TypeExpr::Identifier(id));
-                    self.context.set_span(expr, span);
-                    Ok(expr)
-                }
-                other => Err(Error::UnexpectedToken("identifier".into(), other)),
-            },
+        let type_expr = match self.peek(0)?.0 {
+            Token::Type(_) => self.parse_constructor_type_expr(),
+            Token::Identifier(_) => self.parse_identifier_type_expr(),
             Token::Delimiter(Delimiter::ParenLeft) => match self.peek(1)?.0 {
-                Token::Delimiter(Delimiter::ParenRight) => {
-                    let start_span = self.expect(Token::Delimiter(Delimiter::ParenLeft))?.1;
-                    let end_span = self.expect(Token::Delimiter(Delimiter::ParenRight))?.1;
-                    let expr = self.context.add_type_expr(TypeExpr::Unit);
-                    self.context.set_span(expr, start_span.merge(end_span));
-                    Ok(expr)
-                }
-                _ => {
-                    let start_span = self.expect(Token::Delimiter(Delimiter::ParenLeft))?.1;
-                    let expr = self.parse_type_expr()?;
-                    let mut temp = Vec::new();
-                    while let Ok(arg) = self.parse_type_expr() {
-                        temp.push(arg);
-                    }
-                    if let Some(TypeExpr::Constructor(_, args)) =
-                        self.context.get_type_expr_mut(expr)
-                    {
-                        args.extend(temp)
-                    }
-                    let end_span = self.expect(Token::Delimiter(Delimiter::ParenRight))?.1;
-                    self.context.set_span(expr, start_span.merge(end_span));
-                    Ok(expr)
-                }
+                Token::Delimiter(Delimiter::ParenRight) => self.parse_unit_type_expr(),
+                _ => self.parse_paren_type_expr(),
             },
             _ => Err(Error::UnexpectedToken(
                 "type expression".to_string(),
                 self.peek(0)?,
             )),
+        }?;
+
+        match self.peek(0)?.0 {
+            Token::Symbol(s) if s == "->" => self.parse_lambda_type_expr(type_expr),
+            _ => Ok(type_expr),
         }
+    }
+
+    fn parse_constructor_type_expr(&mut self) -> Result<NodeId> {
+        match self.advance()? {
+            (Token::Type(ty), start_span) => {
+                let mut args = Vec::new();
+                let mut end_span = start_span;
+                while let Ok(arg) = self.parse_type_expr() {
+                    args.push(arg);
+                    end_span = self.context.get_span(arg);
+                }
+                let expr = self.context.add_type_expr(TypeExpr::Constructor(ty, args));
+                self.context.set_span(expr, start_span.merge(end_span));
+                Ok(expr)
+            }
+            other => Err(Error::UnexpectedToken("type".into(), other)),
+        }
+    }
+
+    fn parse_identifier_type_expr(&mut self) -> Result<NodeId> {
+        match self.advance()? {
+            (Token::Identifier(id), span) => {
+                let expr = self.context.add_type_expr(TypeExpr::Identifier(id));
+                self.context.set_span(expr, span);
+                Ok(expr)
+            }
+            other => Err(Error::UnexpectedToken("identifier".into(), other)),
+        }
+    }
+
+    fn parse_unit_type_expr(&mut self) -> Result<NodeId> {
+        let start_span = self.expect(Token::Delimiter(Delimiter::ParenLeft))?.1;
+        let end_span = self.expect(Token::Delimiter(Delimiter::ParenRight))?.1;
+        let expr = self.context.add_type_expr(TypeExpr::Unit);
+        self.context.set_span(expr, start_span.merge(end_span));
+        Ok(expr)
+    }
+
+    fn parse_lambda_type_expr(&mut self, param: NodeId) -> Result<NodeId> {
+        let start_span = self.context.get_span(param);
+        self.expect(Token::Symbol("->".into()))?;
+        let body = self.parse_type_expr()?;
+        let end_span = self.context.get_span(body);
+        let lambda = self.context.add_type_expr(TypeExpr::Lambda(param, body));
+        self.context.set_span(lambda, start_span.merge(end_span));
+        Ok(lambda)
+    }
+
+    fn parse_paren_type_expr(&mut self) -> Result<NodeId> {
+        let start_span = self.expect(Token::Delimiter(Delimiter::ParenLeft))?.1;
+        let expr = self.parse_type_expr()?;
+        let end_span = self.expect(Token::Delimiter(Delimiter::ParenRight))?.1;
+        self.context.set_span(expr, start_span.merge(end_span));
+        Ok(expr)
     }
 
     fn parse_expr(&mut self, min_bp: i32) -> Result<NodeId> {

@@ -226,19 +226,25 @@ impl<'a> fmt::Display for Display<'a> {
             Node::TypeExpr(expr) => match expr {
                 TypeExpr::Unit => write!(f, "()"),
                 TypeExpr::Identifier(id) => write!(f, "{id}"),
-                TypeExpr::Constructor(cons, args) => {
-                    write!(
-                        f,
-                        "{}{}{}{}{}",
-                        if !args.is_empty() { "(" } else { "" },
-                        cons,
-                        if !args.is_empty() { " " } else { "" },
-                        args.iter()
-                            .map(|a| Display::new(*a, self.context).to_string())
-                            .collect::<Vec<String>>()
-                            .join(" "),
-                        if !args.is_empty() { ")" } else { "" },
-                    )
+                TypeExpr::Constructor(name, args) => {
+                    write!(f, "{}", name)?;
+                    if !args.is_empty() {
+                        write!(
+                            f,
+                            " {}",
+                            args.iter()
+                                .map(|a| Display::new(*a, self.context))
+                                .join(" "),
+                        )?
+                    }
+                    Ok(())
+                }
+                TypeExpr::Lambda(l, r) => {
+                    match self.context.get_type_expr(*l).expect("type expr") {
+                        TypeExpr::Lambda(..) => write!(f, "({})", Display::new(*l, self.context))?,
+                        _ => write!(f, "{}", Display::new(*l, self.context))?,
+                    }
+                    write!(f, " -> {}", Display::new(*r, self.context))
                 }
             },
             Node::Expr(expr) => match expr {

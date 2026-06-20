@@ -59,4 +59,5 @@ pub enum TypeExpr {
     Unit,
     Identifier(String),
     Constructor(String, Vec<NodeId>),
+    Lambda(NodeId, NodeId),
 }

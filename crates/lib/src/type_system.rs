@@ -561,9 +561,12 @@ fn eval_type_expr(
             None => todo!(),
         },
         TypeExpr::Constructor(name, args) => {
-            let arity = *arities.get(name).ok_or_else(|| todo!()).unwrap();
+            let arity = *arities
+                .get(name)
+                .ok_or_else(|| todo!("error: {name} ADT does not exist"))
+                .unwrap();
             if arity != args.len() {
-                todo!();
+                todo!("error: not enough arguments for ADT {name}");
             }
 
             match name.as_str() {
@@ -577,6 +580,10 @@ fn eval_type_expr(
                 ),
             }
         }
+        TypeExpr::Lambda(l, r) => Type::Fun(
+            Box::new(eval_type_expr(ctx, param_tys, arities, *l)),
+            Box::new(eval_type_expr(ctx, param_tys, arities, *r)),
+        ),
     }
 }
 
