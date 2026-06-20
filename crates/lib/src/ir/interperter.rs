@@ -148,7 +148,7 @@ impl<'a> GMachine<'a> {
                     self.stack.push(cons);
                     self.pc += 1;
                 }
-                Instruction::Split(n) => {
+                Instruction::Unpack(n) => {
                     let addr = self.stack.pop().unwrap();
                     match &self.heap[addr.0] {
                         Node::Constructor(_, args) => {

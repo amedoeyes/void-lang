@@ -432,8 +432,8 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
         Ok(())
     }
 
-    fn emit_split(&mut self, n: usize) -> Result<()> {
-        writeln!(self.writer, "	; SPLIT {n}")?;
+    fn emit_unpack(&mut self, n: usize) -> Result<()> {
+        writeln!(self.writer, "	; UNPACK {n}")?;
         writeln!(self.writer, "	mov rsi, [r15]")?;
         writeln!(self.writer, "	add r15, 8")?;
         writeln!(self.writer, "	add rsi, 24")?;
@@ -515,7 +515,7 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
             Instruction::Update(n) => self.emit_update(*n),
             Instruction::MkAp => self.emit_mkap(),
             Instruction::Pack(tag, arity) => self.emit_pack(*tag, *arity),
-            Instruction::Split(n) => self.emit_split(*n),
+            Instruction::Unpack(n) => self.emit_unpack(*n),
             Instruction::Case(branches) => self.emit_case(&branches),
             Instruction::Eval => self.emit_eval(),
             Instruction::Unwind => self.emit_unwind(),

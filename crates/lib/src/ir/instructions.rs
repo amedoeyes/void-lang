@@ -13,7 +13,7 @@ pub enum Instruction {
     Slide(usize),
     MkAp,
     Pack(usize, usize),
-    Split(usize),
+    Unpack(usize),
     Case(FxHashMap<usize, Vec<Instruction>>),
     Eval,
     Unwind,
@@ -31,7 +31,7 @@ impl Display for Instruction {
             Instruction::Slide(n) => write!(f, "SLIDE {n}"),
             Instruction::MkAp => write!(f, "MKAP"),
             Instruction::Pack(t, a) => write!(f, "PACK {t} {a}"),
-            Instruction::Split(n) => write!(f, "SPLIT {n}"),
+            Instruction::Unpack(n) => write!(f, "UNPACK {n}"),
             Instruction::Case(branches) => {
                 write!(
                     f,

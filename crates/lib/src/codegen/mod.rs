@@ -18,7 +18,7 @@ pub trait Backend<'a> {
     fn emit_update(&mut self, n: usize) -> Result<()>;
     fn emit_mkap(&mut self) -> Result<()>;
     fn emit_pack(&mut self, tag: usize, arity: usize) -> Result<()>;
-    fn emit_split(&mut self, n: usize) -> Result<()>;
+    fn emit_unpack(&mut self, n: usize) -> Result<()>;
     fn emit_case(&mut self, branches: &FxHashMap<usize, Vec<Instruction>>) -> Result<()>;
     fn emit_unwind(&mut self) -> Result<()>;
     fn emit_eval(&mut self) -> Result<()>;
