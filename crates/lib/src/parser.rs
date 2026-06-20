@@ -159,11 +159,20 @@ impl<'a> Parser<'a> {
                 ));
             }
         };
+
+        let mut type_expr = None;
+        if let Token::Symbol(s) = self.peek(0)?.0
+            && s == ":"
+        {
+            self.advance()?;
+            type_expr = Some(self.parse_type_expr()?)
+        }
+
         self.expect(Token::Symbol("=".into()))?;
         let expr = self.parse_expr(0)?;
         let expr_span = self.context.get_span(expr);
         self.expect(Token::Delimiter(Delimiter::Semicolon))?;
-        let bind = self.context.add_bind(&name, expr);
+        let bind = self.context.add_bind(&name, type_expr, expr);
         self.context.set_span(bind, let_span.merge(expr_span));
         Ok(bind)
     }

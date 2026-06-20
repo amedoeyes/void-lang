@@ -106,7 +106,7 @@ pub fn resolve_imports(
                 new_nodes.extend(
                     imported_nodes
                         .iter()
-                        .filter(|n| matches!(ctx.get_node(**n), Node::Bind(_, _)))
+                        .filter(|n| matches!(ctx.get_node(**n), Node::Bind(..)))
                         .cloned(),
                 );
             }

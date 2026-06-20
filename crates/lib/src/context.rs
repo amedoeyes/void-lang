@@ -20,7 +20,7 @@ pub enum Node {
     Expr(Expr),
     Type(String, Vec<String>, Vec<(String, Vec<NodeId>)>),
     Primitive(String, NodeId, String),
-    Bind(String, NodeId),
+    Bind(String, Option<NodeId>, NodeId),
     Import(Vec<String>),
 }
 
@@ -120,8 +120,8 @@ impl Context {
         self.add(Node::Primitive(name.into(), type_expr, link_name.into()))
     }
 
-    pub fn add_bind(&mut self, name: &str, expr: NodeId) -> NodeId {
-        self.add(Node::Bind(name.to_string(), expr))
+    pub fn add_bind(&mut self, name: &str, type_expr: Option<NodeId>, expr: NodeId) -> NodeId {
+        self.add(Node::Bind(name.to_string(), type_expr, expr))
     }
 
     pub fn add_import(&mut self, module: &[String]) -> NodeId {
@@ -309,8 +309,13 @@ impl<'a> fmt::Display for Display<'a> {
                         .join(" | ")
                 )
             }
-            Node::Bind(name, expr) => {
-                write!(f, "let {} = {};", name, Display::new(*expr, self.context))
+            Node::Bind(name, type_expr, expr) => {
+                write!(f, "let {}", name)?;
+                if let Some(type_expr) = type_expr {
+                    write!(f, " : {}", Display::new(*type_expr, self.context))?;
+                }
+                write!(f, " = {};", Display::new(*expr, self.context))?;
+                Ok(())
             }
             Node::Primitive(name, type_expr, link_name) => {
                 write!(

@@ -97,7 +97,7 @@ impl<'a> IRGenerator<'a> {
                             self.symbols_arity.insert(link_name.clone(), ty.arity());
                         }
                     }
-                    Node::Bind(name, expr) => {
+                    Node::Bind(name, .., expr) => {
                         if let Some(ty) = self.context.get_type(*expr) {
                             let arity = ty.arity();
                             let mut insts = Vec::new();
@@ -284,7 +284,7 @@ impl<'a> IRGenerator<'a> {
                     let mut binds = 0;
                     for n in nodes {
                         match self.context.get_node(*n) {
-                            Node::Bind(name, expr) => {
+                            Node::Bind(name, .., expr) => {
                                 match self.context.get_node(*expr) {
                                     Node::Expr(Expr::Lambda { .. }) => {
                                         for (_, o) in &mut new_offsets {
