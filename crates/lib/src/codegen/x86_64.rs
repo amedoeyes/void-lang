@@ -234,7 +234,9 @@ __print:
 		call __print_char
 
 		mov rdi, [r8+8]
+		push r8
 		call __print_int
+		pop r8
 
 		mov rdi, '>'
 		call __print_char
