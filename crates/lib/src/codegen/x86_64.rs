@@ -159,22 +159,35 @@ __force:
 	ret
 
 __print_int:
+	xor r8, r8
+
+	test rdi, rdi
+	jns .positive
+
+	mov r8, 1
+	neg rdi
+
+	.positive:
 	mov rax, rdi
 
-	lea rsi, [rsp-1]
-
+	lea rsi, [rsp]
 	mov rcx, 10
-
-	.convert:
+	.loop:
 		xor rdx, rdx
 		div rcx
 		add dl, '0'
-		mov [rsi], dl
 		dec rsi
+		mov [rsi], dl
 		test rax, rax
-		jnz .convert
+		jnz .loop
 
-	inc rsi
+	test r8, r8
+	jz .done
+
+	dec rsi
+	mov [rsi], '-'
+
+	.done:
 	mov rdx, rsp
 	sub rdx, rsi
 
