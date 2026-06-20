@@ -655,6 +655,28 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
         self.emit_pop(1)?;
         self.emit_unwind()?;
 
+        writeln!(self.writer, "__int_eq:")?;
+        self.emit_push(1)?;
+        self.emit_eval()?;
+        self.emit_push(1)?;
+        self.emit_eval()?;
+        writeln!(self.writer, "	; eq")?;
+        writeln!(self.writer, "	mov rdi, [r15]")?;
+        writeln!(self.writer, "	mov rsi, [r15+8]")?;
+        writeln!(self.writer, "	add r15, 16")?;
+        writeln!(self.writer, "	mov rdi, [rdi+8]")?;
+        writeln!(self.writer, "	cmp rdi, [rsi+8]")?;
+        writeln!(self.writer, "	je .true")?;
+        self.emit_pack(1, 0)?;
+        writeln!(self.writer, "	jmp .done")?;
+        writeln!(self.writer, "	.true:")?;
+        self.emit_pack(2, 0)?;
+        writeln!(self.writer, "	.done:")?;
+        writeln!(self.writer)?;
+        self.emit_update(2)?;
+        self.emit_pop(2)?;
+        self.emit_unwind()?;
+
         Ok(())
     }
 
