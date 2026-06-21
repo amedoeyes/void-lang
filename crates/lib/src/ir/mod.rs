@@ -67,7 +67,14 @@ impl<'a> IRGenerator<'a> {
                             self.symbols_arity.insert(cons.clone(), args.len());
                         }
                     }
-                    Node::Primitive(name, ..) | Node::Bind(name, ..) => {
+                    Node::Primitive(name, _, link_name) => {
+                        if let Some(ty) = self.context.get_type(*node) {
+                            self.symbols_alias.insert(name.clone(), link_name.clone());
+                            self.symbols_arity.insert(name.clone(), ty.arity());
+                            self.symbols_arity.insert(link_name.clone(), ty.arity());
+                        }
+                    }
+                    Node::Bind(name, ..) => {
                         if let Some(ty) = self.context.get_type(*node) {
                             self.symbols_arity.insert(name.clone(), ty.arity());
                         }
@@ -88,13 +95,6 @@ impl<'a> IRGenerator<'a> {
                             insts.push(Instruction::Update(0));
                             insts.push(Instruction::Unwind);
                             self.symbols.insert(cons.clone(), insts);
-                        }
-                    }
-                    Node::Primitive(name, _, link_name) => {
-                        if let Some(ty) = self.context.get_type(node) {
-                            self.symbols_alias.insert(name.clone(), link_name.clone());
-                            self.symbols_arity.insert(name.clone(), ty.arity());
-                            self.symbols_arity.insert(link_name.clone(), ty.arity());
                         }
                     }
                     Node::Bind(name, .., expr) => {
