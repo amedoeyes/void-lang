@@ -1,10 +1,12 @@
-use std::io::Write;
+use std::{borrow::Cow, io::Write};
 
 use fxhash::FxHashMap;
+use itertools::Itertools;
 
 use crate::{
     codegen::{Backend, Result},
     ir::instructions::Instruction,
+    lexer,
 };
 
 const RUNTIME: &str = r#"
@@ -522,7 +524,9 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
     fn emit_instruction(&mut self, inst: &Instruction) -> Result<()> {
         match inst {
             Instruction::PushInt(i) => self.emit_push_int(*i),
-            Instruction::PushGlobal(name, arity) => self.emit_push_global(name.as_str(), *arity),
+            Instruction::PushGlobal(name, arity) => {
+                self.emit_push_global(&X86_64::<W>::label(name.as_str()), *arity)
+            }
             Instruction::Alloc => self.emit_alloc(),
             Instruction::Push(n) => self.emit_push(*n),
             Instruction::Pop(n) => self.emit_pop(*n),
@@ -686,7 +690,7 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
         self.emit_primitives()?;
 
         for (symbol, insts) in self.symbols {
-            writeln!(self.writer, "{symbol}:")?;
+            writeln!(self.writer, "{}:", X86_64::<W>::label(symbol.as_str()))?;
             for inst in insts {
                 self.emit_instruction(inst)?
             }
@@ -694,6 +698,25 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
         self.writer.flush()?;
 
         Ok(())
+    }
+
+    fn label(symbol: &str) -> Cow<'_, str> {
+        let ch = symbol
+            .chars()
+            .nth(0)
+            .expect("symbol should have at least one character");
+        if lexer::is_symbol(ch) {
+            Cow::Owned(format!(
+                "OP_{}",
+                symbol
+                    .as_bytes()
+                    .iter()
+                    .map(|b| format!("{b:02X}"))
+                    .join("")
+            ))
+        } else {
+            Cow::Borrowed(symbol)
+        }
     }
 }
 

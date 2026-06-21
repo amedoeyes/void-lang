@@ -1,4 +1,4 @@
-use std::io;
+use std::{borrow::Cow, io};
 
 use fxhash::FxHashMap;
 
@@ -25,4 +25,5 @@ pub trait Backend<'a> {
     fn emit_instruction(&mut self, inst: &Instruction) -> Result<()>;
     fn emit_primitives(&mut self) -> Result<()>;
     fn emit(self) -> Result<()>;
+    fn label(symbol: &str) -> Cow<'_, str>;
 }

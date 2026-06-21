@@ -59,31 +59,6 @@ impl<'a> Lexer<'a> {
     }
 
     fn match_symbol(&mut self) -> Option<Result<(Token, Span)>> {
-        fn is_symbol(ch: char) -> bool {
-            matches!(
-                ch,
-                '!' | '#'
-                    | '$'
-                    | '%'
-                    | '&'
-                    | '*'
-                    | '+'
-                    | '-'
-                    | '.'
-                    | '/'
-                    | ':'
-                    | '<'
-                    | '='
-                    | '>'
-                    | '?'
-                    | '@'
-                    | '\\'
-                    | '^'
-                    | '|'
-                    | '~'
-            )
-        }
-
         self.current_char().filter(|&c| is_symbol(c)).map(|_| {
             let (count, len) = self.scan_while(is_symbol);
             Ok((
@@ -324,6 +299,31 @@ impl<'a> Lexer<'a> {
 
         Span::new(start, end)
     }
+}
+
+pub fn is_symbol(ch: char) -> bool {
+    matches!(
+        ch,
+        '!' | '#'
+            | '$'
+            | '%'
+            | '&'
+            | '*'
+            | '+'
+            | '-'
+            | '.'
+            | '/'
+            | ':'
+            | '<'
+            | '='
+            | '>'
+            | '?'
+            | '@'
+            | '\\'
+            | '^'
+            | '|'
+            | '~'
+    )
 }
 
 #[cfg(test)]
