@@ -689,68 +689,73 @@ pub fn infer(ctx: &mut Context) -> Result<()> {
 
     for module in &modules {
         for node in module {
-            if let Node::Type(ty_name, params, _) = ctx.get_node(*node) {
+            if let Node::Type(ty_name, params, constructors) = ctx.get_node(*node) {
                 env.type_arities.insert(ty_name.clone(), params.len());
+
+                let mut param_tys = FxHashMap::default();
+                for param in params {
+                    param_tys.insert(param.clone(), env.fresh_var());
+                }
+
+                let adt_ty = Type::Adt(
+                    ty_name.clone(),
+                    param_tys.iter().map(|(_, v)| v).cloned().collect(),
+                );
+
+                for (cons, args) in constructors {
+                    let mut cons_ty = adt_ty.clone();
+                    for arg_ty in args
+                        .iter()
+                        .map(|a| eval_type_expr(ctx, &mut env, &mut param_tys, *a))
+                        .rev()
+                    {
+                        cons_ty = Type::Fun(Box::new(arg_ty.clone()), Box::new(cons_ty));
+                    }
+                    cons_ty = env.generalize(&cons_ty);
+                    env_vars.insert(cons.clone(), cons_ty);
+                }
+
+                ctx.set_type(*node, adt_ty);
             }
         }
     }
 
-    for module in modules {
-        for node in &module {
-            match ctx.get_node(*node).clone() {
-                Node::Expr(_) => {
-                    let expr_ty = infer_expr(ctx, &mut env, &env_vars, *node)?;
-                    ctx.set_type(*node, env.generalize(&env.substitute(&expr_ty)));
-                }
-                Node::Type(ty_name, params, constructors) => {
-                    let mut param_tys = FxHashMap::default();
-                    for param in &params {
-                        param_tys.insert(param.clone(), env.fresh_var());
-                    }
-
-                    let adt_ty = Type::Adt(
-                        ty_name.clone(),
-                        param_tys.iter().map(|(_, v)| v).cloned().collect(),
-                    );
-
-                    for (cons, args) in constructors {
-                        let mut cons_ty = adt_ty.clone();
-                        for arg_ty in args
-                            .iter()
-                            .map(|a| eval_type_expr(ctx, &mut env, &mut param_tys, *a))
-                            .rev()
-                        {
-                            cons_ty = Type::Fun(Box::new(arg_ty.clone()), Box::new(cons_ty));
-                        }
-                        cons_ty = env.generalize(&cons_ty);
-                        env_vars.insert(cons, cons_ty);
-                    }
-
-                    ctx.set_type(*node, adt_ty);
-                }
-                Node::Primitive(name, type_expr, ..) => {
-                    let ty = eval_type_expr(ctx, &mut env, &mut FxHashMap::default(), type_expr);
-                    env_vars.insert(name.clone(), ty.clone());
-                    ctx.set_type(type_expr, ty.clone());
-                    ctx.set_type(*node, ty);
-                }
-                Node::Bind(name, type_expr, expr) => {
+    for module in &modules {
+        for node in module {
+            match ctx.get_node(*node) {
+                Node::Bind(name, type_expr, ..) => {
                     let ty = match type_expr {
                         Some(t) => {
-                            let ty = eval_type_expr(ctx, &mut env, &mut FxHashMap::default(), t);
+                            let ty = eval_type_expr(ctx, &mut env, &mut FxHashMap::default(), *t);
                             env.generalize(&ty)
                         }
                         None => env.fresh_var(),
                     };
                     env_vars.insert(name.clone(), ty.clone());
-                    let expr_ty = infer_expr(ctx, &mut env, &env_vars, expr)?;
-                    let expr_ty = env.generalize(&env.substitute(&expr_ty));
-                    env.unify(&ty, &expr_ty, ctx.get_span(expr))?;
-                    env_vars.insert(name.clone(), ty.clone());
-                    ctx.set_type(expr, expr_ty.clone());
                     ctx.set_type(*node, ty);
                 }
-                Node::Import(_) => continue,
+                Node::Primitive(name, type_expr, ..) => {
+                    let ty = eval_type_expr(ctx, &mut env, &mut FxHashMap::default(), *type_expr);
+                    env_vars.insert(name.clone(), ty.clone());
+                    ctx.set_type(*type_expr, ty.clone());
+                    ctx.set_type(*node, ty);
+                }
+                _ => (),
+            }
+        }
+    }
+
+    for module in modules {
+        for node in module {
+            match ctx.get_node(node).clone() {
+                Node::Bind(_, _, expr) => {
+                    let expr_ty = infer_expr(ctx, &mut env, &env_vars, expr)?;
+                    let expr_ty = env.generalize(&env.substitute(&expr_ty));
+                    ctx.set_type(expr, expr_ty.clone());
+                    let ty = ctx.get_type(node).as_ref().expect("should have type");
+                    env.unify(&ty, &expr_ty, ctx.get_span(expr))?;
+                }
+                Node::Type(..) | Node::Primitive(..) | Node::Import(..) => continue,
                 _ => unreachable!(),
             }
         }
