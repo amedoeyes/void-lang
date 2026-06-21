@@ -7,7 +7,7 @@ use std::{
     process::{self, Command},
 };
 
-use clap::{Parser, Subcommand, crate_name, crate_version};
+use clap::{Parser, Subcommand, ValueEnum, crate_name, crate_version};
 use fxhash::FxHashSet;
 use void::{
     codegen::{self},
@@ -52,13 +52,47 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    Lex { file: PathBuf },
-    Parse { file: PathBuf },
-    Type { file: PathBuf },
+    Lex {
+        file: PathBuf,
+    },
+    Parse {
+        file: PathBuf,
+    },
+    Type {
+        file: PathBuf,
+    },
     // Repl { file: Option<PathBuf> },
-    Ir { file: PathBuf },
-    Compile { file: PathBuf },
-    Run { file: PathBuf },
+    Ir {
+        file: PathBuf,
+    },
+    Compile {
+        file: PathBuf,
+
+        #[arg(short, long, value_enum, default_value_t = Emit::Binary)]
+        emit: Emit,
+
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+
+        #[arg(short, long)]
+        debug: bool,
+
+        #[arg(short, long)]
+        run: bool,
+    },
+    Run {
+        file: PathBuf,
+    },
+}
+
+#[derive(ValueEnum, Clone, Copy)]
+enum Emit {
+    #[clap(alias = "obj")]
+    Object,
+    #[clap(alias = "asm")]
+    Assembly,
+    #[clap(alias = "bin")]
+    Binary,
 }
 
 fn main() {
@@ -68,7 +102,13 @@ fn main() {
         Commands::Type { file } => type_cmd(&file),
         // Commands::Repl { file } => repl_cmd(file.as_ref()),
         Commands::Ir { file } => ir_cmd(&file),
-        Commands::Compile { file } => compile_cmd(&file),
+        Commands::Compile {
+            file,
+            emit,
+            output,
+            debug,
+            run,
+        } => compile_cmd(&file, emit, output, debug, run),
         Commands::Run { file } => run_cmd(&file),
     };
 
@@ -119,7 +159,13 @@ fn ir_cmd(source_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
-fn compile_cmd(source_path: &PathBuf) -> Result<()> {
+fn compile_cmd(
+    source_path: &PathBuf,
+    emit: Emit,
+    output: Option<PathBuf>,
+    debug: bool,
+    run: bool,
+) -> Result<()> {
     let mut ctx = Context::new();
 
     // let parent_dir = source_path
@@ -160,11 +206,18 @@ fn compile_cmd(source_path: &PathBuf) -> Result<()> {
 
     codegen::x86_64::emit(&mut asm_buf, &symbols)?;
 
-    let status = Command::new("nasm")
-        .args(&["-f", "elf64", "-g", "-F", "dwarf"])
-        .arg(&asm_path)
-        .status()
-        .expect("Failed to execute nasm");
+    if matches!(emit, Emit::Assembly) {
+        return Ok(());
+    }
+
+    let mut cmd = Command::new("nasm");
+    cmd.args(&["-f", "elf64"]);
+    if debug {
+        cmd.args(&["-g", "-F", "dwarf"]);
+    }
+    cmd.arg(&asm_path);
+
+    let status = cmd.status().expect("Failed to execute nasm");
 
     fs::remove_file(&asm_path)?;
 
@@ -172,16 +225,33 @@ fn compile_cmd(source_path: &PathBuf) -> Result<()> {
         process::exit(1);
     }
 
-    let status = Command::new("mold")
-        .arg("-static")
-        .arg(&obj_path)
-        .status()
-        .expect("Failed to execute ld");
+    if matches!(emit, Emit::Object) {
+        return Ok(());
+    }
+
+    let mut cmd = Command::new("mold");
+    cmd.arg("-static");
+
+    if let Some(output) = &output {
+        cmd.arg("-o").arg(output);
+    }
+    cmd.arg(&obj_path);
+
+    let status = cmd.status().expect("Failed to execute ld");
 
     fs::remove_file(&obj_path)?;
 
     if !status.success() {
         process::exit(1);
+    }
+
+    if run {
+        let bin = output
+            .map(|o| PathBuf::from("./").join(o))
+            .unwrap_or_else(|| PathBuf::from("./a.out"));
+        Command::new(bin)
+            .status()
+            .expect("Failed to execute binary");
     }
 
     Ok(())
