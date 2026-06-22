@@ -291,6 +291,7 @@ __println:
 	call __print
 	mov rdi, 10
 	call __print_char
+	ret
 
 __runtime_init:
 	mov r15, __stack_base + 1024*8
