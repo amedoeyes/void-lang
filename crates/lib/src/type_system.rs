@@ -259,7 +259,6 @@ struct Env {
     substitutions: FxHashMap<usize, Type>,
     instances: FxHashMap<TypeClass, Vec<Type>>,
     constraints: Vec<Constraint>,
-    type_arities: FxHashMap<String, usize>,
 }
 
 impl Env {
@@ -277,7 +276,6 @@ impl Env {
             substitutions: FxHashMap::default(),
             instances,
             constraints: Vec::new(),
-            type_arities: FxHashMap::default(),
         }
     }
 
@@ -656,9 +654,6 @@ pub fn infer(ctx: &mut Context) -> Result<()> {
     let mut env = Env::new();
     let mut env_vars = FxHashMap::default();
 
-    env.type_arities.insert("Int".into(), 0);
-    env.type_arities.insert("Char".into(), 0);
-
     let modules = ctx
         .nodes()
         .iter()
@@ -671,8 +666,6 @@ pub fn infer(ctx: &mut Context) -> Result<()> {
     for module in &modules {
         for node in module {
             if let Node::Type(ty_name, params, constructors) = ctx.get_node(*node) {
-                env.type_arities.insert(ty_name.clone(), params.len());
-
                 let mut param_tys = Vec::with_capacity(params.len());
                 let mut type_vars = FxHashMap::default();
                 for param in params {
