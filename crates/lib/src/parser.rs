@@ -88,6 +88,7 @@ impl<'a> Parser<'a> {
                     other => Err(Error::UnexpectedToken("identifier".to_string(), other)),
                 },
             )?
+            .0
         } else {
             Vec::new()
         };
@@ -95,23 +96,26 @@ impl<'a> Parser<'a> {
         self.expect(Token::Symbol("=".into()))?;
 
         let consts = match self.advance()? {
-            (Token::Keyword(Keyword::Enum), _) => self.parse_delimited_list(
-                Token::Delimiter(Delimiter::BraceLeft),
-                Token::Delimiter(Delimiter::BraceRight),
-                Token::Delimiter(Delimiter::Comma),
-                |p| match p.advance()? {
-                    (Token::Type(ty), _) => {
-                        let mut args = Vec::new();
-                        while let Ok(arg) = p.parse_type_expr() {
-                            args.push(arg);
+            (Token::Keyword(Keyword::Enum), _) => {
+                self.parse_delimited_list(
+                    Token::Delimiter(Delimiter::BraceLeft),
+                    Token::Delimiter(Delimiter::BraceRight),
+                    Token::Delimiter(Delimiter::Comma),
+                    |p| match p.advance()? {
+                        (Token::Type(ty), _) => {
+                            let mut args = Vec::new();
+                            while let Ok(arg) = p.parse_type_expr() {
+                                args.push(arg);
+                            }
+                            Ok((ty, args))
                         }
-                        Ok((ty, args))
-                    }
-                    other => Err(Error::UnexpectedToken("variant".to_string(), other)),
-                },
-            ),
-            other => Err(Error::UnexpectedToken("enum".to_string(), other)),
-        }?;
+                        other => Err(Error::UnexpectedToken("variant".to_string(), other)),
+                    },
+                )?
+                .0
+            }
+            other => return Err(Error::UnexpectedToken("enum".to_string(), other)),
+        };
 
         let (_, end_span) = self.expect(Token::Delimiter(Delimiter::Semicolon))?;
 
@@ -246,6 +250,7 @@ impl<'a> Parser<'a> {
                 Token::Delimiter(Delimiter::ParenRight) => self.parse_unit_type_expr(),
                 _ => self.parse_paren_type_expr(),
             },
+            Token::Symbol(s) if s == "<" => self.parse_forall_type_expr(),
             _ => Err(Error::UnexpectedToken(
                 "type expression".to_string(),
                 self.peek(0)?,
@@ -302,6 +307,23 @@ impl<'a> Parser<'a> {
         let lambda = self.context.add_type_expr(TypeExpr::Lambda(param, body));
         self.context.set_span(lambda, start_span.merge(end_span));
         Ok(lambda)
+    }
+
+    fn parse_forall_type_expr(&mut self) -> Result<NodeId> {
+        let (params, start_span) = self.parse_delimited_list(
+            Token::Symbol("<".into()),
+            Token::Symbol(">".into()),
+            Token::Delimiter(Delimiter::Comma),
+            |p| match p.advance()? {
+                (Token::Identifier(id), _) => Ok(id),
+                other => Err(Error::UnexpectedToken("identifier".to_string(), other)),
+            },
+        )?;
+        let body = self.parse_type_expr()?;
+        let end_span = self.context.get_span(body);
+        let expr = self.context.add_type_expr(TypeExpr::Forall(params, body));
+        self.context.set_span(expr, start_span.merge(end_span));
+        Ok(expr)
     }
 
     fn parse_paren_type_expr(&mut self) -> Result<NodeId> {
@@ -762,8 +784,8 @@ impl<'a> Parser<'a> {
         close: Token,
         sep: Token,
         mut parser: impl FnMut(&mut Self) -> Result<T>,
-    ) -> Result<Vec<T>> {
-        self.expect(open)?;
+    ) -> Result<(Vec<T>, Span)> {
+        let start_span = self.expect(open)?.1;
         let mut res = Vec::new();
         if self.peek(0)?.0 != close {
             res.push(parser(self)?);
@@ -775,8 +797,8 @@ impl<'a> Parser<'a> {
                 res.push(parser(self)?);
             }
         }
-        self.expect(close)?;
-        Ok(res)
+        let end_span = self.expect(close)?.1;
+        Ok((res, start_span.merge(end_span)))
     }
 
     fn peek(&mut self, n: usize) -> Result<(Token, Span)> {

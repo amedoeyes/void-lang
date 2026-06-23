@@ -1,8 +1,9 @@
 use core::fmt;
+use std::collections::BTreeSet;
 use std::hash::Hash;
 use std::result;
 
-use fxhash::{FxHashMap, FxHashSet};
+use fxhash::FxHashMap;
 use itertools::Itertools;
 
 use crate::context::{Context, Node, NodeId};
@@ -25,7 +26,7 @@ macro_rules! ty {
 
     (forall $($vars:literal)* . ($($class:tt $var:literal),*) => $($body:tt)*) => {
         Type::Poly(
-            [$($vars),*].into_iter().collect::<FxHashSet<usize>>(),
+            [$($vars),*].into_iter().collect::<BTreeSet<usize>>(),
             Vec::from([
                 $(Constraint {
                     class: TypeClass::$class,
@@ -39,7 +40,7 @@ macro_rules! ty {
 
     (forall $($vars:literal)* . $($body:tt)*) => {
         Type::Poly(
-            [$($vars),*].into_iter().collect::<FxHashSet<usize>>(),
+            [$($vars),*].into_iter().collect::<BTreeSet<usize>>(),
             Vec::new(),
             Box::new(ty!($($body)*))
         )
@@ -91,18 +92,18 @@ pub enum Type {
     Char,
     Var(usize),
     Fun(Box<Type>, Box<Type>),
-    Poly(FxHashSet<usize>, Vec<Constraint>, Box<Type>),
+    Poly(BTreeSet<usize>, Vec<Constraint>, Box<Type>),
     Adt(String, Vec<Type>),
 }
 
 impl Type {
-    fn type_vars(&self) -> FxHashSet<usize> {
-        let mut vars = FxHashSet::default();
+    fn type_vars(&self) -> BTreeSet<usize> {
+        let mut vars = BTreeSet::default();
         self.collect_type_vars(&mut vars);
         vars
     }
 
-    fn collect_type_vars(&self, vars: &mut FxHashSet<usize>) {
+    fn collect_type_vars(&self, vars: &mut BTreeSet<usize>) {
         match self {
             Type::Var(n) => {
                 vars.insert(*n);
@@ -567,7 +568,8 @@ fn infer_expr(
                         Node::Bind(name, type_expr, expr) => {
                             let ty = match type_expr {
                                 Some(t) => {
-                                    let ty = eval_type_expr(ctx, env, &mut FxHashMap::default(), t);
+                                    let ty =
+                                        eval_type_expr(ctx, env, &mut FxHashMap::default(), t)?;
                                     env.generalize(&ty)
                                 }
                                 None => env.fresh_var(),
@@ -618,39 +620,35 @@ fn infer_expr(
 fn eval_type_expr(
     ctx: &Context,
     env: &mut Env,
-    param_tys: &mut FxHashMap<String, Type>,
+    type_vars: &mut FxHashMap<String, Type>,
     expr: NodeId,
-) -> Type {
+) -> Result<Type> {
     match ctx.get_type_expr(expr).unwrap() {
-        TypeExpr::Unit => Type::Unit,
-        TypeExpr::Identifier(id) => param_tys
-            .entry(id.clone())
-            .or_insert_with(|| env.fresh_var())
-            .clone(),
-        TypeExpr::Constructor(name, args) => {
-            let arity = *env
-                .type_arities
-                .get(name)
-                .ok_or_else(|| todo!("error: {name} ADT does not exist"))
-                .unwrap();
-            if arity != args.len() {
-                todo!("error: not enough arguments for ADT {name}");
+        TypeExpr::Unit => Ok(Type::Unit),
+        TypeExpr::Identifier(id) => type_vars
+            .get(id)
+            .ok_or_else(|| Error::UnknownIdentifier(id.clone(), ctx.get_span(expr)))
+            .cloned(),
+        TypeExpr::Constructor(name, args) => match name.as_str() {
+            "Int" => Ok(Type::Int),
+            "Char" => Ok(Type::Char),
+            _ => Ok(Type::Adt(
+                name.clone(),
+                args.iter()
+                    .map(|arg| eval_type_expr(ctx, env, type_vars, *arg))
+                    .collect::<Result<Vec<_>>>()?,
+            )),
+        },
+        TypeExpr::Lambda(l, r) => Ok(Type::Fun(
+            Box::new(eval_type_expr(ctx, env, type_vars, *l)?),
+            Box::new(eval_type_expr(ctx, env, type_vars, *r)?),
+        )),
+        TypeExpr::Forall(params, body) => {
+            for p in params {
+                type_vars.insert(p.clone(), env.fresh_var());
             }
-            match name.as_str() {
-                "Int" => Type::Int,
-                "Char" => Type::Char,
-                _ => Type::Adt(
-                    name.clone(),
-                    args.iter()
-                        .map(|arg| eval_type_expr(ctx, env, param_tys, *arg))
-                        .collect(),
-                ),
-            }
+            eval_type_expr(ctx, env, type_vars, *body)
         }
-        TypeExpr::Lambda(l, r) => Type::Fun(
-            Box::new(eval_type_expr(ctx, env, param_tys, *l)),
-            Box::new(eval_type_expr(ctx, env, param_tys, *r)),
-        ),
     }
 }
 
@@ -692,24 +690,24 @@ pub fn infer(ctx: &mut Context) -> Result<()> {
             if let Node::Type(ty_name, params, constructors) = ctx.get_node(*node) {
                 env.type_arities.insert(ty_name.clone(), params.len());
 
-                let mut param_tys = FxHashMap::default();
+                let mut param_tys = Vec::with_capacity(params.len());
+                let mut type_vars = FxHashMap::default();
                 for param in params {
-                    param_tys.insert(param.clone(), env.fresh_var());
+                    let ty = env.fresh_var();
+                    param_tys.push(ty.clone());
+                    type_vars.insert(param.clone(), ty);
                 }
 
-                let adt_ty = Type::Adt(
-                    ty_name.clone(),
-                    param_tys.iter().map(|(_, v)| v).cloned().collect(),
-                );
+                let adt_ty = Type::Adt(ty_name.clone(), param_tys);
 
                 for (cons, args) in constructors {
                     let mut cons_ty = adt_ty.clone();
                     for arg_ty in args
                         .iter()
-                        .map(|a| eval_type_expr(ctx, &mut env, &mut param_tys, *a))
+                        .map(|a| eval_type_expr(ctx, &mut env, &mut type_vars, *a))
                         .rev()
                     {
-                        cons_ty = Type::Fun(Box::new(arg_ty.clone()), Box::new(cons_ty));
+                        cons_ty = Type::Fun(Box::new(arg_ty?), Box::new(cons_ty));
                     }
                     cons_ty = env.generalize(&cons_ty);
                     env_vars.insert(cons.clone(), cons_ty);
@@ -726,7 +724,7 @@ pub fn infer(ctx: &mut Context) -> Result<()> {
                 Node::Bind(name, type_expr, ..) => {
                     let ty = match type_expr {
                         Some(t) => {
-                            let ty = eval_type_expr(ctx, &mut env, &mut FxHashMap::default(), *t);
+                            let ty = eval_type_expr(ctx, &mut env, &mut FxHashMap::default(), *t)?;
                             env.generalize(&ty)
                         }
                         None => env.fresh_var(),
@@ -735,7 +733,7 @@ pub fn infer(ctx: &mut Context) -> Result<()> {
                     ctx.set_type(*node, ty);
                 }
                 Node::Primitive(name, type_expr, ..) => {
-                    let ty = eval_type_expr(ctx, &mut env, &mut FxHashMap::default(), *type_expr);
+                    let ty = eval_type_expr(ctx, &mut env, &mut FxHashMap::default(), *type_expr)?;
                     env_vars.insert(name.clone(), ty.clone());
                     ctx.set_type(*type_expr, ty.clone());
                     ctx.set_type(*node, ty);

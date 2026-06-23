@@ -60,4 +60,5 @@ pub enum TypeExpr {
     Identifier(String),
     Constructor(String, Vec<NodeId>),
     Lambda(NodeId, NodeId),
+    Forall(Vec<String>, NodeId),
 }

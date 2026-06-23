@@ -251,6 +251,14 @@ impl<'a> fmt::Display for Display<'a> {
                     }
                     write!(f, " -> {}", Display::new(*r, self.context))
                 }
+                TypeExpr::Forall(params, body) => {
+                    write!(
+                        f,
+                        "<{}> {}",
+                        params.iter().join(", "),
+                        Display::new(*body, self.context)
+                    )
+                }
             },
             Node::Expr(expr) => match expr {
                 Expr::Unit => write!(f, "()"),
