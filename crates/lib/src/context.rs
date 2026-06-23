@@ -232,6 +232,9 @@ impl<'a> fmt::Display for Display<'a> {
                 TypeExpr::Unit => write!(f, "()"),
                 TypeExpr::Identifier(id) => write!(f, "{id}"),
                 TypeExpr::Constructor(name, args) => {
+                    if !args.is_empty() {
+                        write!(f, "(")?;
+                    }
                     write!(f, "{}", name)?;
                     if !args.is_empty() {
                         write!(
@@ -240,7 +243,8 @@ impl<'a> fmt::Display for Display<'a> {
                             args.iter()
                                 .map(|a| Display::new(*a, self.context))
                                 .join(" "),
-                        )?
+                        )?;
+                        write!(f, ")")?;
                     }
                     Ok(())
                 }
@@ -296,13 +300,14 @@ impl<'a> fmt::Display for Display<'a> {
                 ),
             },
             Node::Type(name, params, constructors) => {
-                write!(f, "type {}", name)?;
+                write!(f, "type {} = ", name)?;
                 if !params.is_empty() {
-                    write!(f, " {}", params.join(" "))?;
+                    write!(f, "<{}> ", params.join(", "))?;
                 }
+                write!(f, "{{ ")?;
                 write!(
                     f,
-                    " = {};",
+                    "{}",
                     constructors
                         .iter()
                         .map(|(c, a)| format!(
@@ -314,8 +319,10 @@ impl<'a> fmt::Display for Display<'a> {
                                 .join(" ")
                         ))
                         .collect::<Vec<String>>()
-                        .join(" | ")
-                )
+                        .join(", ")
+                )?;
+                write!(f, " }};")?;
+                Ok(())
             }
             Node::Bind(name, type_expr, expr) => {
                 write!(f, "let {}", name)?;

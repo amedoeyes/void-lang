@@ -76,6 +76,8 @@ impl<'a> Parser<'a> {
             other => return Err(Error::UnexpectedToken("type".to_string(), other)),
         };
 
+        self.expect(Token::Symbol("=".into()))?;
+
         let params = if let Token::Symbol(sym) = self.peek(0)?.0
             && sym == "<"
         {
@@ -92,8 +94,6 @@ impl<'a> Parser<'a> {
         } else {
             Vec::new()
         };
-
-        self.expect(Token::Symbol("=".into()))?;
 
         let consts = match self.advance()? {
             (Token::Keyword(Keyword::Enum), _) => {
