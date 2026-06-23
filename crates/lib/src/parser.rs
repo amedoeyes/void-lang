@@ -556,22 +556,17 @@ impl<'a> Parser<'a> {
         let start_span = self.expect(Token::Keyword(Keyword::Match))?.1;
         let cond = self.parse_expr(0)?;
         self.expect(Token::Keyword(Keyword::With))?;
-        let mut branches = Vec::new();
-        loop {
-            let pattern = self.parse_pattern()?;
-            self.expect(Token::Symbol("=>".into()))?;
-            let body = self.parse_expr(0)?;
-            branches.push((pattern, body));
-            match self.peek(0)?.0 {
-                Token::Delimiter(Delimiter::Comma) => {
-                    self.advance()?;
-                    continue;
-                }
-                _ => break,
-            }
-        }
-
-        let end_span = self.context.get_span(branches.last().unwrap().1);
+        let (branches, end_span) = self.parse_delimited_list(
+            Token::Delimiter(Delimiter::BraceLeft),
+            Token::Delimiter(Delimiter::BraceRight),
+            Token::Delimiter(Delimiter::Comma),
+            |p| {
+                let pattern = p.parse_pattern()?;
+                p.expect(Token::Symbol("=>".into()))?;
+                let body = p.parse_expr(0)?;
+                Ok((pattern, body))
+            },
+        )?;
         let expr = self.context.add_expr(Expr::Match(cond, branches));
         self.context.set_span(expr, start_span.merge(end_span));
         Ok(expr)

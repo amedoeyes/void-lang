@@ -273,7 +273,7 @@ impl<'a> fmt::Display for Display<'a> {
                 Expr::Match(scrutinee, branches) => {
                     write!(
                         f,
-                        "match {} with {}",
+                        "match {} with {{ {} }}",
                         Display::new(*scrutinee, self.context),
                         branches
                             .iter()
