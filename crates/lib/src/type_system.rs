@@ -656,23 +656,6 @@ pub fn infer(ctx: &mut Context) -> Result<()> {
     let mut env = Env::new();
     let mut env_vars = FxHashMap::default();
 
-    // for (name, builtin) in ctx.builtins() {
-    //     env_vars.insert(name.clone(), env.generalize(&builtin.ty));
-    // }
-
-    env_vars.insert("println".into(), ty!(forall 0 . 0 -> 0));
-    env_vars.insert("+".into(), ty!(forall 0 . 0 -> 0 -> 0));
-    env_vars.insert("-".into(), ty!(forall 0 . 0 -> 0 -> 0));
-    env_vars.insert("*".into(), ty!(forall 0 . 0 -> 0 -> 0));
-    env_vars.insert("/".into(), ty!(forall 0 . 0 -> 0 -> 0));
-    env_vars.insert("<".into(), ty!(forall 0 . 0 -> 0 -> Bool));
-    env_vars.insert(">".into(), ty!(forall 0 . 0 -> 0 -> Bool));
-    env_vars.insert("<=".into(), ty!(forall 0 . 0 -> 0 -> Bool));
-    env_vars.insert(">=".into(), ty!(forall 0 . 0 -> 0 -> Bool));
-    env_vars.insert("==".into(), ty!(forall 0 . 0 -> 0 -> Bool));
-    env_vars.insert("&&".into(), ty!(Bool -> Bool -> Bool));
-    env_vars.insert("||".into(), ty!(Bool -> Bool -> Bool));
-
     env.type_arities.insert("Int".into(), 0);
     env.type_arities.insert("Char".into(), 0);
 
