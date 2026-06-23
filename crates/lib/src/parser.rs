@@ -735,7 +735,7 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_infix(&mut self, mut lhs: NodeId, min_bp: i32) -> Result<NodeId> {
-        while let (Token::Symbol(op), _) = self.peek(0)?
+        while let (Token::Symbol(op), op_span) = self.peek(0)?
             && self.peek(1)?.0 != Token::Delimiter(Delimiter::ParenRight)
         {
             let (l_bp, r_bp) = self
@@ -751,6 +751,7 @@ impl<'a> Parser<'a> {
             let rhs = self.parse_expr(r_bp)?;
 
             let id = self.context.add_expr(Expr::Identifier(op));
+            self.context.set_span(id, op_span);
             let app = self
                 .context
                 .add_expr(Expr::Application { func: id, arg: lhs });
