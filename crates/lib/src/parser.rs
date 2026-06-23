@@ -583,8 +583,8 @@ impl<'a> Parser<'a> {
         let expr = self.context.add_expr(Expr::Match(
             cond,
             Vec::from([
-                (Pattern::Constructor("True".into(), Vec::new()), true_body),
                 (Pattern::Constructor("False".into(), Vec::new()), false_body),
+                (Pattern::Constructor("True".into(), Vec::new()), true_body),
             ]),
         ));
         self.context.set_span(expr, start_span.merge(end_span));
