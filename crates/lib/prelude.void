@@ -1,0 +1,9 @@
+type Bool = enum {
+	False,
+	True,
+};
+
+type List = <a> enum {
+	Nil,
+	Cons a (List a),
+};
