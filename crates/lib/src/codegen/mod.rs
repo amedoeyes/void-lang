@@ -2,7 +2,7 @@ use std::{borrow::Cow, io};
 
 use fxhash::FxHashMap;
 
-use crate::ir::instructions::Instruction;
+use crate::ir::Instruction;
 
 pub mod x86_64;
 

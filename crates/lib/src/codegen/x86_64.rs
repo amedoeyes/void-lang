@@ -5,7 +5,7 @@ use itertools::Itertools;
 
 use crate::{
     codegen::{Backend, Result},
-    ir::instructions::Instruction,
+    ir::Instruction,
     lexer,
 };
 

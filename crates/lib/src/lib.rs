@@ -2,6 +2,7 @@ pub mod codegen;
 pub mod context;
 pub mod error;
 pub mod expr;
+pub mod interperter;
 pub mod ir;
 pub mod lexer;
 pub mod parser;
