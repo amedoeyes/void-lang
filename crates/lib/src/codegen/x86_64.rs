@@ -13,9 +13,84 @@ const RUNTIME: &str = r#"
 default rel
 
 section .data
-    __unit:
+    __const_0_0:
         dq __TAG_CNST
         dq 0
+        dq 0
+
+    __const_1_0:
+        dq __TAG_CNST
+        dq 1
+        dq 0
+
+    __const_2_0:
+        dq __TAG_CNST
+        dq 2
+        dq 0
+
+    __const_3_0:
+        dq __TAG_CNST
+        dq 3
+        dq 0
+
+    __const_4_0:
+        dq __TAG_CNST
+        dq 4
+        dq 0
+
+    __const_5_0:
+        dq __TAG_CNST
+        dq 5
+        dq 0
+
+    __const_6_0:
+        dq __TAG_CNST
+        dq 6
+        dq 0
+
+    __const_7_0:
+        dq __TAG_CNST
+        dq 7
+        dq 0
+
+    __const_8_0:
+        dq __TAG_CNST
+        dq 8
+        dq 0
+
+    __const_9_0:
+        dq __TAG_CNST
+        dq 9
+        dq 0
+
+    __const_10_0:
+        dq __TAG_CNST
+        dq 10
+        dq 0
+
+    __const_11_0:
+        dq __TAG_CNST
+        dq 11
+        dq 0
+
+    __const_12_0:
+        dq __TAG_CNST
+        dq 12
+        dq 0
+
+    __const_13_0:
+        dq __TAG_CNST
+        dq 13
+        dq 0
+
+    __const_14_0:
+        dq __TAG_CNST
+        dq 14
+        dq 0
+
+    __const_15_0:
+        dq __TAG_CNST
+        dq 15
         dq 0
 
 section .bss
@@ -363,14 +438,6 @@ impl<'a, 'b, W: Write> X86_64<'a, 'b, W> {
 }
 
 impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
-    fn emit_push_unit(&mut self) -> Result<()> {
-        writeln!(self.writer, "	; PUSHUNIT")?;
-        writeln!(self.writer, "	sub r15, 8")?;
-        writeln!(self.writer, "	mov qword [r15], __unit")?;
-        writeln!(self.writer)?;
-        Ok(())
-    }
-
     fn emit_push_int(&mut self, int: i64) -> Result<()> {
         writeln!(self.writer, "	; PUSHINT {int}")?;
         writeln!(self.writer, "	mov rdi, {int}")?;
@@ -452,14 +519,19 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
 
     fn emit_pack(&mut self, tag: usize, arity: usize) -> Result<()> {
         writeln!(self.writer, "	; PACK {tag}, {arity}")?;
-        writeln!(self.writer, "	mov rdi, {tag}")?;
-        writeln!(self.writer, "	mov rsi, {arity}")?;
-        writeln!(self.writer, "	mov rdx, r15")?;
-        writeln!(self.writer, "	call __heap_make_constr")?;
-        writeln!(self.writer, "	mov rdi, {}", arity * 8)?;
-        writeln!(self.writer, "	add r15, rdi")?;
-        writeln!(self.writer, "	sub r15, 8")?;
-        writeln!(self.writer, "	mov [r15], rax")?;
+        if arity == 0 && tag < 16 {
+            writeln!(self.writer, "	sub r15, 8")?;
+            writeln!(self.writer, "	mov qword [r15], __const_{tag}_0")?;
+        } else {
+            writeln!(self.writer, "	mov rdi, {tag}")?;
+            writeln!(self.writer, "	mov rsi, {arity}")?;
+            writeln!(self.writer, "	mov rdx, r15")?;
+            writeln!(self.writer, "	call __heap_make_constr")?;
+            writeln!(self.writer, "	mov rdi, {}", arity * 8)?;
+            writeln!(self.writer, "	add r15, rdi")?;
+            writeln!(self.writer, "	sub r15, 8")?;
+            writeln!(self.writer, "	mov [r15], rax")?;
+        }
         writeln!(self.writer)?;
         Ok(())
     }
@@ -538,7 +610,6 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
 
     fn emit_instruction(&mut self, inst: &Instruction) -> Result<()> {
         match inst {
-            Instruction::PushUnit => self.emit_push_unit(),
             Instruction::PushInt(i) => self.emit_push_int(*i),
             Instruction::PushGlobal(name, arity) => {
                 self.emit_push_global(&X86_64::<W>::label(name.as_str()), *arity)

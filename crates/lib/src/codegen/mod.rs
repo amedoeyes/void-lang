@@ -9,7 +9,6 @@ pub mod x86_64;
 type Result<T> = std::result::Result<T, io::Error>;
 
 pub trait Backend<'a> {
-    fn emit_push_unit(&mut self) -> Result<()>;
     fn emit_push_int(&mut self, int: i64) -> Result<()>;
     fn emit_push_global(&mut self, name: &str, arity: usize) -> Result<()>;
     fn emit_alloc(&mut self) -> Result<()>;
