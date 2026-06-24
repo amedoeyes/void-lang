@@ -212,7 +212,7 @@ impl<'a> GMachine<'a> {
                                     self.pc = 0;
                                     self.instructions = insts.iter().map(|i| i).collect();
                                 }
-                                None => unreachable!(),
+                                None => panic!("symbol not found '{name}'"),
                             }
                         }
                     }
