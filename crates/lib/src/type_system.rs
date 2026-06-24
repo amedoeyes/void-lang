@@ -419,11 +419,7 @@ impl Env {
                 if body1 == *body2 {
                     Ok(())
                 } else {
-                    Err(Error::TypeMismatch(
-                        self.generalize(&ty1).to_string(),
-                        self.generalize(&ty2).to_string(),
-                        span,
-                    ))
+                    Err(Error::TypeMismatch(ty1.to_string(), ty2.to_string(), span))
                 }
             }
             (a @ Type::Fun(..), Type::Poly(_, _, b)) => {
