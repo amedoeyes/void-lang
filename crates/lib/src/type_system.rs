@@ -130,36 +130,6 @@ impl Type {
         }
     }
 
-    pub fn apply_substitution(self, map: &FxHashMap<usize, usize>) -> Self {
-        match self {
-            Type::Unit | Type::Int | Type::Char => self,
-            Type::Var(n) => match map.get(&n) {
-                Some(n) => Type::Var(*n),
-                None => Type::Var(n),
-            },
-            Type::Fun(param, body) => Type::Fun(
-                Box::new(param.apply_substitution(map)),
-                Box::new(body.apply_substitution(map)),
-            ),
-            Type::Poly(vars, constraints, body) => {
-                let new_inner = body.apply_substitution(
-                    &map.iter()
-                        .filter(|(k, _)| !vars.contains(k))
-                        .map(|(k, v)| (*k, *v))
-                        .collect(),
-                );
-                Type::Poly(vars, constraints, Box::new(new_inner))
-            }
-            Type::Adt(name, args) => {
-                let mut new_args = Vec::with_capacity(args.len());
-                for a in args {
-                    new_args.push(a.apply_substitution(map))
-                }
-                Type::Adt(name, new_args)
-            }
-        }
-    }
-
     fn fmt(&self, f: &mut fmt::Formatter, var_order_map: &FxHashMap<usize, usize>) -> fmt::Result {
         match self {
             Type::Unit => write!(f, "Unit"),
@@ -409,18 +379,7 @@ impl Env {
             (Type::Poly(vars1, _, body1), Type::Poly(vars2, _, body2))
                 if vars1.len() == vars2.len() =>
             {
-                let body1 = body1.apply_substitution(
-                    &vars1
-                        .iter()
-                        .zip(vars2.iter())
-                        .map(|(&a, &b)| (a, b))
-                        .collect(),
-                );
-                if body1 == *body2 {
-                    Ok(())
-                } else {
-                    Err(Error::TypeMismatch(ty1.to_string(), ty2.to_string(), span))
-                }
+                self.unify(&body1, &body2, span)
             }
             (a @ Type::Fun(..), Type::Poly(_, _, b)) => {
                 let b = self.instantiate(*b, span);
