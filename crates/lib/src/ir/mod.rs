@@ -179,6 +179,7 @@ impl<'a> IRGenerator<'a> {
             Node::Expr(expr) => match expr {
                 Expr::Unit => out.push(Instruction::PushUnit),
                 Expr::Integer(i) => out.push(Instruction::PushInt(*i)),
+                Expr::Char(c) => out.push(Instruction::PushInt(*c as i64)),
                 Expr::Constructor(cons) => out.push(Instruction::PushGlobal(
                     cons.clone(),
                     *self.symbols_arity.get(cons).unwrap(),
@@ -361,7 +362,6 @@ impl<'a> IRGenerator<'a> {
                         out.push(Instruction::MkAp)
                     }
                 }
-                other => todo!("{other:?}"),
             },
             _ => unreachable!(),
         }
