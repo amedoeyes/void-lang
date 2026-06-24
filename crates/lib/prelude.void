@@ -1,9 +1,37 @@
-type Bool = enum {
-	False,
-	True,
-};
+type Bool = enum { False, True };
 
 type List = <a> enum {
 	Nil,
 	Cons a (List a),
 };
+
+primitive int_add : Int -> Int -> Int = "__int_add";
+primitive int_sub : Int -> Int -> Int = "__int_sub";
+primitive int_mul : Int -> Int -> Int = "__int_mul";
+primitive int_div : Int -> Int -> Int = "__int_div";
+primitive int_mod : Int -> Int -> Int = "__int_mod";
+primitive int_neg : Int -> Int        = "__int_neg";
+
+primitive int_eq : Int -> Int -> Bool = "__int_eq";
+primitive int_ne : Int -> Int -> Bool = "__int_ne";
+primitive int_lt : Int -> Int -> Bool = "__int_lt";
+primitive int_gt : Int -> Int -> Bool = "__int_gt";
+primitive int_le : Int -> Int -> Bool = "__int_le";
+primitive int_ge : Int -> Int -> Bool = "__int_ge";
+
+let (+) = a -> b -> int_add a b;
+let (-) = a -> b -> int_sub a b;
+let (*) = a -> b -> int_mul a b;
+let (/) = a -> b -> int_div a b;
+let (%) = a -> b -> int_mod a b;
+
+let (==) = a -> b -> int_eq a b;
+let (!=) = a -> b -> int_ne a b;
+let (<)  = a -> b -> int_lt a b;
+let (>)  = a -> b -> int_gt a b;
+let (<=) = a -> b -> int_le a b;
+let (>=) = a -> b -> int_ge a b;
+
+let (&&) = a -> b -> if a then b else a;
+let (||) = a -> b -> if a then a else b;
+let not  = a -> if a then False else True;
