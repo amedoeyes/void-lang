@@ -56,7 +56,6 @@ impl<'a> Parser<'a> {
                 Token::Keyword(Keyword::Type) => nodes.push(self.parse_type_decl()?),
                 Token::Keyword(Keyword::Primitive) => nodes.push(self.parse_extern_decl()?),
                 Token::Keyword(Keyword::Let) => nodes.push(self.parse_bind_decl()?),
-                Token::Keyword(Keyword::Import) => nodes.push(self.parse_import_decl()?),
                 _ => {
                     return Err(Error::UnexpectedToken(
                         "top-level declaration".into(),
@@ -209,37 +208,6 @@ impl<'a> Parser<'a> {
         self.expect(Token::Delimiter(Delimiter::Semicolon))?;
         self.context.add_operator(&op, prec, assoc);
         Ok(())
-    }
-
-    fn parse_import_decl(&mut self) -> Result<NodeId> {
-        let (_, start_span) = self.expect(Token::Keyword(Keyword::Import))?;
-
-        let mut module = Vec::new();
-        loop {
-            let part = match self.advance()? {
-                (Token::Identifier(id), _) => id,
-                other => {
-                    return Err(Error::UnexpectedToken("identifier".to_string(), other));
-                }
-            };
-            module.push(part);
-            match self.peek(0)? {
-                (Token::Symbol(val), _) => {
-                    if val == "." {
-                        self.advance()?;
-                        continue;
-                    } else {
-                        return Err(Error::UnexpectedToken(".".to_string(), self.peek(0)?));
-                    }
-                }
-                _ => break,
-            }
-        }
-        let end_span = self.expect(Token::Delimiter(Delimiter::Semicolon))?.1;
-
-        let import = self.context.add_import(&module);
-        self.context.set_span(import, start_span.merge(end_span));
-        Ok(import)
     }
 
     fn parse_type_expr(&mut self) -> Result<NodeId> {

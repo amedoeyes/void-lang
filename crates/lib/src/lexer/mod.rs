@@ -90,7 +90,6 @@ impl<'a> Lexer<'a> {
             ("left", Token::Keyword(Keyword::Left)),
             ("right", Token::Keyword(Keyword::Right)),
             ("none", Token::Keyword(Keyword::None)),
-            ("import", Token::Keyword(Keyword::Import)),
             ("primitive", Token::Keyword(Keyword::Primitive)),
             ("type", Token::Keyword(Keyword::Type)),
             ("enum", Token::Keyword(Keyword::Enum)),
@@ -488,7 +487,6 @@ mod tests {
                 left
                 right
                 none
-                import
                 let
                 if
                 then
@@ -499,7 +497,6 @@ mod tests {
                 2:1-2:4: Keyword(Left)
                 3:1-3:5: Keyword(Right)
                 4:1-4:4: Keyword(None)
-                5:1-5:6: Keyword(Import)
                 6:1-6:3: Keyword(Let)
                 7:1-7:2: Keyword(If)
                 8:1-8:4: Keyword(Then)

@@ -8,7 +8,6 @@ use std::{
 };
 
 use clap::{Parser, Subcommand, ValueEnum, crate_name, crate_version};
-use fxhash::FxHashSet;
 use void::{
     codegen::{self},
     context::{Context, Node},
@@ -121,13 +120,6 @@ fn main() {
 fn ir_cmd(source_path: &PathBuf) -> Result<()> {
     let mut ctx = Context::new();
 
-    // let parent_dir = source_path
-    //     .parent()
-    //     .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
-
-    let mut visited_modules = FxHashSet::default();
-    visited_modules.insert(PathBuf::from(source_path));
-
     let contents = fs::read_to_string(source_path)?;
 
     parse(&mut ctx, &contents).map_err(|err| {
@@ -167,13 +159,6 @@ fn compile_cmd(
     run: bool,
 ) -> Result<()> {
     let mut ctx = Context::new();
-
-    // let parent_dir = source_path
-    //     .parent()
-    //     .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
-
-    let mut visited_modules = FxHashSet::default();
-    visited_modules.insert(PathBuf::from(source_path));
 
     let contents = fs::read_to_string(source_path)?;
 
@@ -260,13 +245,6 @@ fn compile_cmd(
 fn run_cmd(source_path: &PathBuf) -> Result<()> {
     let mut ctx = Context::new();
 
-    // let parent_dir = source_path
-    //     .parent()
-    //     .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
-
-    let mut visited_modules = FxHashSet::default();
-    visited_modules.insert(PathBuf::from(source_path));
-
     let contents = fs::read_to_string(source_path)?;
 
     parse(&mut ctx, &contents).map_err(|err| {
@@ -337,13 +315,6 @@ fn lex_cmd(source_path: &PathBuf) -> Result<()> {
 fn parse_cmd(source_path: &PathBuf) -> Result<()> {
     let mut ctx = Context::new();
 
-    // let parent_dir = source_path
-    //     .parent()
-    //     .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
-
-    let mut visited_modules = FxHashSet::default();
-    visited_modules.insert(PathBuf::from(source_path));
-
     let contents = fs::read_to_string(source_path)?;
 
     parse(&mut ctx, &contents).map_err(|err| {
@@ -374,13 +345,6 @@ fn parse_cmd(source_path: &PathBuf) -> Result<()> {
 
 fn type_cmd(source_path: &PathBuf) -> Result<()> {
     let mut ctx = Context::new();
-
-    // let parent_dir = source_path
-    //     .parent()
-    //     .ok_or_else(|| Error::Void(error::Error::InvalidPath(source_path.clone())))?;
-
-    let mut visited_modules = FxHashSet::default();
-    visited_modules.insert(PathBuf::from(source_path));
 
     let contents = fs::read_to_string(source_path)?;
 

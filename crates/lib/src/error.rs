@@ -14,9 +14,6 @@ use crate::{
 #[derive(Debug)]
 pub enum Error {
     Io(io::Error),
-    InvalidPath(PathBuf),
-    CircularImport(PathBuf),
-    ModuleNotFound(Vec<String>),
     Syntax(PathBuf, String, Box<parser::Error>),
     Type(PathBuf, String, Box<type_system::Error>),
 }
@@ -33,12 +30,6 @@ impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Error::Io(err) => err.fmt(f),
-
-            Error::InvalidPath(path) => write!(f, "Invalid path '{}'", path.display()),
-            Error::CircularImport(path) => write!(f, "Circular import '{}'", path.display()),
-            Error::ModuleNotFound(module) => {
-                write!(f, "Module not found '{}'", module.join("."))
-            }
 
             Error::Syntax(filename, source, err) => match err.as_ref() {
                 parser::Error::Lexer(lexer::Error::InvalidToken(span))
