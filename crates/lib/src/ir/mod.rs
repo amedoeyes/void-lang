@@ -91,7 +91,7 @@ impl<'a> IRGenerator<'a> {
                         for (i, (cons, args)) in constructors.iter().enumerate() {
                             let mut insts = Vec::new();
                             let arity = args.len();
-                            insts.push(Instruction::Pack(i + 1, arity));
+                            insts.push(Instruction::Pack(i, arity));
                             insts.push(Instruction::Update(0));
                             insts.push(Instruction::Unwind);
                             self.symbols.insert(cons.clone(), insts);

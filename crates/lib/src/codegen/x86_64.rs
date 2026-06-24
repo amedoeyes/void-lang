@@ -472,7 +472,7 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
         writeln!(self.writer, "	; CASE")?;
         writeln!(self.writer, "	mov rdi, [r15]")?;
         writeln!(self.writer, "	mov rdi, [rdi+8]")?;
-        writeln!(self.writer, "	jmp [{case_label}+((rdi-1)*8)]")?;
+        writeln!(self.writer, "	jmp [{case_label}+rdi*8]")?;
 
         writeln!(self.writer, "	{case_label}:")?;
         for (tag, _) in branches {
