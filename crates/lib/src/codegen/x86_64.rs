@@ -12,6 +12,12 @@ use crate::{
 const RUNTIME: &str = r#"
 default rel
 
+section .data
+    __unit:
+        dq __TAG_CNST
+        dq 0
+        dq 0
+
 section .bss
 __stack_base resq 1024
 __dump_base resq 2048
@@ -357,6 +363,14 @@ impl<'a, 'b, W: Write> X86_64<'a, 'b, W> {
 }
 
 impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
+    fn emit_push_unit(&mut self) -> Result<()> {
+        writeln!(self.writer, "	; PUSHUNIT")?;
+        writeln!(self.writer, "	sub r15, 8")?;
+        writeln!(self.writer, "	mov qword [r15], __unit")?;
+        writeln!(self.writer)?;
+        Ok(())
+    }
+
     fn emit_push_int(&mut self, int: i64) -> Result<()> {
         writeln!(self.writer, "	; PUSHINT {int}")?;
         writeln!(self.writer, "	mov rdi, {int}")?;
@@ -524,6 +538,7 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
 
     fn emit_instruction(&mut self, inst: &Instruction) -> Result<()> {
         match inst {
+            Instruction::PushUnit => self.emit_push_unit(),
             Instruction::PushInt(i) => self.emit_push_int(*i),
             Instruction::PushGlobal(name, arity) => {
                 self.emit_push_global(&X86_64::<W>::label(name.as_str()), *arity)

@@ -4,6 +4,7 @@ use fxhash::FxHashMap;
 
 #[derive(Debug, Clone)]
 pub enum Instruction {
+    PushUnit,
     PushInt(i64),
     Alloc,
     Push(usize),
@@ -22,6 +23,7 @@ pub enum Instruction {
 impl Display for Instruction {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
         match self {
+            Instruction::PushUnit => write!(f, "PUSHUNIT"),
             Instruction::PushInt(i) => write!(f, "PUSHINT {i}"),
             Instruction::Alloc => write!(f, "ALLOC"),
             Instruction::Push(n) => write!(f, "PUSH {n}"),

@@ -177,6 +177,7 @@ impl<'a> IRGenerator<'a> {
     ) {
         match self.context.get_node(node) {
             Node::Expr(expr) => match expr {
+                Expr::Unit => out.push(Instruction::PushUnit),
                 Expr::Integer(i) => out.push(Instruction::PushInt(*i)),
                 Expr::Constructor(cons) => out.push(Instruction::PushGlobal(
                     cons.clone(),

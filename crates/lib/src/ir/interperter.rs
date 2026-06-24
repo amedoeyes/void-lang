@@ -50,7 +50,7 @@ impl<'a> GMachine<'a> {
             pc: 0,
             instructions: instructions.to_vec(),
             symbols,
-            heap: Vec::from([Node::Indirection(Address(0))]),
+            heap: Vec::from([Node::Constructor(0, Vec::new())]),
             stack: Vec::new(),
             dump: Vec::new(),
         }
@@ -96,6 +96,10 @@ impl<'a> GMachine<'a> {
             }
 
             match self.instructions[self.pc] {
+                Instruction::PushUnit => {
+                    self.stack.push(Address(0));
+                    self.pc += 1;
+                }
                 Instruction::PushInt(i) => {
                     let addr = self.alloc(Node::Integer(*i));
                     self.stack.push(addr);
