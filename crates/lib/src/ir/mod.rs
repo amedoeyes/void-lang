@@ -125,11 +125,11 @@ impl<'a> IRGenerator<'a> {
                                     }
                                 }
                             }
-                            insts.extend([
-                                Instruction::Update(arity),
-                                Instruction::Pop(arity),
-                                Instruction::Unwind,
-                            ]);
+                            insts.push(Instruction::Update(arity));
+                            if arity > 0 {
+                                insts.push(Instruction::Pop(arity));
+                            }
+                            insts.push(Instruction::Unwind);
                             self.symbols.insert(name.clone(), insts);
                         }
                     }
@@ -346,7 +346,9 @@ impl<'a> IRGenerator<'a> {
                     }
                     self.generate_expr(lambda_body, &lambda_offsets, &mut lambda_insts);
                     lambda_insts.push(Instruction::Update(lambda_arity));
-                    lambda_insts.push(Instruction::Pop(lambda_arity));
+                    if lambda_arity > 0 {
+                        lambda_insts.push(Instruction::Pop(lambda_arity));
+                    }
                     lambda_insts.push(Instruction::Unwind);
                     self.symbols.insert(lambda_name.clone(), lambda_insts);
                     self.symbols_arity.insert(lambda_name.clone(), lambda_arity);
