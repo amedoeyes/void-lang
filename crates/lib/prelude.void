@@ -19,6 +19,8 @@ primitive int_gt : Int -> Int -> Bool = "__int_gt";
 primitive int_le : Int -> Int -> Bool = "__int_le";
 primitive int_ge : Int -> Int -> Bool = "__int_ge";
 
+primitive println : <a> a -> () = "__println";
+
 let (+) = a -> b -> int_add a b;
 let (-) = a -> b -> int_sub a b;
 let (*) = a -> b -> int_mul a b;

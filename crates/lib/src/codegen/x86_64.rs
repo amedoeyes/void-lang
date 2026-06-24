@@ -368,12 +368,6 @@ __print:
 
 	ret
 
-__println:
-	call __print
-	mov rdi, 10
-	call __print_char
-	ret
-
 __runtime_init:
 	mov r15, __stack_base + 1024*8
 	mov r14, __dump_base + 2048*8
@@ -401,11 +395,6 @@ __start_main:
 	jmp __unwind
 
 	.return:
-
-	mov rdi, [r15]
-	add r15, 8
-
-	call __println
 
 	ret
 
@@ -876,6 +865,18 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
         writeln!(self.writer)?;
         self.emit_update(2)?;
         self.emit_pop(2)?;
+        self.emit_unwind()?;
+
+        writeln!(self.writer, "__println:")?;
+        writeln!(self.writer, "	mov rdi, [r15]")?;
+        writeln!(self.writer, "	add r15, 8")?;
+        writeln!(self.writer, "	call __print")?;
+        writeln!(self.writer, "	mov rdi, 10")?;
+        writeln!(self.writer, "	call __print_char")?;
+        writeln!(self.writer)?;
+        self.emit_pack(0, 0)?;
+        self.emit_update(1)?;
+        self.emit_pop(1)?;
         self.emit_unwind()?;
 
         Ok(())
