@@ -641,9 +641,15 @@ pub fn infer(ctx: &mut Context) -> Result<()> {
         for node in module {
             match ctx.get_node(*node) {
                 Node::Bind(name, type_expr, ..) => {
-                    let ty = match type_expr {
-                        Some(t) => eval_type_expr(ctx, &mut env, &mut FxHashMap::default(), *t)?,
-                        None => env.fresh_var(),
+                    let ty = if name == "main" {
+                        Type::Unit
+                    } else {
+                        match type_expr {
+                            Some(t) => {
+                                eval_type_expr(ctx, &mut env, &mut FxHashMap::default(), *t)?
+                            }
+                            None => env.fresh_var(),
+                        }
                     };
                     env_vars.insert(name.clone(), ty.clone());
                     ctx.set_type(*node, ty);
