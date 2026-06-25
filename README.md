@@ -19,7 +19,7 @@ let main = println (fib 42);
 
 We have a few expressions that we can use to compose a program.
 
-- **Literals**: The simplest expressions are literals `42 : Int`, `'a' : Char`, `() : Unit` and symbols. Symbols refer to expreesions that are bound to them.
+- **Literals**: The simplest expressions are literals `42 : Int`, `'a' : Char`, `() : Unit` and symbols. Symbols refer to expressions that are bound to them.
 - **Lambda**: Lambdas are expressed as `param -> expr`, so for a lambda to take multiple parameters we chain multiple lambdas `param1 -> param2 -> expr` basically a function that takes `param1` and returns another function that takes `param2`.
 - **Application**: Application expressions are the way we call functions and, are expressed as `fun_expr arg_expr arg_expr ...`.
 - **Match**: Match expressions are used to distinguish between and access values stored in a variant of an ADT, and are expressed as `match expr with { Pattern1 => expr, Pattern2 val => expr }`.
@@ -94,9 +94,9 @@ let main = factorial 10 |> println;
 ### Operator Sectioning
 
 ```fsharp
-let sub = (-); // turns the operater into a -> b -> a - b
-let sub_one_l = (- 1); // turns the operater into a -> a - 1
-let sub_one_r = (1 -); // turns the operater into b -> 1 - b
+let sub = (-); // turns the operator into a -> b -> a - b
+let sub_one_l = (- 1); // turns the operator into a -> a - 1
+let sub_one_r = (1 -); // turns the operator into b -> 1 - b
 ```
 
 ### ADTs
