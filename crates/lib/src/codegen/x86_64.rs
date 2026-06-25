@@ -875,8 +875,7 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
         writeln!(self.writer, "	call __print_char")?;
         writeln!(self.writer)?;
         self.emit_pack(0, 0)?;
-        self.emit_update(1)?;
-        self.emit_pop(1)?;
+        self.emit_update(0)?;
         self.emit_unwind()?;
 
         Ok(())
