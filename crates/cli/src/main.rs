@@ -123,10 +123,10 @@ fn main() {
 fn ir_cmd(source_path: &PathBuf) -> Result<()> {
     let mut ctx = Context::new();
 
-    let contents = PRELUDE
-        .chars()
-        .chain(fs::read_to_string(source_path)?.chars())
-        .collect::<String>();
+    parse(&mut ctx, &PRELUDE).unwrap();
+    infer(&mut ctx).unwrap();
+
+    let contents = fs::read_to_string(source_path)?;
 
     parse(&mut ctx, &contents).map_err(|err| {
         Error::Void(error::Error::Syntax(
@@ -166,10 +166,10 @@ fn compile_cmd(
 ) -> Result<()> {
     let mut ctx = Context::new();
 
-    let contents = PRELUDE
-        .chars()
-        .chain(fs::read_to_string(source_path)?.chars())
-        .collect::<String>();
+    parse(&mut ctx, &PRELUDE).unwrap();
+    infer(&mut ctx).unwrap();
+
+    let contents = fs::read_to_string(source_path)?;
 
     parse(&mut ctx, &contents).map_err(|err| {
         Error::Void(error::Error::Syntax(
@@ -254,10 +254,10 @@ fn compile_cmd(
 fn run_cmd(source_path: &PathBuf) -> Result<()> {
     let mut ctx = Context::new();
 
-    let contents = PRELUDE
-        .chars()
-        .chain(fs::read_to_string(source_path)?.chars())
-        .collect::<String>();
+    parse(&mut ctx, &PRELUDE).unwrap();
+    infer(&mut ctx).unwrap();
+
+    let contents = fs::read_to_string(source_path)?;
 
     parse(&mut ctx, &contents).map_err(|err| {
         Error::Void(error::Error::Syntax(
@@ -294,10 +294,12 @@ fn run_cmd(source_path: &PathBuf) -> Result<()> {
 }
 
 fn lex_cmd(source_path: &PathBuf) -> Result<()> {
-    let contents = PRELUDE
-        .chars()
-        .chain(fs::read_to_string(source_path)?.chars())
-        .collect::<String>();
+    let mut ctx = Context::new();
+
+    parse(&mut ctx, &PRELUDE).unwrap();
+    infer(&mut ctx).unwrap();
+
+    let contents = fs::read_to_string(source_path)?;
 
     let mut lexer = Lexer::new(&contents);
 
@@ -331,10 +333,10 @@ fn lex_cmd(source_path: &PathBuf) -> Result<()> {
 fn parse_cmd(source_path: &PathBuf) -> Result<()> {
     let mut ctx = Context::new();
 
-    let contents = PRELUDE
-        .chars()
-        .chain(fs::read_to_string(source_path)?.chars())
-        .collect::<String>();
+    parse(&mut ctx, &PRELUDE).unwrap();
+    infer(&mut ctx).unwrap();
+
+    let contents = fs::read_to_string(source_path)?;
 
     parse(&mut ctx, &contents).map_err(|err| {
         Error::Void(error::Error::Syntax(
@@ -365,10 +367,10 @@ fn parse_cmd(source_path: &PathBuf) -> Result<()> {
 fn type_cmd(source_path: &PathBuf) -> Result<()> {
     let mut ctx = Context::new();
 
-    let contents = PRELUDE
-        .chars()
-        .chain(fs::read_to_string(source_path)?.chars())
-        .collect::<String>();
+    parse(&mut ctx, &PRELUDE).unwrap();
+    infer(&mut ctx).unwrap();
+
+    let contents = fs::read_to_string(source_path)?;
 
     parse(&mut ctx, &contents).map_err(|err| {
         Error::Void(error::Error::Syntax(
