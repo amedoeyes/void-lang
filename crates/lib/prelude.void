@@ -5,6 +5,42 @@ type List = <a> enum {
 	Cons a (List a),
 };
 
+type Option = <a> enum {
+	None,
+	Some a,
+};
+
+let head = l -> match l with {
+	Nil => None,
+	Cons x _ => Some x,
+};
+
+let tail = l -> match l with {
+	Nil => None,
+	Cons _ xs => Some xs,
+};
+
+let range = s -> e ->
+	if s > e then Nil
+	else Cons s (range (s + 1) e);
+
+let length = l -> match l with {
+	Nil => 0,
+	Cons x xs => 1 + (length xs),
+};
+
+let map = f -> l -> match l with {
+	Nil => Nil,
+	Cons x xs => Cons (f x) (map f xs)
+};
+
+let filter = f -> l -> match l with {
+	Nil => Nil,
+	Cons x xs =>
+		if f x then Cons x (filter f xs)
+		else (filter f xs)
+};
+
 primitive int_add : Int -> Int -> Int = "__int_add";
 primitive int_sub : Int -> Int -> Int = "__int_sub";
 primitive int_mul : Int -> Int -> Int = "__int_mul";
