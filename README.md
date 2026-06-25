@@ -28,7 +28,7 @@ We can add type annotation on binds
 ```fsharp
 let bool_to_int : Bool -> Int = b -> if b then 1 else 0;
 ```
-It's redundant here, because the type of `bool_to_int` is already infered as `Bool -> Int`. It can however be useful if we want to restrict a polymorphic functions
+It's redundant here, because the type of `bool_to_int` is already infered as `Bool -> Int`. It can however be useful if we want to restrict a polymorphic function
 
 ```fsharp
 let id_int : Int -> Int = x -> x;
