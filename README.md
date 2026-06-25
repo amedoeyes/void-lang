@@ -15,6 +15,16 @@ let main = println (fib 42);
 
 ## Features
 
+### Expressions
+
+We have a few expressions that we can use to compose a program.
+
+- **Literals**: The simplest expressions are literals `42 : Int`, `'a' : Char`, `() : Unit` and symbols. Symbols refer to expreesions that are bound to them.
+- **Lambda**: Lambdas are expressed as `param -> expr`, so for a lambda to take multiple parameters we chain multiple lambdas `param1 -> param2 -> expr` basically a function that takes `param1` and returns another function that takes `param2`.
+- **Application**: Application expressions are the way we call functions and, are expressed as `fun_expr arg_expr arg_expr ...`.
+- **Match**: Match expressions are used to distinguish between and access values stored in a variant of an ADT, and are expressed as `match expr with { Pattern1 => expr, Pattern2 val => expr }`.
+- **Block**: Block expressions are used to declare local binds, and are expressed as `{ local_bind; local_bind; ...; expr }`.
+
 ### Bind Declarations:
 
 Immutably bind an expression to a symbol
