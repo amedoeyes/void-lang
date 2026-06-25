@@ -158,12 +158,12 @@ impl Type {
 
                 write!(
                     f,
-                    "forall {} . ",
+                    "<{}> ",
                     vars.iter()
                         .sorted()
                         .map(|v| format!("t{}", var_order_map.get(v).unwrap()))
                         .collect::<Vec<String>>()
-                        .join(" ")
+                        .join(", ")
                 )?;
 
                 let constraints = constraints
@@ -333,7 +333,12 @@ impl Env {
 
                 self.instantiate_helper(*body, span, substitutions)
             }
-            Type::Var(n) => substitutions.get(&n).cloned().unwrap_or(ty),
+            Type::Var(n) => substitutions
+                .get(&n)
+                .or_else(|| self.substitutions.get(&n))
+                .cloned()
+                .map(|ty| self.instantiate_helper(ty, span, substitutions))
+                .unwrap_or_else(|| Type::Var(n)),
             Type::Fun(param, body) => Type::Fun(
                 Box::new(self.instantiate_helper(*param, span, substitutions)),
                 Box::new(self.instantiate_helper(*body, span, substitutions)),
@@ -376,18 +381,14 @@ impl Env {
                 self.unify(p1.as_ref(), p2.as_ref(), span)?;
                 self.unify(b1.as_ref(), b2.as_ref(), span)
             }
-            (Type::Poly(vars1, _, body1), Type::Poly(vars2, _, body2))
-                if vars1.len() == vars2.len() =>
-            {
-                self.unify(&body1, &body2, span)
-            }
-            (a @ Type::Fun(..), Type::Poly(_, _, b)) => {
-                let b = self.instantiate(*b, span);
-                self.unify(&a, &b, span)
-            }
-            (Type::Poly(_, _, a), b @ Type::Fun(..)) => {
-                let a = self.instantiate(*a, span);
-                self.unify(&a, &b, span)
+            (Type::Adt(name1, args1), Type::Adt(name2, args2)) if name1 == name2 => {
+                if args1.len() != args2.len() {
+                    todo!();
+                }
+                for (arg1, arg2) in args1.iter().zip(args2.iter()) {
+                    self.unify(arg1, arg2, span)?;
+                }
+                Ok(())
             }
             (Type::Var(a), b) => {
                 self.occurs_check(a, &b, span)?;
@@ -397,15 +398,6 @@ impl Env {
             (a, Type::Var(b)) => {
                 self.occurs_check(b, &a, span)?;
                 self.substitutions.insert(b, a);
-                Ok(())
-            }
-            (Type::Adt(name1, args1), Type::Adt(name2, args2)) if name1 == name2 => {
-                if args1.len() != args2.len() {
-                    todo!();
-                }
-                for (arg1, arg2) in args1.iter().zip(args2.iter()) {
-                    self.unify(arg1, arg2, span)?;
-                }
                 Ok(())
             }
             (a, b) => Err(Error::TypeMismatch(
@@ -520,20 +512,16 @@ fn infer_expr(
                     match ctx.get_node(n).clone() {
                         Node::Bind(name, type_expr, expr) => {
                             let ty = match type_expr {
-                                Some(t) => {
-                                    let ty =
-                                        eval_type_expr(ctx, env, &mut FxHashMap::default(), t)?;
-                                    env.generalize(&ty)
-                                }
+                                Some(t) => eval_type_expr(ctx, env, &mut FxHashMap::default(), t)?,
                                 None => env.fresh_var(),
                             };
                             new_env_vars.insert(name.clone(), ty.clone());
                             let expr_ty = infer_expr(ctx, env, &new_env_vars, expr)?;
-                            let expr_ty = env.generalize(&env.substitute(&expr_ty));
                             env.unify(&ty, &expr_ty, ctx.get_span(expr))?;
-                            new_env_vars.insert(name, ty.clone());
+                            let expr_ty = env.generalize(&env.substitute(&expr_ty));
+                            new_env_vars.insert(name, expr_ty.clone());
                             ctx.set_type(expr, expr_ty.clone());
-                            ctx.set_type(n, ty);
+                            ctx.set_type(n, expr_ty);
                         }
                         Node::Expr(..) => {
                             ty = infer_expr(ctx, env, &new_env_vars, n)?;
@@ -654,10 +642,7 @@ pub fn infer(ctx: &mut Context) -> Result<()> {
             match ctx.get_node(*node) {
                 Node::Bind(name, type_expr, ..) => {
                     let ty = match type_expr {
-                        Some(t) => {
-                            let ty = eval_type_expr(ctx, &mut env, &mut FxHashMap::default(), *t)?;
-                            env.generalize(&ty)
-                        }
+                        Some(t) => eval_type_expr(ctx, &mut env, &mut FxHashMap::default(), *t)?,
                         None => env.fresh_var(),
                     };
                     env_vars.insert(name.clone(), ty.clone());
@@ -665,6 +650,7 @@ pub fn infer(ctx: &mut Context) -> Result<()> {
                 }
                 Node::Primitive(name, type_expr, ..) => {
                     let ty = eval_type_expr(ctx, &mut env, &mut FxHashMap::default(), *type_expr)?;
+                    let ty = env.generalize(&ty);
                     env_vars.insert(name.clone(), ty.clone());
                     ctx.set_type(*type_expr, ty.clone());
                     ctx.set_type(*node, ty);
@@ -677,12 +663,14 @@ pub fn infer(ctx: &mut Context) -> Result<()> {
     for module in modules {
         for node in module {
             match ctx.get_node(node).clone() {
-                Node::Bind(_, _, expr) => {
+                Node::Bind(name, _, expr) => {
                     let expr_ty = infer_expr(ctx, &mut env, &env_vars, expr)?;
-                    let expr_ty = env.generalize(&env.substitute(&expr_ty));
-                    ctx.set_type(expr, expr_ty.clone());
                     let ty = ctx.get_type(node).as_ref().expect("should have type");
                     env.unify(&ty, &expr_ty, ctx.get_span(expr))?;
+                    let expr_ty = env.generalize(&env.substitute(&expr_ty));
+                    env_vars.insert(name.clone(), expr_ty.clone());
+                    ctx.set_type(expr, expr_ty.clone());
+                    ctx.set_type(node, expr_ty);
                 }
                 Node::Type(..) | Node::Primitive(..) | Node::Import(..) => continue,
                 _ => unreachable!(),
