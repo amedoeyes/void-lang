@@ -1,5 +1,0 @@
-import add;
-import lib;
-import lib.div;
-
-mul (add 1 2) (div 10 2)

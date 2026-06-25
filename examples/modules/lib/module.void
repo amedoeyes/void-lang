@@ -1,1 +1,0 @@
-let mul = a -> b -> a + b;
