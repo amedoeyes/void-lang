@@ -2,7 +2,7 @@ type Bool = enum { False, True };
 
 type List = <a> enum {
 	Nil,
-	Cons a (List a),
+	Cons a List<a>
 };
 
 type Option = <a> enum {

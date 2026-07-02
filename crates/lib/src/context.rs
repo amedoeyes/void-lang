@@ -159,6 +159,26 @@ impl Context {
         })
     }
 
+    pub fn get_expr(&self, id: NodeId) -> Option<&Expr> {
+        self.nodes.get(id.0).and_then(|n| {
+            if let Node::Expr(expr) = n {
+                Some(expr)
+            } else {
+                None
+            }
+        })
+    }
+
+    pub fn get_expr_mut(&mut self, id: NodeId) -> Option<&mut Expr> {
+        self.nodes.get_mut(id.0).and_then(|n| {
+            if let Node::Expr(expr) = n {
+                Some(expr)
+            } else {
+                None
+            }
+        })
+    }
+
     pub fn get_span(&self, id: NodeId) -> Span {
         self.spans[id.0]
     }
@@ -227,19 +247,15 @@ impl<'a> fmt::Display for Display<'a> {
                 TypeExpr::Unit => write!(f, "()"),
                 TypeExpr::Identifier(id) => write!(f, "{id}"),
                 TypeExpr::Constructor(name, args) => {
-                    if !args.is_empty() {
-                        write!(f, "(")?;
-                    }
                     write!(f, "{}", name)?;
                     if !args.is_empty() {
                         write!(
                             f,
-                            " {}",
+                            "<{}>",
                             args.iter()
                                 .map(|a| Display::new(*a, self.context))
-                                .join(" "),
+                                .join(", "),
                         )?;
-                        write!(f, ")")?;
                     }
                     Ok(())
                 }

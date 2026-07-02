@@ -236,10 +236,16 @@ impl<'a> Parser<'a> {
             (Token::Type(ty), start_span) => {
                 let mut args = Vec::new();
                 let mut end_span = start_span;
-                while let Ok(arg) = self.parse_type_expr() {
-                    args.push(arg);
-                    end_span = self.context.get_span(arg);
-                }
+                if let Token::Symbol(sym) = self.peek(0)?.0
+                    && sym == "<"
+                {
+                    (args, end_span) = self.parse_delimited_list(
+                        Token::Symbol("<".into()),
+                        Token::Symbol(">".into()),
+                        Token::Delimiter(Delimiter::Comma),
+                        |p| p.parse_type_expr(),
+                    )?;
+                };
                 let expr = self.context.add_type_expr(TypeExpr::Constructor(ty, args));
                 self.context.set_span(expr, start_span.merge(end_span));
                 Ok(expr)
