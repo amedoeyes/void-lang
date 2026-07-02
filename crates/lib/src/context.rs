@@ -21,7 +21,6 @@ pub enum Node {
     Type(String, Vec<String>, Vec<(String, Vec<NodeId>)>),
     Primitive(String, NodeId, String),
     Bind(String, Option<NodeId>, NodeId),
-    Import(Vec<String>),
 }
 
 pub struct Display<'a> {
@@ -122,10 +121,6 @@ impl Context {
 
     pub fn add_bind(&mut self, name: &str, type_expr: Option<NodeId>, expr: NodeId) -> NodeId {
         self.add(Node::Bind(name.to_string(), type_expr, expr))
-    }
-
-    pub fn add_import(&mut self, module: &[String]) -> NodeId {
-        self.add(Node::Import(module.into()))
     }
 
     pub fn set_span(&mut self, id: NodeId, span: Span) {
@@ -341,7 +336,6 @@ impl<'a> fmt::Display for Display<'a> {
                     link_name
                 )
             }
-            Node::Import(module) => write!(f, "import {}", module.join(".")),
         }
     }
 }

@@ -678,7 +678,7 @@ pub fn infer(ctx: &mut Context) -> Result<()> {
                     ctx.set_type(expr, expr_ty.clone());
                     ctx.set_type(node, expr_ty);
                 }
-                Node::Type(..) | Node::Primitive(..) | Node::Import(..) => continue,
+                Node::Type(..) | Node::Primitive(..) => continue,
                 _ => unreachable!(),
             }
         }
