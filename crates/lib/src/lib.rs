@@ -6,5 +6,6 @@ pub mod interperter;
 pub mod ir;
 pub mod lexer;
 pub mod parser;
+pub mod scoped;
 pub mod span;
 pub mod type_system;
