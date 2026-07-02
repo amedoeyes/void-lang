@@ -497,11 +497,11 @@ mod tests {
                 2:1-2:4: Keyword(Left)
                 3:1-3:5: Keyword(Right)
                 4:1-4:4: Keyword(None)
-                6:1-6:3: Keyword(Let)
-                7:1-7:2: Keyword(If)
-                8:1-8:4: Keyword(Then)
-                9:1-9:4: Keyword(Else)
-                10:1-10:1: Eof
+                5:1-5:3: Keyword(Let)
+                6:1-6:2: Keyword(If)
+                7:1-7:4: Keyword(Then)
+                8:1-8:4: Keyword(Else)
+                9:1-9:1: Eof
             }
         );
     }
