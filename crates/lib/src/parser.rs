@@ -4,8 +4,10 @@ use std::{
     fmt::{Display, Formatter},
 };
 
+use fxhash::FxHashMap;
+
 use crate::{
-    context::{Associativity, Context, NodeId},
+    context::{Context, NodeId},
     expr::{Expr, Pattern, TypeExpr},
     lexer::{self, Delimiter, Keyword, Lexer, Literal, Token},
     span::Span,
@@ -30,11 +32,52 @@ impl Display for Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
+#[derive(Debug, Clone, Copy)]
+pub struct Operator {
+    pub precedence: i32,
+    pub associativity: Associativity,
+}
+
+impl Default for Operator {
+    fn default() -> Self {
+        Self {
+            precedence: 9,
+            associativity: Associativity::default(),
+        }
+    }
+}
+
+impl Operator {
+    pub fn new(precedence: i32, associativity: Associativity) -> Self {
+        Self {
+            precedence,
+            associativity,
+        }
+    }
+
+    pub fn binding_power(&self) -> (i32, i32) {
+        match self.associativity {
+            Associativity::Left => (self.precedence, self.precedence + 1),
+            Associativity::Right => (self.precedence + 1, self.precedence),
+            Associativity::None => (self.precedence, self.precedence),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub enum Associativity {
+    #[default]
+    Left,
+    Right,
+    None,
+}
+
 #[derive(Debug)]
 pub struct Parser<'a> {
     context: &'a mut Context,
     lexer: Lexer<'a>,
     lookahead: VecDeque<(Token, Span)>,
+    operators: FxHashMap<String, Operator>,
 }
 
 impl<'a> Parser<'a> {
@@ -43,6 +86,7 @@ impl<'a> Parser<'a> {
             context,
             lexer: Lexer::new(input),
             lookahead: VecDeque::new(),
+            operators: FxHashMap::default(),
         }
     }
 
@@ -206,7 +250,7 @@ impl<'a> Parser<'a> {
             }
         };
         self.expect(Token::Delimiter(Delimiter::Semicolon))?;
-        self.context.add_operator(&op, prec, assoc);
+        self.operators.insert(op.into(), Operator::new(prec, assoc));
         Ok(())
     }
 
@@ -620,65 +664,6 @@ impl<'a> Parser<'a> {
         }
     }
 
-    // fn parse_list_lit(&mut self) -> std::result::Result<NodeId, Error> {
-    //     match self.advance()? {
-    //         (Token::Delimiter(Delimiter::BracketLeft), start_span) => match self.peek(0)? {
-    //             (Token::Delimiter(Delimiter::BracketRight), end_span) => {
-    //                 self.advance()?;
-    //                 let list = self.context.add_expr(Expr::Nil);
-    //                 self.context.set_span(list, start_span.merge(end_span));
-    //                 Ok(list)
-    //             }
-    //             _ => {
-    //                 let mut elems = Vec::new();
-    //                 loop {
-    //                     elems.push(self.parse_expr(0)?);
-    //                     match self.peek(0)? {
-    //                         (Token::Delimiter(Delimiter::Comma), _) => {
-    //                             self.advance()?;
-    //                             continue;
-    //                         }
-    //                         _ => break,
-    //                     }
-    //                 }
-    //                 let (_, end_span) = self.expect(Token::Delimiter(Delimiter::BracketRight))?;
-    //                 let mut list = self.context.add_expr(Expr::Nil);
-    //                 for elem in elems.into_iter().rev() {
-    //                     list = self.context.add_expr(Expr::Cons {
-    //                         head: elem,
-    //                         tail: list,
-    //                     });
-    //                 }
-    //                 self.context.set_span(list, start_span.merge(end_span));
-    //                 Ok(list)
-    //             }
-    //         },
-    //         other => Err(Error::UnexpectedToken(
-    //             Token::Delimiter(Delimiter::BracketLeft).to_string(),
-    //             other,
-    //         )),
-    //     }
-    // }
-
-    // fn parse_string_lit(&mut self) -> std::result::Result<NodeId, Error> {
-    //     match self.advance()? {
-    //         (Token::Literal(Literal::String(str)), span) => {
-    //             let mut list = self.context.add_expr(Expr::Nil);
-    //             for char in str.chars().rev() {
-    //                 let expr = self.context.add_expr(Expr::Char(char));
-    //                 list = self.context.add_expr(Expr::Cons {
-    //                     head: expr,
-    //                     tail: list,
-    //                 });
-    //             }
-    //             self.context.set_type(list, ty!([Char]));
-    //             self.context.set_span(list, span);
-    //             Ok(list)
-    //         }
-    //         other => Err(Error::UnexpectedToken("string".into(), other)),
-    //     }
-    // }
-
     fn parse_char_lit(&mut self) -> std::result::Result<NodeId, Error> {
         match self.advance()? {
             (Token::Literal(Literal::Char(char)), span) => {
@@ -708,8 +693,8 @@ impl<'a> Parser<'a> {
             && self.peek(1)?.0 != Token::Delimiter(Delimiter::ParenRight)
         {
             let (l_bp, r_bp) = self
-                .context
-                .get_operator(&op)
+                .operators
+                .get(&op)
                 .cloned()
                 .unwrap_or_default()
                 .binding_power();

@@ -1,7 +1,6 @@
 use core::fmt;
 use std::fmt::Formatter;
 
-use fxhash::FxHashMap;
 use itertools::Itertools;
 
 use crate::{
@@ -28,58 +27,20 @@ pub struct Display<'a> {
     context: &'a Context,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum Associativity {
-    Left,
-    Right,
-    None,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Operator {
-    pub precedence: i32,
-    pub associativity: Associativity,
-}
-
-impl Default for Operator {
-    fn default() -> Self {
-        Self {
-            precedence: 9,
-            associativity: Associativity::Left,
-        }
-    }
-}
-
-impl Operator {
-    pub fn binding_power(&self) -> (i32, i32) {
-        match self.associativity {
-            Associativity::Left => (self.precedence, self.precedence + 1),
-            Associativity::Right => (self.precedence + 1, self.precedence),
-            Associativity::None => (self.precedence, self.precedence),
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Context {
     nodes: Vec<Node>,
     spans: Vec<Span>,
     types: Vec<Option<Type>>,
-    operators: FxHashMap<String, Operator>,
 }
 
 impl Context {
     pub fn new() -> Self {
-        let mut ctx = Self {
+        Self {
             nodes: Vec::new(),
             spans: Vec::new(),
             types: Vec::new(),
-            operators: FxHashMap::default(),
-        };
-
-        ctx.add_operators();
-
-        ctx
+        }
     }
 
     pub fn nodes(&self) -> &[Node] {
@@ -185,38 +146,6 @@ impl Context {
 
     pub fn get_type(&self, id: NodeId) -> &Option<Type> {
         &self.types[id.0]
-    }
-
-    pub fn add_operator(&mut self, symbol: &str, precedence: i32, associativity: Associativity) {
-        self.operators.insert(
-            symbol.into(),
-            Operator {
-                precedence,
-                associativity,
-            },
-        );
-    }
-
-    pub fn get_operator(&self, symbol: &str) -> Option<&Operator> {
-        self.operators.get(symbol)
-    }
-
-    fn add_operators(&mut self) {
-        self.add_operator("||", 1, Associativity::Right);
-        self.add_operator("&&", 2, Associativity::Right);
-        self.add_operator("==", 3, Associativity::None);
-        self.add_operator("!=", 3, Associativity::None);
-        self.add_operator("<", 3, Associativity::None);
-        self.add_operator("<=", 3, Associativity::None);
-        self.add_operator(">", 3, Associativity::None);
-        self.add_operator(">=", 3, Associativity::None);
-        self.add_operator("++", 4, Associativity::Right);
-        self.add_operator(":", 4, Associativity::Right);
-        self.add_operator("+", 5, Associativity::Left);
-        self.add_operator("-", 5, Associativity::Left);
-        self.add_operator("*", 6, Associativity::Left);
-        self.add_operator("/", 6, Associativity::Left);
-        self.add_operator("%", 6, Associativity::Left);
     }
 }
 
