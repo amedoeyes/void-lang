@@ -6,9 +6,12 @@ use std::result;
 use fxhash::FxHashMap;
 use itertools::Itertools;
 
-use crate::context::{Context, Node, NodeId};
-use crate::expr::{Pattern, TypeExpr};
-use crate::{expr::Expr, span::Span};
+use crate::ast::arena::NodeArena;
+use crate::ast::expr::Expr;
+use crate::ast::node::{Node, NodeKind};
+use crate::ast::pattern::Pattern;
+use crate::ast::type_expr::TypeExpr;
+use crate::span::Span;
 
 #[macro_export]
 macro_rules! ty {
@@ -54,7 +57,6 @@ pub enum Error {
     TypeMismatch(String, String, Span),
     InfiniteType(String, Span),
     UnknownIdentifier(String, Span),
-    UnknownOperator(String, Span),
     NoInstance(String, String, Span),
 }
 
@@ -424,14 +426,19 @@ impl Env {
 }
 
 fn infer_pattern(
-    ctx: &mut Context,
+    ctx: &mut NodeArena,
     env: &mut Env,
     env_vars: &FxHashMap<String, Type>,
-    pattern: &Pattern,
+    pattern: Node,
     expected_ty: &Type,
     span: Span,
 ) -> Result<FxHashMap<String, Type>> {
-    match pattern {
+    match ctx
+        .kind(pattern)
+        .as_pattern()
+        .cloned()
+        .expect("node should be pattern")
+    {
         Pattern::Wildcard => Ok(FxHashMap::default()),
         Pattern::Identifier(id) => {
             let mut map = FxHashMap::default();
@@ -444,7 +451,7 @@ fn infer_pattern(
             let mut map = FxHashMap::default();
             let cons_ty = env.instantiate(
                 env_vars
-                    .get(name)
+                    .get(&name)
                     .ok_or_else(|| Error::UnknownIdentifier(name.clone(), span))?
                     .clone(),
                 span,
@@ -460,7 +467,7 @@ fn infer_pattern(
             }
             env.unify(expected_ty, &result_ty, span)?;
             for (p, a) in subpatterns.iter().zip(arg_tys) {
-                map.extend(infer_pattern(ctx, env, env_vars, p, &a, span)?);
+                map.extend(infer_pattern(ctx, env, env_vars, *p, &a, span)?);
             }
             Ok(map)
         }
@@ -468,62 +475,62 @@ fn infer_pattern(
 }
 
 fn infer_expr(
-    ctx: &mut Context,
+    ctx: &mut NodeArena,
     env: &mut Env,
     env_vars: &FxHashMap<String, Type>,
-    expr: NodeId,
+    expr: Node,
 ) -> Result<Type> {
-    let ty = ctx.get_type(expr).as_ref();
+    let ty = ctx.ty(expr);
 
     let ty = if let Some(ty) = ty {
         ty.clone()
     } else {
-        match ctx.get_node(expr).clone() {
-            Node::Expr(Expr::Unit) => Type::Unit,
-            Node::Expr(Expr::Integer(_)) => Type::Int,
-            Node::Expr(Expr::Char(_)) => Type::Char,
-            Node::Expr(Expr::Constructor(name)) | Node::Expr(Expr::Identifier(name)) => env
+        match ctx.kind(expr).clone() {
+            NodeKind::Expr(Expr::Unit) => Type::Unit,
+            NodeKind::Expr(Expr::Integer(_)) => Type::Int,
+            NodeKind::Expr(Expr::Char(_)) => Type::Char,
+            NodeKind::Expr(Expr::Constructor(name)) | NodeKind::Expr(Expr::Identifier(name)) => env
                 .instantiate(
                     env_vars
                         .get(&name)
-                        .ok_or(Error::UnknownIdentifier(name, ctx.get_span(expr)))?
+                        .ok_or(Error::UnknownIdentifier(name, ctx.span(expr)))?
                         .clone(),
-                    ctx.get_span(expr),
+                    ctx.span(expr),
                 ),
-            Node::Expr(Expr::Match(scrutinee, branches)) => {
+            NodeKind::Expr(Expr::Match(scrutinee, branches)) => {
                 let scrutinee_ty = infer_expr(ctx, env, env_vars, scrutinee)?;
                 let match_ty = env.fresh_var();
                 for (p, b) in branches {
                     let mut branch_env = env_vars.clone();
                     let bindings =
-                        infer_pattern(ctx, env, env_vars, &p, &scrutinee_ty, ctx.get_span(expr))?;
+                        infer_pattern(ctx, env, env_vars, p, &scrutinee_ty, ctx.span(expr))?;
                     for (id, ty) in bindings {
                         branch_env.insert(id, ty);
                     }
                     let body_ty = infer_expr(ctx, env, &branch_env, b)?;
-                    env.unify(&match_ty, &body_ty, ctx.get_span(expr))?;
+                    env.unify(&match_ty, &body_ty, ctx.span(expr))?;
                 }
                 match_ty
             }
-            Node::Expr(Expr::Block(nodes)) => {
+            NodeKind::Expr(Expr::Block(nodes)) => {
                 let mut new_env_vars = env_vars.clone();
                 let mut ty = Type::Unit;
                 for n in nodes {
-                    match ctx.get_node(n).clone() {
-                        Node::Bind(name, type_expr, expr) => {
+                    match ctx.kind(n).clone() {
+                        NodeKind::Bind(name, type_expr, expr) => {
                             let ty = match type_expr {
                                 Some(t) => eval_type_expr(ctx, env, &mut FxHashMap::default(), t)?,
                                 None => env.fresh_var(),
                             };
                             new_env_vars.insert(name.clone(), ty.clone());
                             let expr_ty = infer_expr(ctx, env, &new_env_vars, expr)?;
-                            env.unify(&ty, &expr_ty, ctx.get_span(expr))?;
+                            env.unify(&ty, &expr_ty, ctx.span(expr))?;
                             let expr_ty = env.generalize(&env.substitute(&expr_ty));
                             new_env_vars.insert(name, expr_ty.clone());
-                            ctx.set_type(expr, expr_ty.clone());
-                            ctx.set_type(n, expr_ty);
+                            ctx.set_ty(expr, expr_ty.clone());
+                            ctx.set_ty(n, expr_ty);
                         }
-                        Node::Expr(..) => {
+                        NodeKind::Expr(..) => {
                             ty = infer_expr(ctx, env, &new_env_vars, n)?;
                         }
                         _ => unreachable!(),
@@ -531,21 +538,21 @@ fn infer_expr(
                 }
                 ty
             }
-            Node::Expr(Expr::Lambda { param, body }) => {
+            NodeKind::Expr(Expr::Lambda(param, body)) => {
                 let param_ty = env.fresh_var();
                 let mut new_env_vars = env_vars.clone();
                 new_env_vars.insert(param, param_ty.clone());
                 let body_ty = infer_expr(ctx, env, &new_env_vars, body)?;
                 Type::Fun(Box::new(param_ty), Box::new(body_ty))
             }
-            Node::Expr(Expr::Application { func, arg }) => {
+            NodeKind::Expr(Expr::Application(func, arg)) => {
                 let func_ty = infer_expr(ctx, env, env_vars, func)?;
                 let arg_ty = infer_expr(ctx, env, env_vars, arg)?;
                 let ret_ty = env.fresh_var();
                 env.unify(
                     &func_ty,
                     &Type::Fun(Box::new(arg_ty), Box::new(ret_ty.clone())),
-                    ctx.get_span(arg),
+                    ctx.span(arg),
                 )?;
                 ret_ty
             }
@@ -554,21 +561,21 @@ fn infer_expr(
     };
 
     let ty = env.substitute(&ty);
-    ctx.set_type(expr, ty.clone());
+    ctx.set_ty(expr, ty.clone());
     Ok(ty)
 }
 
 fn eval_type_expr(
-    ctx: &Context,
+    ctx: &NodeArena,
     env: &mut Env,
     type_vars: &mut FxHashMap<String, Type>,
-    expr: NodeId,
+    expr: Node,
 ) -> Result<Type> {
     match ctx.get_type_expr(expr).unwrap() {
         TypeExpr::Unit => Ok(Type::Unit),
         TypeExpr::Identifier(id) => type_vars
             .get(id)
-            .ok_or_else(|| Error::UnknownIdentifier(id.clone(), ctx.get_span(expr)))
+            .ok_or_else(|| Error::UnknownIdentifier(id.clone(), ctx.span(expr)))
             .cloned(),
         TypeExpr::Constructor(name, args) => match name.as_str() {
             "Int" => Ok(Type::Int),
@@ -593,22 +600,22 @@ fn eval_type_expr(
     }
 }
 
-pub fn infer(ctx: &mut Context) -> Result<()> {
+pub fn infer(ctx: &mut NodeArena) -> Result<()> {
     let mut env = Env::new();
     let mut env_vars = FxHashMap::default();
 
     let modules = ctx
-        .nodes()
+        .kinds()
         .iter()
         .filter_map(|n| match n {
-            Node::Module(nodes) => Some(nodes.clone()),
+            NodeKind::Module(nodes) => Some(nodes.clone()),
             _ => None,
         })
         .collect::<Vec<_>>();
 
     for module in &modules {
         for node in module {
-            if let Node::Type(ty_name, params, constructors) = ctx.get_node(*node) {
+            if let NodeKind::Type(ty_name, params, constructors) = ctx.kind(*node) {
                 let mut param_tys = Vec::with_capacity(params.len());
                 let mut type_vars = FxHashMap::default();
                 for param in params {
@@ -632,15 +639,15 @@ pub fn infer(ctx: &mut Context) -> Result<()> {
                     env_vars.insert(cons.clone(), cons_ty);
                 }
 
-                ctx.set_type(*node, adt_ty);
+                ctx.set_ty(*node, adt_ty);
             }
         }
     }
 
     for module in &modules {
         for node in module {
-            match ctx.get_node(*node) {
-                Node::Bind(name, type_expr, ..) => {
+            match ctx.kind(*node) {
+                NodeKind::Bind(name, type_expr, ..) => {
                     let ty = if name == "main" {
                         Type::Unit
                     } else {
@@ -652,14 +659,14 @@ pub fn infer(ctx: &mut Context) -> Result<()> {
                         }
                     };
                     env_vars.insert(name.clone(), ty.clone());
-                    ctx.set_type(*node, ty);
+                    ctx.set_ty(*node, ty);
                 }
-                Node::Primitive(name, type_expr, ..) => {
+                NodeKind::Primitive(name, type_expr, ..) => {
                     let ty = eval_type_expr(ctx, &mut env, &mut FxHashMap::default(), *type_expr)?;
                     let ty = env.generalize(&ty);
                     env_vars.insert(name.clone(), ty.clone());
-                    ctx.set_type(*type_expr, ty.clone());
-                    ctx.set_type(*node, ty);
+                    ctx.set_ty(*type_expr, ty.clone());
+                    ctx.set_ty(*node, ty);
                 }
                 _ => (),
             }
@@ -668,31 +675,31 @@ pub fn infer(ctx: &mut Context) -> Result<()> {
 
     for module in modules {
         for node in module {
-            match ctx.get_node(node).clone() {
-                Node::Bind(name, _, expr) => {
+            match ctx.kind(node).clone() {
+                NodeKind::Bind(name, _, expr) => {
                     let expr_ty = infer_expr(ctx, &mut env, &env_vars, expr)?;
-                    let ty = ctx.get_type(node).as_ref().expect("should have type");
-                    env.unify(&ty, &expr_ty, ctx.get_span(expr))?;
+                    let ty = ctx.ty(node).expect("should have type");
+                    env.unify(&ty, &expr_ty, ctx.span(expr))?;
                     let expr_ty = env.generalize(&env.substitute(&expr_ty));
                     env_vars.insert(name.clone(), expr_ty.clone());
-                    ctx.set_type(expr, expr_ty.clone());
-                    ctx.set_type(node, expr_ty);
+                    ctx.set_ty(expr, expr_ty.clone());
+                    ctx.set_ty(node, expr_ty);
                 }
-                Node::Type(..) | Node::Primitive(..) => continue,
+                NodeKind::Type(..) | NodeKind::Primitive(..) => continue,
                 _ => unreachable!(),
             }
         }
     }
 
     for node in ctx
-        .nodes()
+        .kinds()
         .iter()
         .enumerate()
-        .map(|(i, _)| NodeId(i))
-        .collect::<Vec<NodeId>>()
+        .map(|(i, _)| Node(i))
+        .collect::<Vec<Node>>()
     {
-        if let Some(ty) = ctx.get_type(node) {
-            ctx.set_type(node, env.substitute(ty));
+        if let Some(ty) = ctx.ty(node) {
+            ctx.set_ty(node, env.substitute(ty));
         }
     }
 

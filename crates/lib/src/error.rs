@@ -70,13 +70,6 @@ impl fmt::Display for Error {
                     *span,
                     &format!("unknown identifier '{id}'"),
                 ),
-                type_system::Error::UnknownOperator(op, span) => write_message_and_lines(
-                    f,
-                    filename,
-                    source,
-                    *span,
-                    &format!("unknown operator '({op})'"),
-                ),
                 type_system::Error::NoInstance(cons, ty, span) => write_message_and_lines(
                     f,
                     filename,

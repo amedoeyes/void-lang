@@ -3,8 +3,12 @@ use std::fmt::{Display, Formatter};
 use fxhash::{FxHashMap, FxHashSet};
 
 use crate::{
-    context::{Context, Node, NodeId},
-    expr::{Expr, Pattern},
+    ast::{
+        arena::NodeArena,
+        expr::Expr,
+        node::{Node, NodeKind},
+        pattern::Pattern,
+    },
     type_system::Type,
 };
 
@@ -67,7 +71,7 @@ impl Display for Instruction {
 
 #[derive(Debug)]
 pub struct IRGenerator<'a> {
-    pub context: &'a Context,
+    pub context: &'a NodeArena,
     pub symbols: FxHashMap<String, Vec<Instruction>>,
     pub symbols_arity: FxHashMap<String, usize>,
     pub symbols_alias: FxHashMap<String, String>,
@@ -76,12 +80,12 @@ pub struct IRGenerator<'a> {
 }
 
 impl<'a> IRGenerator<'a> {
-    pub fn new(context: &'a Context) -> Self {
+    pub fn new(context: &'a NodeArena) -> Self {
         let type_consts = context
-            .nodes()
+            .kinds()
             .iter()
             .filter_map(|n| match n {
-                Node::Type(name, _, constructors) => Some((
+                NodeKind::Type(name, _, constructors) => Some((
                     name.clone(),
                     constructors
                         .iter()
@@ -106,31 +110,31 @@ impl<'a> IRGenerator<'a> {
     pub fn generate(&mut self) {
         let modules = self
             .context
-            .nodes()
+            .kinds()
             .iter()
             .filter_map(|n| match n {
-                Node::Module(nodes) => Some(nodes.clone()),
+                NodeKind::Module(nodes) => Some(nodes.clone()),
                 _ => None,
             })
             .collect::<Vec<_>>();
 
         for module in &modules {
             for node in module {
-                match self.context.get_node(*node) {
-                    Node::Type(_, _, constructors) => {
+                match self.context.kind(*node) {
+                    NodeKind::Type(_, _, constructors) => {
                         for (cons, args) in constructors {
                             self.symbols_arity.insert(cons.clone(), args.len());
                         }
                     }
-                    Node::Primitive(name, _, link_name) => {
-                        if let Some(ty) = self.context.get_type(*node) {
+                    NodeKind::Primitive(name, _, link_name) => {
+                        if let Some(ty) = self.context.ty(*node) {
                             self.symbols_alias.insert(name.clone(), link_name.clone());
                             self.symbols_arity.insert(name.clone(), ty.arity());
                             self.symbols_arity.insert(link_name.clone(), ty.arity());
                         }
                     }
-                    Node::Bind(name, ..) => {
-                        if let Some(ty) = self.context.get_type(*node) {
+                    NodeKind::Bind(name, ..) => {
+                        if let Some(ty) = self.context.ty(*node) {
                             self.symbols_arity.insert(name.clone(), ty.arity());
                         }
                     }
@@ -141,8 +145,8 @@ impl<'a> IRGenerator<'a> {
 
         for module in modules {
             for node in module {
-                match self.context.get_node(node) {
-                    Node::Type(_, _, constructors) => {
+                match self.context.kind(node) {
+                    NodeKind::Type(_, _, constructors) => {
                         for (i, (cons, args)) in constructors.iter().enumerate() {
                             let mut insts = Vec::new();
                             let arity = args.len();
@@ -152,19 +156,19 @@ impl<'a> IRGenerator<'a> {
                             self.symbols.insert(cons.clone(), insts);
                         }
                     }
-                    Node::Bind(name, .., expr) => {
-                        if let Some(ty) = self.context.get_type(*expr) {
+                    NodeKind::Bind(name, .., expr) => {
+                        if let Some(ty) = self.context.ty(*expr) {
                             let arity = ty.arity();
                             let mut insts = Vec::new();
-                            match self.context.get_node(*expr) {
-                                Node::Expr(Expr::Lambda { .. }) => {
+                            match self.context.kind(*expr) {
+                                NodeKind::Expr(Expr::Lambda(..)) => {
                                     let mut offsets = FxHashMap::default();
                                     let mut node = *expr;
-                                    while let Node::Expr(Expr::Lambda { param, body }) =
-                                        self.context.get_node(node)
+                                    while let NodeKind::Expr(Expr::Lambda(l, r)) =
+                                        self.context.kind(node)
                                     {
-                                        offsets.insert(param.clone(), offsets.len());
-                                        node = *body;
+                                        offsets.insert(l.clone(), offsets.len());
+                                        node = *r;
                                     }
                                     self.generate_expr(node, &offsets, &mut insts)
                                 }
@@ -194,27 +198,44 @@ impl<'a> IRGenerator<'a> {
         }
     }
 
-    fn collect_free_vars(&self, node: NodeId, bound: &mut Vec<String>, out: &mut Vec<NodeId>) {
-        match self.context.get_node(node) {
-            Node::Expr(Expr::Identifier(id)) => {
+    fn collect_free_vars(&self, node: Node, bound: &mut Vec<String>, out: &mut Vec<Node>) {
+        match self.context.kind(node) {
+            NodeKind::Expr(Expr::Identifier(id)) => {
                 if !bound.contains(id) {
                     out.push(node);
                 }
             }
-            Node::Expr(Expr::Application { func, arg }) => {
-                self.collect_free_vars(*func, bound, out);
-                self.collect_free_vars(*arg, bound, out);
+            NodeKind::Expr(Expr::Application(r, l)) => {
+                self.collect_free_vars(*r, bound, out);
+                self.collect_free_vars(*l, bound, out);
             }
-            Node::Expr(Expr::Match(scrutinee, branches)) => {
+            NodeKind::Expr(Expr::Match(scrutinee, branches)) => {
                 self.collect_free_vars(*scrutinee, bound, out);
                 for (pat, body) in branches {
                     let original_len = bound.len();
-                    pat.collect_bound_vars(bound);
+                    self.collect_pattern_bound_vars(*pat, bound);
                     self.collect_free_vars(*body, bound, out);
                     bound.truncate(original_len);
                 }
             }
             _ => {}
+        }
+    }
+
+    pub fn collect_pattern_bound_vars(&self, pattern: Node, vars: &mut Vec<String>) {
+        match self
+            .context
+            .kind(pattern)
+            .as_pattern()
+            .expect("node should be pattern")
+        {
+            Pattern::Wildcard => {}
+            Pattern::Identifier(id) => vars.push(id.clone()),
+            Pattern::Constructor(_, patterns) => {
+                for p in patterns {
+                    self.collect_pattern_bound_vars(*p, vars);
+                }
+            }
         }
     }
 
@@ -226,12 +247,12 @@ impl<'a> IRGenerator<'a> {
 
     pub fn generate_expr(
         &mut self,
-        node: NodeId,
+        node: Node,
         offsets: &FxHashMap<String, usize>,
         out: &mut Vec<Instruction>,
     ) {
-        match self.context.get_node(node) {
-            Node::Expr(expr) => match expr {
+        match self.context.kind(node) {
+            NodeKind::Expr(expr) => match expr {
                 Expr::Unit => out.push(Instruction::Pack(0, 0)),
                 Expr::Integer(i) => out.push(Instruction::PushInt(*i)),
                 Expr::Char(c) => out.push(Instruction::PushInt(*c as i64)),
@@ -250,17 +271,17 @@ impl<'a> IRGenerator<'a> {
                         ));
                     }
                 }
-                Expr::Application { func, arg } => {
-                    self.generate_expr(*arg, offsets, out);
+                Expr::Application(l, r) => {
+                    self.generate_expr(*r, offsets, out);
                     self.generate_expr(
-                        *func,
+                        *l,
                         &offsets.iter().map(|(k, v)| (k.clone(), v + 1)).collect(),
                         out,
                     );
                     out.push(Instruction::MkAp);
                 }
                 Expr::Match(scrutinee, branches) => {
-                    let consts = match self.context.get_type(*scrutinee) {
+                    let consts = match self.context.ty(*scrutinee) {
                         Some(Type::Adt(name, _)) => self.type_consts.get(name).unwrap().clone(),
                         _ => todo!(),
                     };
@@ -269,7 +290,12 @@ impl<'a> IRGenerator<'a> {
                     out.push(Instruction::Eval);
                     let mut compiled_branches = FxHashMap::default();
                     for (pattern, body) in branches {
-                        match pattern {
+                        match self
+                            .context
+                            .kind(*pattern)
+                            .as_pattern()
+                            .expect("node should be pattern")
+                        {
                             Pattern::Wildcard => {
                                 for cons in consts
                                     .keys()
@@ -319,7 +345,12 @@ impl<'a> IRGenerator<'a> {
                                         .map(|(k, v)| (k.clone(), v + subpatterns.len().max(1)))
                                         .chain(subpatterns.iter().enumerate().filter_map(
                                             |(i, p)| {
-                                                if let Pattern::Identifier(id) = p {
+                                                if let Pattern::Identifier(id) = self
+                                                    .context
+                                                    .kind(*p)
+                                                    .as_pattern()
+                                                    .expect("node should be pattern")
+                                                {
                                                     Some((id.clone(), i))
                                                 } else {
                                                     None
@@ -340,10 +371,10 @@ impl<'a> IRGenerator<'a> {
                     let mut new_offsets = offsets.clone();
                     let mut binds = 0;
                     for n in nodes {
-                        match self.context.get_node(*n) {
-                            Node::Bind(name, .., expr) => {
-                                match self.context.get_node(*expr) {
-                                    Node::Expr(Expr::Lambda { .. }) => {
+                        match self.context.kind(*n) {
+                            NodeKind::Bind(name, .., expr) => {
+                                match self.context.kind(*expr) {
+                                    NodeKind::Expr(Expr::Lambda(..)) => {
                                         for (_, o) in &mut new_offsets {
                                             *o += 1;
                                         }
@@ -362,23 +393,21 @@ impl<'a> IRGenerator<'a> {
                                 };
                                 binds += 1;
                             }
-                            Node::Expr(..) => self.generate_expr(*n, &new_offsets, out),
+                            NodeKind::Expr(..) => self.generate_expr(*n, &new_offsets, out),
                             _ => unreachable!(),
                         }
                     }
                     out.push(Instruction::Slide(binds))
                 }
-                Expr::Lambda { .. } => {
+                Expr::Lambda(..) => {
                     let lambda_name = self.create_lambda_name();
                     let mut lambda_offsets = FxHashMap::default();
                     let mut lambda_arity = 0;
                     let mut lambda_insts = Vec::new();
                     let mut lambda_body = node;
-                    while let Node::Expr(Expr::Lambda { param, body }) =
-                        self.context.get_node(lambda_body)
-                    {
-                        lambda_offsets.insert(param.clone(), lambda_offsets.len());
-                        lambda_body = *body;
+                    while let NodeKind::Expr(Expr::Lambda(l, r)) = self.context.kind(lambda_body) {
+                        lambda_offsets.insert(l.clone(), lambda_offsets.len());
+                        lambda_body = *r;
                         lambda_arity += 1;
                     }
                     let mut free_vars = Vec::new();
@@ -392,8 +421,8 @@ impl<'a> IRGenerator<'a> {
                         for (_, o) in &mut lambda_offsets {
                             *o += 1;
                         }
-                        match self.context.get_node(*v) {
-                            Node::Expr(Expr::Identifier(id)) => {
+                        match self.context.kind(*v) {
+                            NodeKind::Expr(Expr::Identifier(id)) => {
                                 lambda_offsets.insert(id.clone(), 0);
                             }
                             _ => unreachable!(),
@@ -425,7 +454,7 @@ impl<'a> IRGenerator<'a> {
     }
 }
 
-pub fn generate(ctx: &Context) -> FxHashMap<String, Vec<Instruction>> {
+pub fn generate(ctx: &NodeArena) -> FxHashMap<String, Vec<Instruction>> {
     let mut generator = IRGenerator::new(ctx);
     generator.generate();
     generator.symbols
