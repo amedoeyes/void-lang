@@ -63,19 +63,12 @@ impl fmt::Display for Error {
                     *span,
                     &format!("infinite type '{ty}'"),
                 ),
-                type_system::Error::UnknownIdentifier(id, span) => write_message_and_lines(
+                type_system::Error::UnboundIdentifier(id, span) => write_message_and_lines(
                     f,
                     filename,
                     source,
                     *span,
-                    &format!("unknown identifier '{id}'"),
-                ),
-                type_system::Error::NoInstance(cons, ty, span) => write_message_and_lines(
-                    f,
-                    filename,
-                    source,
-                    *span,
-                    &format!("no '{cons}' instance for type '{ty}'"),
+                    &format!("unbound identifier '{id}'"),
                 ),
             },
         }
