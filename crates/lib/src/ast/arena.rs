@@ -1,9 +1,5 @@
 use crate::{
-    ast::{
-        expr::Expr,
-        node::{Node, NodeKind},
-        type_expr::TypeExpr,
-    },
+    ast::node::{Node, NodeKind},
     span::Span,
     type_system::Type,
 };
@@ -38,48 +34,8 @@ impl NodeArena {
         (node, span)
     }
 
-    pub fn get_type_expr(&self, node: Node) -> Option<&TypeExpr> {
-        self.kinds.get(node.0).and_then(|n| {
-            if let NodeKind::TypeExpr(expr) = n {
-                Some(expr)
-            } else {
-                None
-            }
-        })
-    }
-
-    pub fn get_type_expr_mut(&mut self, node: Node) -> Option<&mut TypeExpr> {
-        self.kinds.get_mut(node.0).and_then(|n| {
-            if let NodeKind::TypeExpr(expr) = n {
-                Some(expr)
-            } else {
-                None
-            }
-        })
-    }
-
-    pub fn get_expr(&self, node: Node) -> Option<&Expr> {
-        self.kinds.get(node.0).and_then(|n| {
-            if let NodeKind::Expr(expr) = n {
-                Some(expr)
-            } else {
-                None
-            }
-        })
-    }
-
-    pub fn get_expr_mut(&mut self, node: Node) -> Option<&mut Expr> {
-        self.kinds.get_mut(node.0).and_then(|n| {
-            if let NodeKind::Expr(expr) = n {
-                Some(expr)
-            } else {
-                None
-            }
-        })
-    }
-
-    pub fn nodes(&self) -> impl Iterator<Item = Node> {
-        (0..self.kinds.len()).map(Node)
+    pub fn nodes(&self) -> Vec<Node> {
+        (0..self.kinds.len()).map(Node).collect()
     }
 
     pub fn kinds(&self) -> &[NodeKind] {
