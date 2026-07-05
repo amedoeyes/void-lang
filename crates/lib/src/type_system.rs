@@ -1,4 +1,7 @@
-use std::fmt::{self, Display, Formatter};
+use std::{
+    collections::VecDeque,
+    fmt::{self, Display, Formatter},
+};
 
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
@@ -160,7 +163,7 @@ struct TypeSystem<'a> {
     vars: Vec<Option<Type>>,
     scheme_scopes: ScopedMap<String, TypeScheme>,
     type_scopes: ScopedMap<String, Type>,
-    constraints: Vec<Constraint>,
+    constraints: VecDeque<Constraint>,
 }
 
 impl<'a> TypeSystem<'a> {
@@ -170,7 +173,7 @@ impl<'a> TypeSystem<'a> {
             vars: Vec::default(),
             scheme_scopes: ScopedMap::default(),
             type_scopes: ScopedMap::default(),
-            constraints: Vec::default(),
+            constraints: VecDeque::default(),
         }
     }
 
@@ -216,7 +219,7 @@ impl<'a> TypeSystem<'a> {
                 Ok(())
             }
             (Type::Var(id), other) | (other, Type::Var(id)) => self.bind(id, other, span),
-            (a, b) => Err(TypeMismatch(a.to_string(), b.to_string(), span)),
+            (a, b) => Err(Error::TypeMismatch(a.to_string(), b.to_string(), span)),
         }
     }
 
@@ -238,7 +241,7 @@ impl<'a> TypeSystem<'a> {
     }
 
     fn solve_constraints(&mut self) -> Result<()> {
-        while let Some(cons) = self.constraints.pop() {
+        while let Some(cons) = self.constraints.pop_front() {
             match cons {
                 Constraint::Equal(ty, node) => self.unify(
                     &ty,
@@ -394,7 +397,8 @@ impl<'a> TypeSystem<'a> {
                     NodeKind::Bind(name, _, expr) => {
                         let expr_ty = self.infer_expr(expr)?;
                         let ty = self.nodes.ty(node).expect("should have type");
-                        self.constraints.push(Constraint::Equal(ty.clone(), expr));
+                        self.constraints
+                            .push_back(Constraint::Equal(ty.clone(), expr));
                         let scheme = self.generalize(&expr_ty);
                         self.scheme_scopes.insert(name, scheme);
                     }
@@ -406,7 +410,7 @@ impl<'a> TypeSystem<'a> {
 
         self.solve_constraints()?;
 
-        for node in self.nodes.nodes().collect::<Vec<_>>() {
+        for node in self.nodes.nodes() {
             if let Some(ty) = self.nodes.ty(node).cloned() {
                 let ty = self.resolve(&ty);
                 self.nodes.set_ty(node, ty);
@@ -446,7 +450,7 @@ impl<'a> TypeSystem<'a> {
                     self.infer_pattern(pattern, &scrutinee_ty)?;
                     self.infer_expr(body)?;
                     self.constraints
-                        .push(Constraint::Equal(match_ty.clone(), body));
+                        .push_back(Constraint::Equal(match_ty.clone(), body));
                     self.type_scopes.pop();
                 }
                 match_ty
@@ -466,7 +470,7 @@ impl<'a> TypeSystem<'a> {
                             let expr_ty = self.infer_expr(expr)?;
                             let scheme = self.generalize(&expr_ty);
                             self.scheme_scopes.insert(name, scheme);
-                            self.constraints.push(Constraint::Equal(ty, expr));
+                            self.constraints.push_back(Constraint::Equal(ty, expr));
                         }
                         NodeKind::Expr(..) => {
                             ty = self.infer_expr(n)?;
@@ -490,7 +494,7 @@ impl<'a> TypeSystem<'a> {
                 self.infer_expr(l)?;
                 let r_ty = self.infer_expr(r)?;
                 let ret_ty = self.fresh_var();
-                self.constraints.push(Constraint::Equal(
+                self.constraints.push_back(Constraint::Equal(
                     Type::Lambda(Box::new(r_ty), Box::new(ret_ty.clone())),
                     l,
                 ));
@@ -502,6 +506,8 @@ impl<'a> TypeSystem<'a> {
     }
 
     fn infer_pattern(&mut self, pattern: Node, expected_ty: &Type) -> Result<()> {
+        self.constraints
+            .push_back(Constraint::Equal(expected_ty.clone(), pattern));
         match self
             .nodes
             .kind(pattern)
@@ -513,8 +519,6 @@ impl<'a> TypeSystem<'a> {
             Pattern::Identifier(id) => {
                 let ty = self.fresh_var();
                 self.nodes.set_ty(pattern, ty.clone());
-                self.constraints
-                    .push(Constraint::Equal(expected_ty.clone(), pattern));
                 self.type_scopes.insert(id.clone(), ty);
                 Ok(())
             }
@@ -539,8 +543,6 @@ impl<'a> TypeSystem<'a> {
                         subpatterns.len()
                     );
                 }
-                self.constraints
-                    .push(Constraint::Equal(expected_ty.clone(), pattern));
                 for (p, a) in subpatterns.iter().zip(arg_tys) {
                     self.infer_pattern(*p, &a)?;
                 }
