@@ -16,7 +16,6 @@ use crate::{
     },
     scoped::ScopedMap,
     span::Span,
-    type_system::Error::TypeMismatch,
 };
 
 #[derive(Debug)]
@@ -28,10 +27,9 @@ pub enum Error {
 
 type Result<T> = std::result::Result<T, Error>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Var(usize),
-    #[default]
     Unit,
     Int,
     Char,
@@ -151,16 +149,35 @@ pub enum Constraint {
     Equal(Type, Node),
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct TypeScheme {
     pub vars: Vec<usize>,
     pub ty: Type,
+}
+
+impl Display for TypeScheme {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(
+            f,
+            "<{}> {}",
+            self.vars
+                .iter()
+                .enumerate()
+                .format_with(", ", |(i, _), f| if i < 26 {
+                    f(&format!("{}", (97 + i) as u8 as char))
+                } else {
+                    f(&format!("t{}", i))
+                }),
+            self.ty
+        )
+    }
 }
 
 #[derive(Debug)]
 struct TypeSystem<'a> {
     nodes: &'a mut NodeArena,
     vars: Vec<Option<Type>>,
+    rigid_vars: FxHashSet<usize>,
     scheme_scopes: ScopedMap<String, TypeScheme>,
     type_scopes: ScopedMap<String, Type>,
     constraints: VecDeque<Constraint>,
@@ -171,6 +188,7 @@ impl<'a> TypeSystem<'a> {
         Self {
             nodes,
             vars: Vec::default(),
+            rigid_vars: FxHashSet::default(),
             scheme_scopes: ScopedMap::default(),
             type_scopes: ScopedMap::default(),
             constraints: VecDeque::default(),
@@ -178,8 +196,17 @@ impl<'a> TypeSystem<'a> {
     }
 
     fn fresh_var(&mut self) -> Type {
-        let var = Type::Var(self.vars.len());
+        let id = self.vars.len();
+        let var = Type::Var(id);
         self.vars.push(None);
+        var
+    }
+
+    fn fresh_rigid_var(&mut self) -> Type {
+        let id = self.vars.len();
+        let var = Type::Var(id);
+        self.vars.push(None);
+        self.rigid_vars.insert(id);
         var
     }
 
@@ -201,22 +228,29 @@ impl<'a> TypeSystem<'a> {
         }
     }
 
-    fn unify(&mut self, ty1: &Type, ty2: &Type, span: Span) -> Result<()> {
-        match (self.resolve(ty1), self.resolve(ty2)) {
+    fn unify(&mut self, lhs: &Type, rhs: &Type, span: Span) -> Result<()> {
+        match (self.resolve(lhs), self.resolve(rhs)) {
             (Type::Int, Type::Int) | (Type::Unit, Type::Unit) | (Type::Char, Type::Char) => Ok(()),
-            (Type::Var(a), Type::Var(b)) if a == b => Ok(()),
-            (Type::Lambda(p1, b1), Type::Lambda(p2, b2)) => {
-                self.unify(&p1, &p2, span)?;
-                self.unify(&b1, &b2, span)?;
-                Ok(())
+            (Type::Var(a), Type::Var(b)) => {
+                if a == b {
+                    Ok(())
+                } else if self.rigid_vars.contains(&a) {
+                    self.bind(b, Type::Var(a), span)
+                } else {
+                    self.bind(a, Type::Var(b), span)
+                }
             }
+            (Type::Lambda(param1, body1), Type::Lambda(param2, body2)) => self
+                .unify(&param1, &param2, span)
+                .and_then(|_| self.unify(&body1, &body2, span)),
             (Type::Adt(name1, params1), Type::Adt(name2, params2))
                 if name1 == name2 && params1.len() == params2.len() =>
             {
-                for (arg1, arg2) in params1.into_iter().zip(params2.into_iter()) {
-                    self.unify(&arg1, &arg2, span)?;
-                }
-                Ok(())
+                params1
+                    .into_iter()
+                    .zip(params2.into_iter())
+                    .map(|(p1, p2)| self.unify(&p1, &p2, span))
+                    .collect::<Result<_>>()
             }
             (Type::Var(id), other) | (other, Type::Var(id)) => self.bind(id, other, span),
             (a, b) => Err(Error::TypeMismatch(a.to_string(), b.to_string(), span)),
@@ -224,11 +258,18 @@ impl<'a> TypeSystem<'a> {
     }
 
     fn bind(&mut self, id: usize, ty: Type, span: Span) -> Result<()> {
-        if self.occurs(id, &ty) {
-            return Err(Error::InfiniteType(ty.to_string(), span));
+        if self.rigid_vars.contains(&id) {
+            Err(Error::TypeMismatch(
+                Type::Var(id).to_string(),
+                ty.to_string(),
+                span,
+            ))
+        } else if self.occurs(id, &ty) {
+            Err(Error::InfiniteType(ty.to_string(), span))
+        } else {
+            self.vars[id] = Some(ty);
+            Ok(())
         }
-        self.vars[id] = Some(ty);
-        Ok(())
     }
 
     fn occurs(&self, id: usize, ty: &Type) -> bool {
@@ -245,7 +286,7 @@ impl<'a> TypeSystem<'a> {
             match cons {
                 Constraint::Equal(ty, node) => self.unify(
                     &ty,
-                    &self.nodes.ty(node).unwrap().clone(),
+                    &self.nodes.ty(node).cloned().expect("node should have type"),
                     self.nodes.span(node),
                 )?,
             }
@@ -288,37 +329,75 @@ impl<'a> TypeSystem<'a> {
         scheme.ty.replace_vars(&mapping)
     }
 
+    fn subsumes(&mut self, lhs: &TypeScheme, rhs: &TypeScheme, span: Span) -> Result<()> {
+        let vars_len = self.vars.len();
+        let old_rigid = std::mem::take(&mut self.rigid_vars);
+
+        let mapping = lhs
+            .vars
+            .iter()
+            .copied()
+            .map(|id| (id, self.fresh_rigid_var()))
+            .filter_map(|(id, v)| match v {
+                Type::Var(new_id) => Some((id, new_id)),
+                _ => None,
+            })
+            .collect();
+        let lhs_ty = lhs.ty.replace_vars(&mapping);
+
+        let mapping = rhs
+            .vars
+            .iter()
+            .copied()
+            .map(|id| (id, self.fresh_var()))
+            .filter_map(|(id, v)| match v {
+                Type::Var(new_id) => Some((id, new_id)),
+                _ => None,
+            })
+            .collect();
+        let rhs_ty = rhs.ty.replace_vars(&mapping);
+
+        let res = self.unify(&lhs_ty, &rhs_ty, span);
+
+        self.vars.truncate(vars_len);
+        self.rigid_vars = old_rigid;
+
+        res
+    }
+
     fn eval_type_expr(&mut self, scopes: &mut ScopedMap<String, Type>, expr: Node) -> Result<Type> {
-        match self.nodes.kind(expr).as_type_expr().cloned().unwrap() {
-            TypeExpr::Unit => Ok(Type::Unit),
+        let ty = match self.nodes.kind(expr).as_type_expr().cloned().unwrap() {
+            TypeExpr::Unit => Type::Unit,
             TypeExpr::Identifier(id) => scopes
                 .get(&id)
                 .ok_or_else(|| Error::UnboundIdentifier(id, self.nodes.span(expr)))
-                .cloned(),
+                .cloned()?,
             TypeExpr::Constructor(name, args) => match name.as_str() {
-                "Int" => Ok(Type::Int),
-                "Char" => Ok(Type::Char),
-                _ => Ok(Type::Adt(
+                "Int" => Type::Int,
+                "Char" => Type::Char,
+                _ => Type::Adt(
                     name,
                     args.iter()
                         .map(|arg| self.eval_type_expr(scopes, *arg))
                         .collect::<Result<Vec<_>>>()?,
-                )),
+                ),
             },
-            TypeExpr::Lambda(l, r) => Ok(Type::Lambda(
+            TypeExpr::Lambda(l, r) => Type::Lambda(
                 Box::new(self.eval_type_expr(scopes, l)?),
                 Box::new(self.eval_type_expr(scopes, r)?),
-            )),
+            ),
             TypeExpr::Forall(params, body) => {
                 scopes.push();
                 for p in params {
                     scopes.insert(p, self.fresh_var());
                 }
-                let ty = self.eval_type_expr(scopes, body);
+                let ty = self.eval_type_expr(scopes, body)?;
                 scopes.pop();
                 ty
             }
-        }
+        };
+        self.nodes.set_ty(expr, ty.clone());
+        Ok(ty)
     }
 
     pub fn infer(mut self) -> Result<()> {
@@ -366,25 +445,29 @@ impl<'a> TypeSystem<'a> {
         }
 
         for module in &modules {
-            for node in module {
-                match self.nodes.kind(*node).clone() {
-                    NodeKind::Bind(name, type_expr, ..) => {
-                        let ty = if name == "main" {
-                            Type::Unit
+            for &node in module {
+                match self.nodes.kind(node).clone() {
+                    NodeKind::Bind(name, type_expr, _) => {
+                        if name == "main" {
+                            self.nodes.set_ty(node, Type::Unit);
+                            self.type_scopes.insert(name, Type::Unit);
+                        } else if let Some(type_expr) = type_expr {
+                            let ty = self.eval_type_expr(&mut ScopedMap::default(), type_expr)?;
+                            let scheme = self.generalize(&ty);
+                            self.scheme_scopes.insert(name, scheme.clone());
+                            self.nodes.set_scheme(node, scheme);
                         } else {
-                            type_expr
-                                .map(|t| self.eval_type_expr(&mut ScopedMap::default(), t))
-                                .unwrap_or_else(|| Ok(self.fresh_var()))?
-                        };
-                        self.type_scopes.insert(name, ty.clone());
-                        self.nodes.set_ty(*node, ty);
+                            let ty = self.fresh_var();
+                            self.type_scopes.insert(name, ty.clone());
+                            self.nodes.set_ty(node, ty);
+                        }
                     }
-                    NodeKind::Primitive(name, type_expr, ..) => {
+                    NodeKind::Primitive(name, type_expr, _) => {
                         let ty = self.eval_type_expr(&mut ScopedMap::default(), type_expr)?;
                         let scheme = self.generalize(&ty);
-                        self.scheme_scopes.insert(name, scheme);
-                        self.nodes.set_ty(type_expr, ty.clone());
-                        self.nodes.set_ty(*node, ty);
+                        self.scheme_scopes.insert(name, scheme.clone());
+                        self.nodes.set_ty(node, scheme.ty.clone());
+                        self.nodes.set_scheme(node, scheme);
                     }
                     _ => (),
                 }
@@ -396,19 +479,28 @@ impl<'a> TypeSystem<'a> {
                 match self.nodes.kind(node).clone() {
                     NodeKind::Bind(name, _, expr) => {
                         let expr_ty = self.infer_expr(expr)?;
-                        let ty = self.nodes.ty(node).expect("should have type");
-                        self.constraints
-                            .push_back(Constraint::Equal(ty.clone(), expr));
-                        let scheme = self.generalize(&expr_ty);
-                        self.scheme_scopes.insert(name, scheme);
+                        self.solve_constraints()?;
+                        let inferred_scheme = self.generalize(&expr_ty);
+                        if let Some(annotated_scheme) = self.nodes.scheme(node).cloned() {
+                            self.subsumes(
+                                &annotated_scheme,
+                                &inferred_scheme,
+                                self.nodes.span(node),
+                            )?;
+                            self.scheme_scopes.insert(name, annotated_scheme.clone());
+                            self.nodes.set_ty(node, annotated_scheme.ty.clone());
+                            self.nodes.set_scheme(node, annotated_scheme);
+                        } else {
+                            self.scheme_scopes.insert(name, inferred_scheme.clone());
+                            self.nodes.set_ty(node, inferred_scheme.ty.clone());
+                            self.nodes.set_scheme(node, inferred_scheme);
+                        }
                     }
-                    NodeKind::Type(..) | NodeKind::Primitive(..) => continue,
+                    NodeKind::Type(..) | NodeKind::Primitive(..) => (),
                     _ => unreachable!(),
                 }
             }
         }
-
-        self.solve_constraints()?;
 
         for node in self.nodes.nodes() {
             if let Some(ty) = self.nodes.ty(node).cloned() {
@@ -432,15 +524,11 @@ impl<'a> TypeSystem<'a> {
                 .map(|s| self.instantiate(&s))
                 .ok_or_else(|| Error::UnboundIdentifier(name, self.nodes.span(expr)))?,
             Expr::Identifier(name) => self
-                .type_scopes
+                .scheme_scopes
                 .get(&name)
                 .cloned()
-                .or_else(|| {
-                    self.scheme_scopes
-                        .get(&name)
-                        .cloned()
-                        .map(|s| self.instantiate(&s))
-                })
+                .map(|s| self.instantiate(&s))
+                .or_else(|| self.type_scopes.get(&name).cloned())
                 .ok_or_else(|| Error::UnboundIdentifier(name, self.nodes.span(expr)))?,
             Expr::Match(scrutinee, arms) => {
                 let scrutinee_ty = self.infer_expr(scrutinee)?;
@@ -459,21 +547,40 @@ impl<'a> TypeSystem<'a> {
                 self.scheme_scopes.push();
                 self.type_scopes.push();
                 let mut ty = Type::Unit;
-                for n in nodes {
-                    match self.nodes.kind(n).clone() {
+                for node in nodes {
+                    match self.nodes.kind(node).clone() {
                         NodeKind::Bind(name, type_expr, expr) => {
-                            let ty = type_expr
-                                .map(|t| self.eval_type_expr(&mut ScopedMap::default(), t))
-                                .unwrap_or_else(|| Ok(self.fresh_var()))?;
-                            self.nodes.set_ty(n, ty.clone());
-                            self.type_scopes.insert(name.clone(), ty.clone());
+                            if let Some(type_expr) = type_expr {
+                                let ty =
+                                    self.eval_type_expr(&mut ScopedMap::default(), type_expr)?;
+                                let scheme = self.generalize(&ty);
+                                self.scheme_scopes.insert(name.clone(), scheme.clone());
+                                self.nodes.set_scheme(node, scheme);
+                            } else {
+                                let ty = self.fresh_var();
+                                self.type_scopes.insert(name.clone(), ty.clone());
+                                self.nodes.set_ty(node, ty);
+                            }
                             let expr_ty = self.infer_expr(expr)?;
-                            let scheme = self.generalize(&expr_ty);
-                            self.scheme_scopes.insert(name, scheme);
-                            self.constraints.push_back(Constraint::Equal(ty, expr));
+                            self.solve_constraints()?;
+                            let inferred_scheme = self.generalize(&expr_ty);
+                            if let Some(annotated_scheme) = self.nodes.scheme(node).cloned() {
+                                self.subsumes(
+                                    &annotated_scheme,
+                                    &inferred_scheme,
+                                    self.nodes.span(node),
+                                )?;
+                                self.scheme_scopes.insert(name, annotated_scheme.clone());
+                                self.nodes.set_ty(node, annotated_scheme.ty.clone());
+                                self.nodes.set_scheme(node, annotated_scheme);
+                            } else {
+                                self.scheme_scopes.insert(name, inferred_scheme.clone());
+                                self.nodes.set_ty(node, inferred_scheme.ty.clone());
+                                self.nodes.set_scheme(node, inferred_scheme);
+                            }
                         }
-                        NodeKind::Expr(..) => {
-                            ty = self.infer_expr(n)?;
+                        NodeKind::Expr(_) => {
+                            ty = self.infer_expr(node)?;
                         }
                         _ => unreachable!(),
                     }
