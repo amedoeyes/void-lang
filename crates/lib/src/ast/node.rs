@@ -90,4 +90,55 @@ impl NodeKind {
             _ => None,
         }
     }
+
+    pub fn as_mut_module(&mut self) -> Option<&mut [Node]> {
+        match self {
+            NodeKind::Module(nodes) => Some(nodes.as_mut_slice()),
+            _ => None,
+        }
+    }
+
+    pub fn as_mut_type_expr(&mut self) -> Option<&mut TypeExpr> {
+        match self {
+            NodeKind::TypeExpr(type_expr) => Some(type_expr),
+            _ => None,
+        }
+    }
+
+    pub fn as_mut_expr(&mut self) -> Option<&mut Expr> {
+        match self {
+            NodeKind::Expr(expr) => Some(expr),
+            _ => None,
+        }
+    }
+
+    pub fn as_mut_type(
+        &mut self,
+    ) -> Option<(&mut String, &mut Vec<String>, &mut Vec<(String, Vec<Node>)>)> {
+        match self {
+            NodeKind::Type(name, params, constructors) => Some((name, params, constructors)),
+            _ => None,
+        }
+    }
+
+    pub fn as_mut_primitive(&mut self) -> Option<(&mut String, &mut Node, &mut String)> {
+        match self {
+            NodeKind::Primitive(name, type_expr, link_name) => Some((name, type_expr, link_name)),
+            _ => None,
+        }
+    }
+
+    pub fn as_mut_bind(&mut self) -> Option<(&mut String, &mut Option<Node>, &mut Node)> {
+        match self {
+            NodeKind::Bind(name, type_expr, expr) => Some((name, type_expr, expr)),
+            _ => None,
+        }
+    }
+
+    pub fn as_mut_pattern(&mut self) -> Option<&mut Pattern> {
+        match self {
+            NodeKind::Pattern(pattern) => Some(pattern),
+            _ => None,
+        }
+    }
 }
