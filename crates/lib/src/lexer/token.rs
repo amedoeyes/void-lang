@@ -55,7 +55,7 @@ impl Display for Token {
             Token::Keyword(keyword) => keyword.fmt(f),
             Token::Type(val) => write!(f, "{val}"),
             Token::Identifier(val) => write!(f, "{val}"),
-            Token::Symbol(val) => write!(f, "({val})"),
+            Token::Symbol(val) => write!(f, "{val}"),
             Token::Eof => write!(f, "EOF"),
         }
     }
