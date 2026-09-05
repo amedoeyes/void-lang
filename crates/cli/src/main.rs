@@ -9,7 +9,7 @@ use std::{
 
 use clap::{Parser, Subcommand, ValueEnum, crate_name, crate_version};
 use void::{
-    ast::{arena::NodeArena, node::NodeKind},
+    ast::{arena::NodeArena, printer::Dumper},
     codegen::{self},
     error,
     interperter::GMachine,
@@ -133,14 +133,20 @@ fn ir_cmd(source_path: &PathBuf) -> Result<()> {
         ))
     })?;
 
-    type_system::infer(&mut ctx);
+    type_system::infer(&mut ctx).map_err(|err| {
+        Error::Void(error::Error::Type(
+            source_path.clone(),
+            contents.clone(),
+            Box::new(err),
+        ))
+    })?;
 
     let ir = generate(&ctx);
 
     for (name, insts) in ir {
         println!("{}:", name);
-        for i in insts {
-            println!("  {i}");
+        for inst in insts {
+            println!("{inst}");
         }
         println!();
     }
@@ -169,7 +175,13 @@ fn compile_cmd(
         ))
     })?;
 
-    type_system::infer(&mut ctx);
+    type_system::infer(&mut ctx).map_err(|err| {
+        Error::Void(error::Error::Type(
+            source_path.clone(),
+            contents.clone(),
+            Box::new(err),
+        ))
+    })?;
 
     let symbols = generate(&ctx);
 
@@ -250,7 +262,13 @@ fn run_cmd(source_path: &PathBuf) -> Result<()> {
         ))
     })?;
 
-    type_system::infer(&mut ctx);
+    type_system::infer(&mut ctx).map_err(|err| {
+        Error::Void(error::Error::Type(
+            source_path.clone(),
+            contents.clone(),
+            Box::new(err),
+        ))
+    })?;
 
     let symbols = generate(&ctx);
 
@@ -321,19 +339,9 @@ fn parse_cmd(source_path: &PathBuf) -> Result<()> {
         ))
     })?;
 
-    let modules = ctx
-        .kinds()
-        .iter()
-        .filter_map(|n| match n {
-            NodeKind::Module(nodes) => Some(nodes.clone()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-
-    for module in modules {
-        for node in module {
-            println!("{}", node.display(&ctx));
-        }
+    let dumper = Dumper::new(&ctx);
+    for module in ctx.nodes().into_iter().filter(|n| ctx.kind(*n).is_module()) {
+        println!("{}", dumper.to_string(module));
     }
 
     Ok(())
@@ -354,26 +362,17 @@ fn type_cmd(source_path: &PathBuf) -> Result<()> {
         ))
     })?;
 
-    type_system::infer(&mut ctx);
+    type_system::infer(&mut ctx).map_err(|err| {
+        Error::Void(error::Error::Type(
+            source_path.clone(),
+            contents.clone(),
+            Box::new(err),
+        ))
+    })?;
 
-    let modules = ctx
-        .kinds()
-        .iter()
-        .filter_map(|n| match n {
-            NodeKind::Module(nodes) => Some(nodes.clone()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-
-    for module in modules {
-        for node in module {
-            match ctx.kind(node) {
-                NodeKind::Primitive(name, ..) | NodeKind::Bind(name, ..) => {
-                    println!("{} : {}", name, ctx.ty(node).as_ref().unwrap())
-                }
-                _ => continue,
-            }
-        }
+    let dumper = Dumper::new(&ctx);
+    for module in ctx.nodes().into_iter().filter(|n| ctx.kind(*n).is_module()) {
+        println!("{}", dumper.to_string(module));
     }
 
     Ok(())

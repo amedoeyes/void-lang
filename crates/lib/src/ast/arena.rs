@@ -1,7 +1,7 @@
 use crate::{
     ast::node::{Node, NodeKind},
     span::Span,
-    type_system::Type,
+    type_system::{Type, TypeScheme},
 };
 
 #[derive(Debug, Clone)]
@@ -9,6 +9,7 @@ pub struct NodeArena {
     kinds: Vec<NodeKind>,
     spans: Vec<Span>,
     types: Vec<Option<Type>>,
+    schemes: Vec<Option<TypeScheme>>,
 }
 
 impl NodeArena {
@@ -17,6 +18,7 @@ impl NodeArena {
             kinds: Vec::new(),
             spans: Vec::new(),
             types: Vec::new(),
+            schemes: Vec::new(),
         }
     }
 
@@ -25,6 +27,7 @@ impl NodeArena {
         self.kinds.push(kind);
         self.spans.push(Span::DUMMY);
         self.types.push(None);
+        self.schemes.push(None);
         node
     }
 
@@ -48,6 +51,10 @@ impl NodeArena {
 
     pub fn types(&self) -> &[Option<Type>] {
         &self.types
+    }
+
+    pub fn schemes(&self) -> &[Option<TypeScheme>] {
+        &self.schemes
     }
 
     pub fn kind(&self, node: Node) -> &NodeKind {
@@ -74,11 +81,23 @@ impl NodeArena {
         self.types[node.0].as_mut()
     }
 
+    pub fn scheme(&self, node: Node) -> Option<&TypeScheme> {
+        self.schemes[node.0].as_ref()
+    }
+
+    pub fn scheme_mut(&mut self, node: Node) -> Option<&mut TypeScheme> {
+        self.schemes[node.0].as_mut()
+    }
+
     pub fn set_span(&mut self, node: Node, span: Span) {
         self.spans[node.0] = span;
     }
 
     pub fn set_ty(&mut self, node: Node, ty: Type) {
         self.types[node.0] = Some(ty);
+    }
+
+    pub fn set_scheme(&mut self, node: Node, scheme: TypeScheme) {
+        self.schemes[node.0] = Some(scheme);
     }
 }
