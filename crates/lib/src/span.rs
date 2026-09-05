@@ -1,4 +1,4 @@
-use std::fmt::Debug;
+use std::fmt::{self, Debug, Display};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Position {
@@ -11,6 +11,12 @@ impl Position {
 
     pub fn new(line: usize, column: usize) -> Self {
         Self { line, column }
+    }
+}
+
+impl Display for Position {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> fmt::Result {
+        write!(f, "{}:{}", self.line, self.column)
     }
 }
 
