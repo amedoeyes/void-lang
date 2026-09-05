@@ -1,15 +1,13 @@
-use std::fmt::{Display, Formatter};
+use std::fmt::{self, Display, Formatter};
 
 use fxhash::{FxHashMap, FxHashSet};
+use itertools::Itertools;
 
-use crate::{
-    ast::{
-        arena::NodeArena,
-        expr::Expr,
-        node::{Node, NodeKind},
-        pattern::Pattern,
-    },
-    type_system::Type,
+use crate::ast::{
+    arena::NodeArena,
+    expr::Expr,
+    node::{Node, NodeKind},
+    pattern::Pattern,
 };
 
 #[derive(Debug, Clone)]
@@ -24,48 +22,64 @@ pub enum Instruction {
     MkAp,
     Pack(usize, usize),
     Unpack(usize),
-    Case(FxHashMap<usize, Vec<Instruction>>),
+    Case(FxHashMap<usize, Vec<Instruction>>, Option<Vec<Instruction>>),
     Eval,
     Unwind,
 }
 
 impl Display for Instruction {
     fn fmt(&self, f: &mut Formatter) -> std::fmt::Result {
-        match self {
-            Instruction::PushInt(i) => write!(f, "PUSHINT {i}"),
-            Instruction::Alloc => write!(f, "ALLOC"),
-            Instruction::Push(n) => write!(f, "PUSH {n}"),
-            Instruction::PushGlobal(name, arity) => write!(f, "PUSHGLOBAL {name}, {arity}"),
-            Instruction::Pop(n) => write!(f, "POP {n}"),
-            Instruction::Update(n) => write!(f, "UPDATE {n}"),
-            Instruction::Slide(n) => write!(f, "SLIDE {n}"),
-            Instruction::MkAp => write!(f, "MKAP"),
-            Instruction::Pack(t, a) => write!(f, "PACK {t} {a}"),
-            Instruction::Unpack(n) => write!(f, "UNPACK {n}"),
-            Instruction::Case(branches) => {
-                write!(
-                    f,
-                    "Case {{ {} }}",
-                    branches
-                        .iter()
-                        .map(|(t, insts)| {
-                            format!(
-                                "{} => {{ {} }}",
-                                t,
-                                insts
-                                    .iter()
-                                    .map(|i| format!("{i}"))
-                                    .collect::<Vec<_>>()
-                                    .join(", ")
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            }
-            Instruction::Eval => write!(f, "EVAL"),
-            Instruction::Unwind => write!(f, "UNWIND"),
+        fn write_indent(f: &mut Formatter, indent: usize) -> fmt::Result {
+            Ok(for _ in 0..indent {
+                write!(f, "    ")?;
+            })
         }
+
+        fn fmt(inst: &Instruction, f: &mut Formatter, depth: usize) -> fmt::Result {
+            write_indent(f, depth)?;
+            match inst {
+                Instruction::PushInt(i) => write!(f, "PUSHINT {i}"),
+                Instruction::Alloc => write!(f, "ALLOC"),
+                Instruction::Push(n) => write!(f, "PUSH {n}"),
+                Instruction::PushGlobal(name, arity) => write!(f, "PUSHGLOBAL {name}, {arity}"),
+                Instruction::Pop(n) => write!(f, "POP {n}"),
+                Instruction::Update(n) => write!(f, "UPDATE {n}"),
+                Instruction::Slide(n) => write!(f, "SLIDE {n}"),
+                Instruction::MkAp => write!(f, "MKAP"),
+                Instruction::Pack(t, a) => write!(f, "PACK {t} {a}"),
+                Instruction::Unpack(n) => write!(f, "UNPACK {n}"),
+                Instruction::Case(arms, default) => {
+                    writeln!(f, "CASE {{")?;
+                    for (pattern, body) in arms {
+                        write_indent(f, depth + 1)?;
+                        writeln!(f, "{pattern} => {{")?;
+                        for inst in body {
+                            fmt(inst, f, depth + 2)?;
+                            writeln!(f)?;
+                        }
+                        write_indent(f, depth + 1)?;
+                        writeln!(f, "}}")?;
+                    }
+                    if let Some(default) = default {
+                        write_indent(f, depth + 1)?;
+                        writeln!(f, "_ => {{")?;
+                        for inst in default {
+                            fmt(inst, f, depth + 2)?;
+                            writeln!(f)?;
+                        }
+                        write_indent(f, depth + 1)?;
+                        writeln!(f, "}}")?;
+                    }
+                    write_indent(f, depth)?;
+                    write!(f, "}}")?;
+                    Ok(())
+                }
+                Instruction::Eval => write!(f, "EVAL"),
+                Instruction::Unwind => write!(f, "UNWIND"),
+            }
+        }
+
+        fmt(self, f, 0)
     }
 }
 
@@ -75,13 +89,13 @@ pub struct IRGenerator<'a> {
     pub symbols: FxHashMap<String, Vec<Instruction>>,
     pub symbols_arity: FxHashMap<String, usize>,
     pub symbols_alias: FxHashMap<String, String>,
-    pub type_consts: FxHashMap<String, FxHashMap<String, usize>>,
+    pub type_ctors: FxHashMap<String, FxHashMap<String, (usize, usize)>>,
     pub lambda_counter: usize,
 }
 
 impl<'a> IRGenerator<'a> {
     pub fn new(context: &'a NodeArena) -> Self {
-        let type_consts = context
+        let type_ctors = context
             .kinds()
             .iter()
             .filter_map(|n| match n {
@@ -90,7 +104,7 @@ impl<'a> IRGenerator<'a> {
                     constructors
                         .iter()
                         .enumerate()
-                        .map(|(i, (c, _))| (c.clone(), i + 1))
+                        .map(|(i, (c, a))| (c.clone(), (i, a.len())))
                         .collect::<FxHashMap<_, _>>(),
                 )),
                 _ => None,
@@ -102,7 +116,7 @@ impl<'a> IRGenerator<'a> {
             symbols: FxHashMap::default(),
             symbols_arity: FxHashMap::default(),
             symbols_alias: FxHashMap::default(),
-            type_consts,
+            type_ctors,
             lambda_counter: 0,
         }
     }
@@ -280,92 +294,18 @@ impl<'a> IRGenerator<'a> {
                     );
                     out.push(Instruction::MkAp);
                 }
-                Expr::Match(scrutinee, branches) => {
-                    let consts = match self.context.ty(*scrutinee) {
-                        Some(Type::Adt(name, _)) => self.type_consts.get(name).unwrap().clone(),
-                        _ => todo!(),
-                    };
-                    let mut consts_used = FxHashSet::default();
-                    self.generate_expr(*scrutinee, offsets, out);
-                    out.push(Instruction::Eval);
-                    let mut compiled_branches = FxHashMap::default();
-                    for (pattern, body) in branches {
-                        match self
-                            .context
-                            .kind(*pattern)
-                            .as_pattern()
-                            .expect("node should be pattern")
-                        {
-                            Pattern::Wildcard => {
-                                for cons in consts
-                                    .keys()
-                                    .collect::<FxHashSet<_>>()
-                                    .difference(&consts_used)
-                                {
-                                    let mut insts = Vec::new();
-                                    self.generate_expr(
-                                        *body,
-                                        &offsets.iter().map(|(k, v)| (k.clone(), v + 1)).collect(),
-                                        &mut insts,
-                                    );
-                                    insts.push(Instruction::Slide(1));
-                                    compiled_branches.insert(*consts.get(*cons).unwrap(), insts);
-                                }
-                            }
-                            Pattern::Identifier(id) => {
-                                for cons in consts
-                                    .keys()
-                                    .collect::<FxHashSet<_>>()
-                                    .difference(&consts_used)
-                                {
-                                    let mut insts = Vec::new();
-                                    self.generate_expr(
-                                        *body,
-                                        &offsets
-                                            .iter()
-                                            .map(|(k, v)| (k.clone(), v + 1))
-                                            .chain(std::iter::once((id.clone(), offsets.len())))
-                                            .collect(),
-                                        &mut insts,
-                                    );
-                                    insts.push(Instruction::Slide(1));
-                                    compiled_branches.insert(*consts.get(*cons).unwrap(), insts);
-                                }
-                            }
-                            Pattern::Constructor(name, subpatterns) => {
-                                consts_used.insert(name);
-                                let mut insts = Vec::new();
-                                if !subpatterns.is_empty() {
-                                    insts.push(Instruction::Unpack(subpatterns.len()));
-                                }
-                                self.generate_expr(
-                                    *body,
-                                    &offsets
-                                        .iter()
-                                        .map(|(k, v)| (k.clone(), v + subpatterns.len().max(1)))
-                                        .chain(subpatterns.iter().enumerate().filter_map(
-                                            |(i, p)| {
-                                                if let Pattern::Identifier(id) = self
-                                                    .context
-                                                    .kind(*p)
-                                                    .as_pattern()
-                                                    .expect("node should be pattern")
-                                                {
-                                                    Some((id.clone(), i))
-                                                } else {
-                                                    None
-                                                }
-                                            },
-                                        ))
-                                        .collect::<FxHashMap<_, _>>(),
-                                    &mut insts,
-                                );
-                                insts.push(Instruction::Slide(subpatterns.len().max(1)));
-                                compiled_branches.insert(*consts.get(name).unwrap(), insts);
-                            }
-                        }
-                    }
-                    out.push(Instruction::Case(compiled_branches));
+                Expr::Match(scrutinee, arms) => {
+                    let insts = self.compile_pattern_matrix(
+                        *scrutinee,
+                        &arms
+                            .iter()
+                            .copied()
+                            .map(|(p, b)| (Vec::from([p]), b))
+                            .collect_vec(),
+                        offsets.clone(),
+                        Vec::new(),
+                    );
+                    out.extend(insts);
                 }
                 Expr::Block(nodes) => {
                     let mut new_offsets = offsets.clone();
@@ -451,6 +391,170 @@ impl<'a> IRGenerator<'a> {
             },
             _ => unreachable!(),
         }
+    }
+
+    fn compile_pattern_matrix(
+        &mut self,
+        scrutinee: Node,
+        matrix: &[(Vec<Node>, Node)],
+        mut offsets: FxHashMap<String, usize>,
+        mut frames: Vec<(usize, usize, usize)>,
+    ) -> Vec<Instruction> {
+        if let Some((row, body)) = matrix.first()
+            && row.is_empty()
+        {
+            let mut out = Vec::new();
+            self.generate_expr(*body, &offsets, &mut out);
+            return out;
+        }
+
+        let mut out = Vec::new();
+
+        if let Some((offset, field, arity)) = frames.pop() {
+            out.push(Instruction::Push(offset - (arity - field)));
+            if field + 1 < arity {
+                frames.push((offset, field + 1, arity))
+            }
+        } else {
+            let mut insts = Vec::new();
+            self.generate_expr(scrutinee, &offsets, &mut insts);
+            out.extend(insts);
+        }
+
+        out.push(Instruction::Eval);
+
+        for offset in offsets.values_mut() {
+            *offset += 1;
+        }
+
+        for (offset, ..) in frames.iter_mut() {
+            *offset += 1
+        }
+
+        let (default, bindings) = self.default_pattern_matrix(matrix);
+
+        for bind in bindings {
+            offsets.insert(bind, 0);
+        }
+
+        let default = (!default.is_empty()).then(|| {
+            self.compile_pattern_matrix(scrutinee, &default, offsets.clone(), frames.clone())
+                .into_iter()
+                .chain(std::iter::once(Instruction::Slide(1)))
+                .collect()
+        });
+
+        let used_ctors = matrix
+            .iter()
+            .map(|(r, _)| self.context.kind(r[0]).as_pattern())
+            .filter_map(|p| p.and_then(|p| p.as_constructor().map(|(n, _)| n)))
+            .collect::<FxHashSet<_>>();
+
+        let arms = self
+            .context
+            .ty(matrix[0].0[0])
+            .expect("pattern must have type")
+            .as_adt()
+            .and_then(|(n, _)| self.type_ctors.get(n))
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|(n, _)| used_ctors.contains(n.as_str()))
+            .collect::<FxHashMap<_, _>>()
+            .into_iter()
+            .map(|(name, (tag, arity))| {
+                let new_matrix = self.specialize_pattern_matrix(matrix, &name, arity);
+                let new_offsets = offsets
+                    .iter()
+                    .map(|(n, o)| (n.clone(), *o + arity))
+                    .collect();
+                let new_frames = frames
+                    .iter()
+                    .copied()
+                    .map(|(o, f, a)| (o + arity, f, a))
+                    .chain(std::iter::once((arity, 0, arity)).filter(|_| arity > 0))
+                    .collect();
+                (
+                    tag,
+                    std::iter::once(Instruction::Unpack(arity))
+                        .chain(self.compile_pattern_matrix(
+                            scrutinee,
+                            &new_matrix,
+                            new_offsets,
+                            new_frames,
+                        ))
+                        .chain(std::iter::once(Instruction::Slide(arity + 1)))
+                        .collect(),
+                )
+            })
+            .collect();
+
+        out.push(Instruction::Case(arms, default));
+        out
+    }
+
+    fn default_pattern_matrix(
+        &self,
+        matrix: &[(Vec<Node>, Node)],
+    ) -> (Vec<(Vec<Node>, Node)>, FxHashSet<String>) {
+        matrix.iter().filter(|(row, _)| !row.is_empty()).fold(
+            (Vec::new(), FxHashSet::default()),
+            |mut acc, (row, body)| match self
+                .context
+                .kind(row[0])
+                .as_pattern()
+                .expect("node should be pattern")
+            {
+                Pattern::Wildcard => {
+                    acc.0.push((row[1..].to_vec(), *body));
+                    acc
+                }
+                Pattern::Identifier(id) => {
+                    acc.0.push((row[1..].to_vec(), *body));
+                    acc.1.insert(id.clone());
+                    acc
+                }
+                _ => acc,
+            },
+        )
+    }
+
+    fn specialize_pattern_matrix(
+        &self,
+        matrix: &[(Vec<Node>, Node)],
+        ctor: &str,
+        arity: usize,
+    ) -> Vec<(Vec<Node>, Node)> {
+        matrix
+            .iter()
+            .filter(|(row, _)| !row.is_empty())
+            .fold(Vec::new(), |mut acc, (row, body)| {
+                match self
+                    .context
+                    .kind(row[0])
+                    .as_pattern()
+                    .expect("node should be pattern")
+                {
+                    Pattern::Constructor(name, patterns) if name == ctor => {
+                        acc.push((
+                            patterns.iter().chain(row[1..].iter()).copied().collect(),
+                            *body,
+                        ));
+                        acc
+                    }
+                    Pattern::Wildcard | Pattern::Identifier(_) => {
+                        acc.push((
+                            std::iter::repeat(row[0])
+                                .take(arity)
+                                .chain(row[1..].iter().copied())
+                                .collect(),
+                            *body,
+                        ));
+                        acc
+                    }
+                    _ => acc,
+                }
+            })
     }
 }
 

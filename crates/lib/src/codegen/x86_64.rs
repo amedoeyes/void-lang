@@ -528,7 +528,6 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
     fn emit_unpack(&mut self, n: usize) -> Result<()> {
         writeln!(self.writer, "	; UNPACK {n}")?;
         writeln!(self.writer, "	mov rsi, [r15]")?;
-        writeln!(self.writer, "	add r15, 8")?;
         writeln!(self.writer, "	add rsi, 24")?;
         writeln!(self.writer, "	mov rcx, {n}")?;
         writeln!(self.writer, "	mov rdx, {}", n * 8)?;
@@ -540,28 +539,61 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
         Ok(())
     }
 
-    fn emit_case(&mut self, branches: &FxHashMap<usize, Vec<Instruction>>) -> Result<()> {
+    fn emit_case(
+        &mut self,
+        arms: &FxHashMap<usize, Vec<Instruction>>,
+        default: Option<&Vec<Instruction>>,
+    ) -> Result<()> {
         let case_label = format!(".case.{}", self.case_counter);
         self.case_counter += 1;
 
         writeln!(self.writer, "	; CASE")?;
         writeln!(self.writer, "	mov rdi, [r15]")?;
         writeln!(self.writer, "	mov rdi, [rdi+8]")?;
-        writeln!(self.writer, "	jmp [{case_label}+rdi*8]")?;
 
-        writeln!(self.writer, "	{case_label}:")?;
-        for (tag, _) in branches {
-            writeln!(self.writer, "	dq {case_label}.{tag}")?;
+        let max = arms.keys().max().copied().unwrap_or_default();
+        let min = arms.keys().min().copied().unwrap_or_default();
+
+        if arms.len() == max - min + 1 {
+            writeln!(self.writer, "	sub rdi, {min}")?;
+            if default.is_some() {
+                writeln!(self.writer, "	cmp rdi, {}", max - min)?;
+                writeln!(self.writer, "	ja {case_label}.default")?;
+            }
+            writeln!(self.writer, "	jmp [{case_label}+rdi*8]")?;
+            writeln!(self.writer, "	{case_label}:")?;
+            for (tag, _) in arms.iter().sorted_by(|(a, _), (b, _)| a.cmp(b)) {
+                writeln!(self.writer, "	dq {case_label}.{tag}")?;
+            }
+            writeln!(self.writer)?;
+        } else {
+            for (tag, _) in arms.iter().sorted_by(|(a, _), (b, _)| a.cmp(b)) {
+                writeln!(self.writer, "	cmp rdi, {tag}")?;
+                writeln!(self.writer, "	je {case_label}.{tag}")?;
+            }
+            if default.is_some() {
+                writeln!(self.writer, "	jmp {case_label}.default")?;
+            } else {
+                writeln!(self.writer, "	jmp {case_label}.end")?;
+            }
         }
-        writeln!(self.writer)?;
 
-        for (tag, insts) in branches {
+        for (tag, insts) in arms.iter().sorted_by(|(a, _), (b, _)| a.cmp(b)) {
             writeln!(self.writer, "	{case_label}.{tag}:")?;
             for inst in insts {
-                self.emit_instruction(inst)?
+                self.emit_instruction(inst)?;
             }
             writeln!(self.writer, "	jmp {case_label}.end")?;
         }
+
+        if let Some(insts) = default {
+            writeln!(self.writer, "	{case_label}.default:")?;
+            for inst in insts {
+                self.emit_instruction(inst)?;
+            }
+            writeln!(self.writer, "	jmp {case_label}.end")?;
+        }
+
         writeln!(self.writer, "	{case_label}.end:")?;
 
         writeln!(self.writer)?;
@@ -611,7 +643,7 @@ impl<'a, 'b, W: Write> Backend<'b> for X86_64<'a, 'b, W> {
             Instruction::MkAp => self.emit_mkap(),
             Instruction::Pack(tag, arity) => self.emit_pack(*tag, *arity),
             Instruction::Unpack(n) => self.emit_unpack(*n),
-            Instruction::Case(branches) => self.emit_case(&branches),
+            Instruction::Case(arms, default) => self.emit_case(&arms, default.as_ref()),
             Instruction::Eval => self.emit_eval(),
             Instruction::Unwind => self.emit_unwind(),
         }

@@ -4,6 +4,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use itertools::Itertools;
+
 use crate::{
     lexer::{self, Token},
     parser,
@@ -69,6 +71,23 @@ impl fmt::Display for Error {
                     source,
                     *span,
                     &format!("unbound identifier '{id}'"),
+                ),
+                type_system::Error::NonExhaustiveMatch(patterns, span) => write_message_and_lines(
+                    f,
+                    filename,
+                    source,
+                    *span,
+                    &format!(
+                        "non exhaustive match, missing '{}'",
+                        patterns.iter().format(", ")
+                    ),
+                ),
+                type_system::Error::RedundantMatchArm(pattern, span) => write_message_and_lines(
+                    f,
+                    filename,
+                    source,
+                    *span,
+                    &format!("redundant match arm '{}'", pattern),
                 ),
             },
         }

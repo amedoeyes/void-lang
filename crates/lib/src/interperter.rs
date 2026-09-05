@@ -149,7 +149,7 @@ impl<'a> GMachine<'a> {
                     self.pc += 1;
                 }
                 Instruction::Unpack(n) => {
-                    let addr = self.stack.pop().unwrap();
+                    let addr = self.stack.last().unwrap();
                     match &self.heap[addr.0] {
                         Node::Constructor(_, args) => {
                             for a in args[..*n].iter().rev() {
@@ -160,14 +160,23 @@ impl<'a> GMachine<'a> {
                     }
                     self.pc += 1;
                 }
-                Instruction::Case(branches) => {
+                Instruction::Case(arms, default) => {
                     let addr = self.stack.last().unwrap();
                     match &self.heap[addr.0] {
                         Node::Constructor(tag, _) => {
-                            self.instructions
-                                .splice(self.pc + 1..self.pc + 1, branches.get(tag).unwrap());
+                            self.instructions.splice(
+                                self.pc + 1..self.pc + 1,
+                                arms.get(tag)
+                                    .or_else(|| default.as_ref())
+                                    .expect("case should match arm or default"),
+                            );
                         }
-                        _ => todo!(),
+                        _ => {
+                            self.instructions.splice(
+                                self.pc + 1..self.pc + 1,
+                                default.as_ref().expect("case should match default"),
+                            );
+                        }
                     }
                     self.pc += 1;
                 }

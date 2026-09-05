@@ -618,10 +618,45 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_pattern(&mut self) -> Result<(Node, Span)> {
+        self.parse_pattern_primary()
+            .and_then(|(p, s)| self.parse_pattern_application((p, s)))
+    }
+
+    fn parse_pattern_application(&mut self, lhs: (Node, Span)) -> Result<(Node, Span)> {
+        let (lhs, mut lhs_span) = lhs;
+        if let Some((_, args)) = self
+            .nodes
+            .kind_mut(lhs)
+            .as_mut_pattern()
+            .expect("node should be pattern")
+            .as_mut_constructor()
+        {
+            let mut end_span = lhs_span;
+            let mut new_args = std::mem::take(args);
+            while let Ok((arg, arg_span)) = self.parse_pattern_primary() {
+                new_args.push(arg);
+                end_span = arg_span;
+            }
+            let (_, args) = self
+                .nodes
+                .kind_mut(lhs)
+                .as_mut_pattern()
+                .expect("node should be pattern")
+                .as_mut_constructor()
+                .expect("pattern should be constructor");
+            *args = new_args;
+            lhs_span = lhs_span.merge(end_span);
+            self.nodes.set_span(lhs, lhs_span);
+        }
+        Ok((lhs, lhs_span))
+    }
+
+    fn parse_pattern_primary(&mut self) -> Result<(Node, Span)> {
         self.peek(0).and_then(|(token, span)| match token {
             Token::Identifier(id) if id == "_" => self.parse_pattern_wildcard(),
             Token::Identifier(..) => self.parse_pattern_identifier(),
             Token::Type(..) => self.parse_pattern_constructor(),
+            Token::Delimiter(Delimiter::ParenLeft) => self.parse_paren_pattern(),
             _ => Err(Error::UnexpectedToken("pattern".to_string(), (token, span))),
         })
     }
@@ -642,17 +677,20 @@ impl<'a> Parser<'a> {
     }
 
     fn parse_pattern_constructor(&mut self) -> Result<(Node, Span)> {
-        let (ty, start_span) = self.expect_type()?;
-        let mut args = Vec::new();
-        let mut end_span = start_span;
-        while let Ok((arg, arg_span)) = self.parse_pattern() {
-            args.push(arg);
-            end_span = arg_span;
-        }
+        let (ty, span) = self.expect_type()?;
         Ok(self.nodes.alloc_with_span(
-            NodeKind::Pattern(Pattern::Constructor(ty, args)),
-            start_span.merge(end_span),
+            NodeKind::Pattern(Pattern::Constructor(ty, Vec::new())),
+            span,
         ))
+    }
+
+    fn parse_paren_pattern(&mut self) -> Result<(Node, Span)> {
+        let (_, start_span) = self.expect_token(Token::Delimiter(Delimiter::ParenLeft))?;
+        let (expr, _) = self.parse_pattern()?;
+        let (_, end_span) = self.expect_token(Token::Delimiter(Delimiter::ParenRight))?;
+        let span = start_span.merge(end_span);
+        self.nodes.set_span(expr, span);
+        Ok((expr, span))
     }
 
     pub fn parse_delimited_list<T>(
