@@ -50,3 +50,55 @@ impl Pattern {
         }
     }
 }
+
+#[derive(Debug, Clone)]
+pub enum PrettyPattern {
+    Wildcard,
+    Identifier(String),
+    Constructor(String, Vec<PrettyPattern>),
+}
+
+impl PrettyPattern {
+    pub fn from_pattern(nodes: &NodeArena, pattern: Node) -> Self {
+        match nodes
+            .kind(pattern)
+            .as_pattern()
+            .cloned()
+            .expect("node should be pattern")
+        {
+            Pattern::Wildcard => PrettyPattern::Wildcard,
+            Pattern::Identifier(id) => Self::Identifier(id),
+            Pattern::Constructor(name, subpats) => PrettyPattern::Constructor(
+                name,
+                subpats
+                    .into_iter()
+                    .map(|p| Self::from_pattern(nodes, p))
+                    .collect(),
+            ),
+        }
+    }
+}
+
+impl Display for PrettyPattern {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match self {
+            PrettyPattern::Wildcard => write!(f, "_"),
+            PrettyPattern::Identifier(id) => write!(f, "{id}"),
+            PrettyPattern::Constructor(name, subpats) => {
+                write!(f, "{name}")?;
+                for pat in subpats.iter() {
+                    write!(f, " ")?;
+                    match pat {
+                        Self::Constructor(_, subpats) if !subpats.is_empty() => {
+                            write!(f, "({pat})")?;
+                        }
+                        _ => {
+                            write!(f, "{pat}")?;
+                        }
+                    }
+                }
+                Ok(())
+            }
+        }
+    }
+}
