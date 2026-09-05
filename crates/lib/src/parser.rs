@@ -466,20 +466,21 @@ impl<'a> Parser<'a> {
         let (true_body, _) = self.parse_expr(0)?;
         self.expect_token(Token::Keyword(Keyword::Else))?;
         let (false_body, end_span) = self.parse_expr(0)?;
-        let false_pat = self.nodes.alloc(NodeKind::Pattern(Pattern::Constructor(
-            "False".into(),
-            Vec::new(),
-        )));
-        let true_pat = self.nodes.alloc(NodeKind::Pattern(Pattern::Constructor(
-            "True".into(),
-            Vec::new(),
-        )));
+        let span = start_span.merge(end_span);
+        let (false_pat, _) = self.nodes.alloc_with_span(
+            NodeKind::Pattern(Pattern::Constructor("False".into(), Vec::new())),
+            span,
+        );
+        let (true_pat, _) = self.nodes.alloc_with_span(
+            NodeKind::Pattern(Pattern::Constructor("True".into(), Vec::new())),
+            span,
+        );
         Ok(self.nodes.alloc_with_span(
             NodeKind::Expr(Expr::Match(
                 condition,
                 Vec::from([(false_pat, false_body), (true_pat, true_body)]),
             )),
-            start_span.merge(end_span),
+            span,
         ))
     }
 
@@ -573,7 +574,7 @@ impl<'a> Parser<'a> {
             let (l_bp, r_bp) = self
                 .operators
                 .get(&op)
-                .cloned()
+                .copied()
                 .unwrap_or_default()
                 .binding_power();
             if l_bp < min_bp {
