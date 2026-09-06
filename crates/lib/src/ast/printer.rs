@@ -229,21 +229,25 @@ impl<'a> Printer<'a> {
         match pattern {
             Pattern::Wildcard => write!(w, "_"),
             Pattern::Identifier(id) => write!(w, "{id}"),
-            Pattern::Constructor(name, patterns) => {
+            Pattern::Constructor(name, subpats) => {
                 write!(w, "{name}")?;
-                if !patterns.is_empty() {
+                if !subpats.is_empty() {
                     write!(
                         w,
                         " {}",
-                        patterns
-                            .iter()
-                            .copied()
-                            .map(|p| self.to_string(p))
-                            .join(" ")
+                        subpats.iter().copied().map(|p| self.to_string(p)).join(" ")
                     )?;
                 }
                 Ok(())
             }
+            Pattern::Or(alts) => write!(
+                w,
+                "{}",
+                alts.iter()
+                    .copied()
+                    .map(|p| self.to_string(p))
+                    .format(" | ")
+            ),
         }
     }
 
@@ -481,7 +485,7 @@ impl<'a> Dumper<'a> {
             }
             Pattern::Constructor(name, args) => {
                 write_indent(w, indent)?;
-                writeln!(w, "Constructor:")?;
+                writeln!(w, "constructor:")?;
                 write_indent(w, indent + 1)?;
                 writeln!(w, "name: {name:?}")?;
                 if !args.is_empty() {
@@ -490,6 +494,14 @@ impl<'a> Dumper<'a> {
                     for arg in args {
                         self.fmt(w, *arg, indent + 2)?;
                     }
+                }
+                Ok(())
+            }
+            Pattern::Or(alts) => {
+                write_indent(w, indent)?;
+                writeln!(w, "or:")?;
+                for alt in alts {
+                    self.fmt(w, *alt, indent + 1)?;
                 }
                 Ok(())
             }

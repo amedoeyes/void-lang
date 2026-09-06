@@ -620,6 +620,7 @@ impl<'a> Parser<'a> {
     fn parse_pattern(&mut self) -> Result<(Node, Span)> {
         self.parse_pattern_primary()
             .and_then(|(p, s)| self.parse_pattern_application((p, s)))
+            .and_then(|(p, s)| self.parse_pattern_or((p, s)))
     }
 
     fn parse_pattern_application(&mut self, lhs: (Node, Span)) -> Result<(Node, Span)> {
@@ -647,6 +648,23 @@ impl<'a> Parser<'a> {
             *args = new_args;
             lhs_span = lhs_span.merge(end_span);
             self.nodes.set_span(lhs, lhs_span);
+        }
+        Ok((lhs, lhs_span))
+    }
+
+    fn parse_pattern_or(&mut self, lhs: (Node, Span)) -> Result<(Node, Span)> {
+        let (mut lhs, mut lhs_span) = lhs;
+        if matches!(self.peek(0)?.0, Token::Symbol(s) if s == "|") {
+            let mut alts = Vec::from([lhs]);
+            while matches!(self.peek(0)?.0, Token::Symbol(s) if s == "|") {
+                self.advance()?;
+                let (alt, alt_span) = self.parse_pattern_primary()?;
+                alts.push(alt);
+                lhs_span = lhs_span.merge(alt_span);
+            }
+            (lhs, lhs_span) = self
+                .nodes
+                .alloc_with_span(NodeKind::Pattern(Pattern::Or(alts)), lhs_span);
         }
         Ok((lhs, lhs_span))
     }

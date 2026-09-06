@@ -248,9 +248,14 @@ impl<'a> IRGenerator<'a> {
         {
             Pattern::Wildcard => {}
             Pattern::Identifier(id) => vars.push(id.clone()),
-            Pattern::Constructor(_, patterns) => {
-                for p in patterns {
-                    self.collect_pattern_bound_vars(*p, vars);
+            Pattern::Constructor(_, subpats) => {
+                for pat in subpats {
+                    self.collect_pattern_bound_vars(*pat, vars);
+                }
+            }
+            Pattern::Or(alts) => {
+                for alt in alts {
+                    self.collect_pattern_bound_vars(*alt, vars);
                 }
             }
         }
@@ -298,7 +303,7 @@ impl<'a> IRGenerator<'a> {
                     out.push(Instruction::MkAp);
                 }
                 Expr::Match(scrutinee, arms) => {
-                    let insts = self.compile_match_matrix(
+                    let insts = self.generate_match_matrix(
                         *scrutinee,
                         &arms
                             .iter()
@@ -396,7 +401,7 @@ impl<'a> IRGenerator<'a> {
         }
     }
 
-    fn compile_match_matrix(
+    fn generate_match_matrix(
         &mut self,
         scrutinee: Node,
         matrix: &[(Vec<Node>, Node)],
@@ -441,7 +446,7 @@ impl<'a> IRGenerator<'a> {
         }
 
         let default = (!default.is_empty()).then(|| {
-            self.compile_match_matrix(scrutinee, &default, offsets.clone(), frames.clone())
+            self.generate_match_matrix(scrutinee, &default, offsets.clone(), frames.clone())
                 .into_iter()
                 .chain(std::iter::once(Instruction::Slide(1)))
                 .collect()
@@ -449,8 +454,13 @@ impl<'a> IRGenerator<'a> {
 
         let used_ctors = matrix
             .iter()
-            .map(|(r, _)| self.nodes.kind(r[0]).as_pattern())
-            .filter_map(|p| p.and_then(|p| p.as_constructor().map(|(n, _)| n)))
+            .flat_map(|(r, _)| {
+                self.nodes
+                    .kind(r[0])
+                    .as_pattern()
+                    .expect("node should be pattern")
+                    .constructors(self.nodes)
+            })
             .collect::<FxHashSet<_>>();
 
         let arms = self
@@ -480,7 +490,7 @@ impl<'a> IRGenerator<'a> {
                 (
                     tag,
                     std::iter::once(Instruction::Unpack(arity))
-                        .chain(self.compile_match_matrix(
+                        .chain(self.generate_match_matrix(
                             scrutinee,
                             &new_matrix,
                             new_offsets,

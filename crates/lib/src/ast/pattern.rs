@@ -1,5 +1,8 @@
 use std::fmt::{self, Display, Formatter};
 
+use fxhash::FxHashSet;
+use itertools::Itertools;
+
 use crate::ast::{arena::NodeArena, node::Node};
 
 #[derive(Debug, Clone)]
@@ -7,6 +10,7 @@ pub enum Pattern {
     Wildcard,
     Identifier(String),
     Constructor(String, Vec<Node>),
+    Or(Vec<Node>),
 }
 
 impl Pattern {
@@ -49,6 +53,28 @@ impl Pattern {
             _ => None,
         }
     }
+
+    pub fn constructors(&self, nodes: &NodeArena) -> FxHashSet<String> {
+        let mut res = FxHashSet::default();
+        match self {
+            Pattern::Constructor(name, _) => {
+                res.insert(name.clone());
+            }
+            Pattern::Or(alts) => {
+                for alt in alts {
+                    res.extend(
+                        nodes
+                            .kind(*alt)
+                            .as_pattern()
+                            .expect("node should be pattern")
+                            .constructors(nodes),
+                    );
+                }
+            }
+            _ => {}
+        }
+        res
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -56,6 +82,7 @@ pub enum PrettyPattern {
     Wildcard,
     Identifier(String),
     Constructor(String, Vec<PrettyPattern>),
+    Or(Vec<PrettyPattern>),
 }
 
 impl PrettyPattern {
@@ -72,6 +99,11 @@ impl PrettyPattern {
                 name,
                 subpats
                     .into_iter()
+                    .map(|p| Self::from_pattern(nodes, p))
+                    .collect(),
+            ),
+            Pattern::Or(alts) => PrettyPattern::Or(
+                alts.into_iter()
                     .map(|p| Self::from_pattern(nodes, p))
                     .collect(),
             ),
@@ -99,6 +131,7 @@ impl Display for PrettyPattern {
                 }
                 Ok(())
             }
+            PrettyPattern::Or(alts) => write!(f, "{}", alts.iter().format(" | ")),
         }
     }
 }

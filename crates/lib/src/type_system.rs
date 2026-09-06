@@ -11,7 +11,8 @@ use crate::{
         arena::NodeArena,
         expr::Expr,
         node::{Node, NodeKind},
-        pattern::Pattern,
+        pattern::{Pattern, PrettyPattern},
+        printer::Printer,
         type_expr::TypeExpr,
     },
     matching,
@@ -586,15 +587,13 @@ impl<'a> TypeSystem<'a> {
         });
 
         for (node, _, arms) in matches {
-            let missing = matching::missing(
-                self.nodes,
-                &self.type_ctors,
-                &arms
-                    .iter()
-                    .copied()
-                    .map(|(p, b)| (Vec::from([p]), b))
-                    .collect_vec(),
-            );
+            let matrix = arms
+                .iter()
+                .copied()
+                .map(|(p, b)| (Vec::from([p]), b))
+                .collect_vec();
+            let width = matrix.first().map(|(r, _)| r.len()).unwrap_or(0);
+            let missing = matching::missing(self.nodes, &self.type_ctors, &matrix, width);
 
             if !missing.is_empty() {
                 return Err(Error::NonExhaustiveMatch(
@@ -738,7 +737,7 @@ impl<'a> TypeSystem<'a> {
                 self.type_scopes.insert(id.clone(), ty);
                 Ok(())
             }
-            Pattern::Constructor(name, subpatterns) => {
+            Pattern::Constructor(name, subpats) => {
                 let cons_ty = self
                     .scheme_scopes
                     .get(&name)
@@ -754,17 +753,25 @@ impl<'a> TypeSystem<'a> {
                     result_ty = *body;
                 }
                 self.nodes.set_ty(pattern, result_ty.clone());
-                if arg_tys.len() != subpatterns.len() {
+                if arg_tys.len() != subpats.len() {
                     todo!(
                         "error: pattern constructor {} takes {} arguments but got {} at {}",
                         name,
                         arg_tys.len(),
-                        subpatterns.len(),
+                        subpats.len(),
                         self.nodes.span(pattern).start
                     );
                 }
-                for (p, a) in subpatterns.iter().zip(arg_tys) {
+                for (p, a) in subpats.iter().zip(arg_tys) {
                     self.infer_pattern(*p, &a)?;
+                }
+                Ok(())
+            }
+            Pattern::Or(alts) => {
+                let ty = self.fresh_var();
+                self.nodes.set_ty(pattern, ty.clone());
+                for alt in alts {
+                    self.infer_pattern(alt, expected_ty)?;
                 }
                 Ok(())
             }
