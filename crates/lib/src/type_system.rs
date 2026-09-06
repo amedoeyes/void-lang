@@ -11,9 +11,10 @@ use crate::{
         arena::NodeArena,
         expr::Expr,
         node::{Node, NodeKind},
-        pattern::{Pattern, PrettyPattern},
+        pattern::Pattern,
         type_expr::TypeExpr,
     },
+    matching,
     scoped::ScopedMap,
     span::Span,
 };
@@ -242,7 +243,7 @@ struct TypeSystem<'a> {
     scheme_scopes: ScopedMap<String, TypeScheme>,
     type_scopes: ScopedMap<String, Type>,
     constraints: VecDeque<Constraint>,
-    type_ctors: FxHashMap<String, FxHashMap<String, usize>>,
+    type_ctors: FxHashMap<String, FxHashMap<String, (usize, usize)>>,
 }
 
 impl<'a> TypeSystem<'a> {
@@ -491,14 +492,14 @@ impl<'a> TypeSystem<'a> {
 
                     let adt_ty = Type::Adt(ty_name.clone(), param_tys);
 
-                    for (name, args) in constructors {
+                    for (i, (name, args)) in constructors.into_iter().enumerate() {
                         let mut cons_ty = adt_ty.clone();
                         let arg_tys = args
                             .iter()
                             .map(|a| self.eval_type_expr(&mut scopes, *a))
                             .rev()
                             .collect::<Result<Vec<_>>>()?;
-                        ctors.insert(name.clone(), arg_tys.len());
+                        ctors.insert(name.clone(), (i, arg_tys.len()));
                         for arg_ty in arg_tys {
                             cons_ty = Type::Lambda(Box::new(arg_ty), Box::new(cons_ty));
                         }
@@ -578,23 +579,26 @@ impl<'a> TypeSystem<'a> {
         }
 
         let matches = self.nodes.nodes().into_iter().filter_map(|n| {
-            self.nodes.kind(n).as_expr().and_then(|e| {
-                e.as_match()
-                    .map(|(&s, a)| (n, s, a.iter().map(|&(p, _)| p).collect_vec()))
-            })
+            self.nodes
+                .kind(n)
+                .as_expr()
+                .and_then(|e| e.as_match().map(|(&s, a)| (n, s, a)))
         });
 
-        for (node, _, patterns) in matches {
-            let missing_patterns = self.missing_patterns(
-                &patterns
+        for (node, _, arms) in matches {
+            let missing = matching::missing(
+                self.nodes,
+                &self.type_ctors,
+                &arms
                     .iter()
-                    .map(|&n| Vec::from([n.clone()]))
+                    .copied()
+                    .map(|(p, b)| (Vec::from([p]), b))
                     .collect_vec(),
             );
 
-            if !missing_patterns.is_empty() {
+            if !missing.is_empty() {
                 return Err(Error::NonExhaustiveMatch(
-                    missing_patterns
+                    missing
                         .iter()
                         .map(|r| r.iter().format(", ").to_string())
                         .collect(),
@@ -602,10 +606,10 @@ impl<'a> TypeSystem<'a> {
                 ));
             }
 
-            let redundant_patterns = self.redundant_patterns(&patterns);
+            let redundant = matching::redundant(self.nodes, &self.type_ctors, arms);
 
-            if !redundant_patterns.is_empty() {
-                let (pattern, span) = &redundant_patterns[0];
+            if !redundant.is_empty() {
+                let (pattern, span) = &redundant[0];
                 return Err(Error::RedundantMatchArm(pattern.to_string(), *span));
             }
         }
@@ -765,177 +769,6 @@ impl<'a> TypeSystem<'a> {
                 Ok(())
             }
         }
-    }
-
-    fn missing_patterns(&self, matrix: &[Vec<Node>]) -> Vec<Vec<PrettyPattern>> {
-        if matrix.is_empty() {
-            Vec::from([Vec::from([PrettyPattern::Wildcard])])
-        } else if matrix.iter().any(|r| r.is_empty()) {
-            Vec::new()
-        } else {
-            if let default = self.default_pattern_matrix(matrix)
-                && !default.is_empty()
-            {
-                self.missing_patterns(&default)
-                    .into_iter()
-                    .map(|row| [PrettyPattern::Wildcard].into_iter().chain(row).collect())
-                    .collect()
-            } else {
-                self.nodes
-                    .ty(matrix[0][0])
-                    .expect("pattern must have type")
-                    .as_adt()
-                    .and_then(|(n, _)| self.type_ctors.get(n))
-                    .cloned()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .flat_map(|(name, arity)| {
-                        let new_matrix = self.specialize_pattern_matrix(matrix, &name, arity);
-                        self.missing_patterns(&new_matrix)
-                            .into_iter()
-                            .map(|mut row| {
-                                let tail = row.split_off(arity.min(row.len()));
-                                let padding = std::iter::repeat(PrettyPattern::Wildcard)
-                                    .take(arity.saturating_sub(row.len()));
-                                let ctor = PrettyPattern::Constructor(
-                                    name.clone(),
-                                    row.into_iter().chain(padding).collect(),
-                                );
-                                std::iter::once(ctor).chain(tail).collect()
-                            })
-                            .collect_vec()
-                    })
-                    .collect()
-            }
-        }
-    }
-
-    fn redundant_patterns(&self, patterns: &[Node]) -> Vec<(PrettyPattern, Span)> {
-        patterns
-            .iter()
-            .copied()
-            .fold(
-                (Vec::new(), Vec::new()),
-                |(mut redundant, mut prev_rows), pattern| {
-                    let is_useful = self.is_pattern_useful(
-                        &prev_rows,
-                        &[self
-                            .nodes
-                            .kind(pattern)
-                            .as_pattern()
-                            .cloned()
-                            .expect("node should be pattern")],
-                    );
-                    if !is_useful {
-                        redundant.push((
-                            PrettyPattern::from_pattern(self.nodes, pattern),
-                            self.nodes.span(pattern),
-                        ));
-                    }
-                    prev_rows.push(Vec::from([pattern]));
-                    (redundant, prev_rows)
-                },
-            )
-            .0
-    }
-
-    fn is_pattern_useful(&self, matrix: &[Vec<Node>], query: &[Pattern]) -> bool {
-        if matrix.is_empty() {
-            true
-        } else if matrix.iter().any(|r| r.is_empty()) || query.is_empty() {
-            false
-        } else {
-            let ctors = self
-                .nodes
-                .ty(matrix[0][0])
-                .expect("pattern must have type")
-                .as_adt()
-                .and_then(|(n, _)| self.type_ctors.get(n))
-                .cloned()
-                .unwrap_or_default();
-            match &query[0] {
-                Pattern::Wildcard | Pattern::Identifier(..) => {
-                    let default = self.default_pattern_matrix(matrix);
-                    if !default.is_empty() {
-                        self.is_pattern_useful(&default, &query[1..])
-                    } else {
-                        let mut res = ctors.is_empty();
-                        for (name, arity) in ctors {
-                            let new_matrix = self.specialize_pattern_matrix(matrix, &name, arity);
-                            let new_query = std::iter::repeat(Pattern::Wildcard)
-                                .take(arity)
-                                .chain(query[1..].iter().cloned())
-                                .collect_vec();
-                            if self.is_pattern_useful(&new_matrix, &new_query) {
-                                res = true;
-                                break;
-                            }
-                        }
-                        res
-                    }
-                }
-                Pattern::Constructor(name, _) => {
-                    let arity = ctors.get(name).copied().unwrap_or_default();
-                    let new_matrix = self.specialize_pattern_matrix(matrix, &name, arity);
-                    let new_query = std::iter::repeat(Pattern::Wildcard)
-                        .take(arity)
-                        .chain(query[1..].iter().cloned())
-                        .collect_vec();
-                    self.is_pattern_useful(&new_matrix, &new_query)
-                }
-            }
-        }
-    }
-
-    fn default_pattern_matrix(&self, matrix: &[Vec<Node>]) -> Vec<Vec<Node>> {
-        let mut res = Vec::new();
-        for row in matrix {
-            if !row.is_empty() {
-                match self
-                    .nodes
-                    .kind(row[0])
-                    .as_pattern()
-                    .expect("node should be pattern")
-                {
-                    Pattern::Wildcard | Pattern::Identifier(_) => res.push(row[1..].to_vec()),
-                    _ => {}
-                }
-            }
-        }
-        res
-    }
-
-    fn specialize_pattern_matrix(
-        &self,
-        matrix: &[Vec<Node>],
-        ctor: &str,
-        arity: usize,
-    ) -> Vec<Vec<Node>> {
-        let mut res = Vec::new();
-        for row in matrix {
-            if !row.is_empty() {
-                match self
-                    .nodes
-                    .kind(row[0])
-                    .as_pattern()
-                    .expect("node should be pattern")
-                {
-                    Pattern::Constructor(name, patterns) if name == ctor => {
-                        res.push(patterns.iter().chain(row[1..].iter()).copied().collect());
-                    }
-                    Pattern::Wildcard | Pattern::Identifier(_) => {
-                        res.push(
-                            std::iter::repeat(row[0])
-                                .take(arity)
-                                .chain(row[1..].iter().copied())
-                                .collect(),
-                        );
-                    }
-                    _ => {}
-                }
-            }
-        }
-        res
     }
 }
 

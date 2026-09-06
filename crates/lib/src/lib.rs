@@ -4,6 +4,7 @@ pub mod error;
 pub mod interperter;
 pub mod ir;
 pub mod lexer;
+pub mod matching;
 pub mod parser;
 pub mod scoped;
 pub mod span;

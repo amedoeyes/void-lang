@@ -3,11 +3,14 @@ use std::fmt::{self, Display, Formatter};
 use fxhash::{FxHashMap, FxHashSet};
 use itertools::Itertools;
 
-use crate::ast::{
-    arena::NodeArena,
-    expr::Expr,
-    node::{Node, NodeKind},
-    pattern::Pattern,
+use crate::{
+    ast::{
+        arena::NodeArena,
+        expr::Expr,
+        node::{Node, NodeKind},
+        pattern::Pattern,
+    },
+    matching,
 };
 
 #[derive(Debug, Clone)]
@@ -85,7 +88,7 @@ impl Display for Instruction {
 
 #[derive(Debug)]
 pub struct IRGenerator<'a> {
-    pub context: &'a NodeArena,
+    pub nodes: &'a NodeArena,
     pub symbols: FxHashMap<String, Vec<Instruction>>,
     pub symbols_arity: FxHashMap<String, usize>,
     pub symbols_alias: FxHashMap<String, String>,
@@ -94,8 +97,8 @@ pub struct IRGenerator<'a> {
 }
 
 impl<'a> IRGenerator<'a> {
-    pub fn new(context: &'a NodeArena) -> Self {
-        let type_ctors = context
+    pub fn new(nodes: &'a NodeArena) -> Self {
+        let type_ctors = nodes
             .kinds()
             .iter()
             .filter_map(|n| match n {
@@ -112,7 +115,7 @@ impl<'a> IRGenerator<'a> {
             .collect::<FxHashMap<_, _>>();
 
         Self {
-            context,
+            nodes,
             symbols: FxHashMap::default(),
             symbols_arity: FxHashMap::default(),
             symbols_alias: FxHashMap::default(),
@@ -123,7 +126,7 @@ impl<'a> IRGenerator<'a> {
 
     pub fn generate(&mut self) {
         let modules = self
-            .context
+            .nodes
             .kinds()
             .iter()
             .filter_map(|n| match n {
@@ -134,21 +137,21 @@ impl<'a> IRGenerator<'a> {
 
         for module in &modules {
             for node in module {
-                match self.context.kind(*node) {
+                match self.nodes.kind(*node) {
                     NodeKind::Type(_, _, constructors) => {
                         for (cons, args) in constructors {
                             self.symbols_arity.insert(cons.clone(), args.len());
                         }
                     }
                     NodeKind::Primitive(name, _, link_name) => {
-                        if let Some(ty) = self.context.ty(*node) {
+                        if let Some(ty) = self.nodes.ty(*node) {
                             self.symbols_alias.insert(name.clone(), link_name.clone());
                             self.symbols_arity.insert(name.clone(), ty.arity());
                             self.symbols_arity.insert(link_name.clone(), ty.arity());
                         }
                     }
                     NodeKind::Bind(name, ..) => {
-                        if let Some(ty) = self.context.ty(*node) {
+                        if let Some(ty) = self.nodes.ty(*node) {
                             self.symbols_arity.insert(name.clone(), ty.arity());
                         }
                     }
@@ -159,7 +162,7 @@ impl<'a> IRGenerator<'a> {
 
         for module in modules {
             for node in module {
-                match self.context.kind(node) {
+                match self.nodes.kind(node) {
                     NodeKind::Type(_, _, constructors) => {
                         for (i, (cons, args)) in constructors.iter().enumerate() {
                             let mut insts = Vec::new();
@@ -171,15 +174,15 @@ impl<'a> IRGenerator<'a> {
                         }
                     }
                     NodeKind::Bind(name, .., expr) => {
-                        if let Some(ty) = self.context.ty(*expr) {
+                        if let Some(ty) = self.nodes.ty(*expr) {
                             let arity = ty.arity();
                             let mut insts = Vec::new();
-                            match self.context.kind(*expr) {
+                            match self.nodes.kind(*expr) {
                                 NodeKind::Expr(Expr::Lambda(..)) => {
                                     let mut offsets = FxHashMap::default();
                                     let mut node = *expr;
                                     while let NodeKind::Expr(Expr::Lambda(l, r)) =
-                                        self.context.kind(node)
+                                        self.nodes.kind(node)
                                     {
                                         offsets.insert(l.clone(), offsets.len());
                                         node = *r;
@@ -213,7 +216,7 @@ impl<'a> IRGenerator<'a> {
     }
 
     fn collect_free_vars(&self, node: Node, bound: &mut Vec<String>, out: &mut Vec<Node>) {
-        match self.context.kind(node) {
+        match self.nodes.kind(node) {
             NodeKind::Expr(Expr::Identifier(id)) => {
                 if !bound.contains(id) {
                     out.push(node);
@@ -238,7 +241,7 @@ impl<'a> IRGenerator<'a> {
 
     pub fn collect_pattern_bound_vars(&self, pattern: Node, vars: &mut Vec<String>) {
         match self
-            .context
+            .nodes
             .kind(pattern)
             .as_pattern()
             .expect("node should be pattern")
@@ -265,7 +268,7 @@ impl<'a> IRGenerator<'a> {
         offsets: &FxHashMap<String, usize>,
         out: &mut Vec<Instruction>,
     ) {
-        match self.context.kind(node) {
+        match self.nodes.kind(node) {
             NodeKind::Expr(expr) => match expr {
                 Expr::Unit => out.push(Instruction::Pack(0, 0)),
                 Expr::Integer(i) => out.push(Instruction::PushInt(*i)),
@@ -295,7 +298,7 @@ impl<'a> IRGenerator<'a> {
                     out.push(Instruction::MkAp);
                 }
                 Expr::Match(scrutinee, arms) => {
-                    let insts = self.compile_pattern_matrix(
+                    let insts = self.compile_match_matrix(
                         *scrutinee,
                         &arms
                             .iter()
@@ -311,9 +314,9 @@ impl<'a> IRGenerator<'a> {
                     let mut new_offsets = offsets.clone();
                     let mut binds = 0;
                     for n in nodes {
-                        match self.context.kind(*n) {
+                        match self.nodes.kind(*n) {
                             NodeKind::Bind(name, .., expr) => {
-                                match self.context.kind(*expr) {
+                                match self.nodes.kind(*expr) {
                                     NodeKind::Expr(Expr::Lambda(..)) => {
                                         for (_, o) in &mut new_offsets {
                                             *o += 1;
@@ -345,7 +348,7 @@ impl<'a> IRGenerator<'a> {
                     let mut lambda_arity = 0;
                     let mut lambda_insts = Vec::new();
                     let mut lambda_body = node;
-                    while let NodeKind::Expr(Expr::Lambda(l, r)) = self.context.kind(lambda_body) {
+                    while let NodeKind::Expr(Expr::Lambda(l, r)) = self.nodes.kind(lambda_body) {
                         lambda_offsets.insert(l.clone(), lambda_offsets.len());
                         lambda_body = *r;
                         lambda_arity += 1;
@@ -361,7 +364,7 @@ impl<'a> IRGenerator<'a> {
                         for (_, o) in &mut lambda_offsets {
                             *o += 1;
                         }
-                        match self.context.kind(*v) {
+                        match self.nodes.kind(*v) {
                             NodeKind::Expr(Expr::Identifier(id)) => {
                                 lambda_offsets.insert(id.clone(), 0);
                             }
@@ -393,7 +396,7 @@ impl<'a> IRGenerator<'a> {
         }
     }
 
-    fn compile_pattern_matrix(
+    fn compile_match_matrix(
         &mut self,
         scrutinee: Node,
         matrix: &[(Vec<Node>, Node)],
@@ -431,14 +434,14 @@ impl<'a> IRGenerator<'a> {
             *offset += 1
         }
 
-        let (default, bindings) = self.default_pattern_matrix(matrix);
+        let (default, bindings) = matching::default(self.nodes, matrix);
 
         for bind in bindings {
             offsets.insert(bind, 0);
         }
 
         let default = (!default.is_empty()).then(|| {
-            self.compile_pattern_matrix(scrutinee, &default, offsets.clone(), frames.clone())
+            self.compile_match_matrix(scrutinee, &default, offsets.clone(), frames.clone())
                 .into_iter()
                 .chain(std::iter::once(Instruction::Slide(1)))
                 .collect()
@@ -446,12 +449,12 @@ impl<'a> IRGenerator<'a> {
 
         let used_ctors = matrix
             .iter()
-            .map(|(r, _)| self.context.kind(r[0]).as_pattern())
+            .map(|(r, _)| self.nodes.kind(r[0]).as_pattern())
             .filter_map(|p| p.and_then(|p| p.as_constructor().map(|(n, _)| n)))
             .collect::<FxHashSet<_>>();
 
         let arms = self
-            .context
+            .nodes
             .ty(matrix[0].0[0])
             .expect("pattern must have type")
             .as_adt()
@@ -463,7 +466,7 @@ impl<'a> IRGenerator<'a> {
             .collect::<FxHashMap<_, _>>()
             .into_iter()
             .map(|(name, (tag, arity))| {
-                let new_matrix = self.specialize_pattern_matrix(matrix, &name, arity);
+                let new_matrix = matching::specialize(self.nodes, matrix, &name, arity);
                 let new_offsets = offsets
                     .iter()
                     .map(|(n, o)| (n.clone(), *o + arity))
@@ -477,7 +480,7 @@ impl<'a> IRGenerator<'a> {
                 (
                     tag,
                     std::iter::once(Instruction::Unpack(arity))
-                        .chain(self.compile_pattern_matrix(
+                        .chain(self.compile_match_matrix(
                             scrutinee,
                             &new_matrix,
                             new_offsets,
@@ -491,70 +494,6 @@ impl<'a> IRGenerator<'a> {
 
         out.push(Instruction::Case(arms, default));
         out
-    }
-
-    fn default_pattern_matrix(
-        &self,
-        matrix: &[(Vec<Node>, Node)],
-    ) -> (Vec<(Vec<Node>, Node)>, FxHashSet<String>) {
-        matrix.iter().filter(|(row, _)| !row.is_empty()).fold(
-            (Vec::new(), FxHashSet::default()),
-            |mut acc, (row, body)| match self
-                .context
-                .kind(row[0])
-                .as_pattern()
-                .expect("node should be pattern")
-            {
-                Pattern::Wildcard => {
-                    acc.0.push((row[1..].to_vec(), *body));
-                    acc
-                }
-                Pattern::Identifier(id) => {
-                    acc.0.push((row[1..].to_vec(), *body));
-                    acc.1.insert(id.clone());
-                    acc
-                }
-                _ => acc,
-            },
-        )
-    }
-
-    fn specialize_pattern_matrix(
-        &self,
-        matrix: &[(Vec<Node>, Node)],
-        ctor: &str,
-        arity: usize,
-    ) -> Vec<(Vec<Node>, Node)> {
-        matrix
-            .iter()
-            .filter(|(row, _)| !row.is_empty())
-            .fold(Vec::new(), |mut acc, (row, body)| {
-                match self
-                    .context
-                    .kind(row[0])
-                    .as_pattern()
-                    .expect("node should be pattern")
-                {
-                    Pattern::Constructor(name, patterns) if name == ctor => {
-                        acc.push((
-                            patterns.iter().chain(row[1..].iter()).copied().collect(),
-                            *body,
-                        ));
-                        acc
-                    }
-                    Pattern::Wildcard | Pattern::Identifier(_) => {
-                        acc.push((
-                            std::iter::repeat(row[0])
-                                .take(arity)
-                                .chain(row[1..].iter().copied())
-                                .collect(),
-                            *body,
-                        ));
-                        acc
-                    }
-                    _ => acc,
-                }
-            })
     }
 }
 
