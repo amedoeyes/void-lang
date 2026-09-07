@@ -73,53 +73,50 @@ pub fn redundant(
         .copied()
         .fold(
             (Vec::new(), Vec::new()),
-            |(mut redundant, mut prev_matrix), (pattern, body)| match nodes
-                .kind(pattern)
-                .as_pattern()
-                .expect("node should be pattern")
-            {
-                Pattern::Or(alts) => {
-                    let mut new_matrix = prev_matrix.clone();
-                    for alt in alts {
+            |(mut redundant, mut prev_matrix), (pattern, body)| {
+                match nodes
+                    .kind(pattern)
+                    .as_pattern()
+                    .expect("node should be pattern")
+                {
+                    Pattern::Or(..) => {
+                        let mut new_matrix = prev_matrix.clone();
+                        for pat in expand_or_pattern(nodes, pattern) {
+                            let query = [nodes
+                                .kind(pat)
+                                .as_pattern()
+                                .cloned()
+                                .expect("node should be pattern")];
+                            if !is_useful(nodes, type_ctors, &new_matrix, &query) {
+                                redundant.push((
+                                    PrettyPattern::from_pattern(nodes, pat),
+                                    nodes.span(pat),
+                                ));
+                            }
+                            new_matrix.push((Vec::from([pat]), body));
+                        }
+                    }
+                    _ => {
                         let is_useful = is_useful(
                             nodes,
                             type_ctors,
-                            &new_matrix,
+                            &prev_matrix,
                             &[nodes
-                                .kind(*alt)
+                                .kind(pattern)
                                 .as_pattern()
                                 .cloned()
                                 .expect("node should be pattern")],
                         );
                         if !is_useful {
-                            redundant
-                                .push((PrettyPattern::from_pattern(nodes, *alt), nodes.span(*alt)));
+                            redundant.push((
+                                PrettyPattern::from_pattern(nodes, pattern),
+                                nodes.span(pattern),
+                            ));
                         }
-                        new_matrix.push((Vec::from([(*alt)]), body));
                     }
-                    prev_matrix.push((Vec::from([(pattern)]), body));
-                    (redundant, prev_matrix)
                 }
-                _ => {
-                    let is_useful = is_useful(
-                        nodes,
-                        type_ctors,
-                        &prev_matrix,
-                        &[nodes
-                            .kind(pattern)
-                            .as_pattern()
-                            .cloned()
-                            .expect("node should be pattern")],
-                    );
-                    if !is_useful {
-                        redundant.push((
-                            PrettyPattern::from_pattern(nodes, pattern),
-                            nodes.span(pattern),
-                        ));
-                    }
-                    prev_matrix.push((Vec::from([(pattern)]), body));
-                    (redundant, prev_matrix)
-                }
+                prev_matrix.push((Vec::from([(pattern)]), body));
+                (redundant, prev_matrix)
             },
         )
         .0
@@ -286,4 +283,17 @@ pub fn specialize(
                 }
             }
         })
+}
+
+fn expand_or_pattern(nodes: &NodeArena, pattern: Node) -> Vec<Node> {
+    let mut res = Vec::new();
+    match nodes
+        .kind(pattern)
+        .as_pattern()
+        .expect("node should be pattern")
+    {
+        Pattern::Or(alts) => res.extend(alts.iter().flat_map(|&a| expand_or_pattern(nodes, a))),
+        _ => res.push(pattern),
+    }
+    res
 }
