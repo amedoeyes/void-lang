@@ -82,12 +82,7 @@ pub fn redundant(
                     Pattern::Or(..) => {
                         let mut new_matrix = prev_matrix.clone();
                         for pat in expand_or_pattern(nodes, pattern) {
-                            let query = [nodes
-                                .kind(pat)
-                                .as_pattern()
-                                .cloned()
-                                .expect("node should be pattern")];
-                            if !is_useful(nodes, type_ctors, &new_matrix, &query) {
+                            if !is_useful(nodes, type_ctors, &new_matrix, &[pat]) {
                                 redundant.push((
                                     PrettyPattern::from_pattern(nodes, pat),
                                     nodes.span(pat),
@@ -97,17 +92,7 @@ pub fn redundant(
                         }
                     }
                     _ => {
-                        let is_useful = is_useful(
-                            nodes,
-                            type_ctors,
-                            &prev_matrix,
-                            &[nodes
-                                .kind(pattern)
-                                .as_pattern()
-                                .cloned()
-                                .expect("node should be pattern")],
-                        );
-                        if !is_useful {
+                        if !is_useful(nodes, type_ctors, &prev_matrix, &[pattern]) {
                             redundant.push((
                                 PrettyPattern::from_pattern(nodes, pattern),
                                 nodes.span(pattern),
@@ -126,7 +111,7 @@ pub fn is_useful(
     nodes: &NodeArena,
     type_ctors: &FxHashMap<String, FxHashMap<String, (usize, usize)>>,
     matrix: &[(Vec<Node>, Node)],
-    query: &[Pattern],
+    query: &[Node],
 ) -> bool {
     if matrix.is_empty() {
         true
@@ -140,7 +125,11 @@ pub fn is_useful(
             .and_then(|(n, _)| type_ctors.get(n))
             .cloned()
             .unwrap_or_default();
-        match &query[0] {
+        match nodes
+            .kind(query[0])
+            .as_pattern()
+            .expect("node should be pattern")
+        {
             Pattern::Wildcard | Pattern::Identifier(..) => {
                 if let (default, _) = default(nodes, matrix)
                     && !default.is_empty()
@@ -150,7 +139,7 @@ pub fn is_useful(
                     let mut res = ctors.is_empty();
                     for (name, (_, arity)) in ctors {
                         let new_matrix = specialize(nodes, matrix, &name, arity);
-                        let new_query = std::iter::repeat(Pattern::Wildcard)
+                        let new_query = std::iter::repeat(nodes.builtins.wildcard)
                             .take(arity)
                             .chain(query[1..].iter().cloned())
                             .collect_vec();
@@ -165,7 +154,7 @@ pub fn is_useful(
             Pattern::Constructor(name, _) => {
                 let (_, arity) = ctors.get(name).copied().unwrap_or_default();
                 let new_matrix = specialize(nodes, matrix, &name, arity);
-                let new_query = std::iter::repeat(Pattern::Wildcard)
+                let new_query = std::iter::repeat(nodes.builtins.wildcard)
                     .take(arity)
                     .chain(query[1..].iter().cloned())
                     .collect_vec();
@@ -175,16 +164,10 @@ pub fn is_useful(
                 let mut res = false;
                 let mut new_matrix = matrix.to_vec();
                 for alt in alts {
-                    let new_query = std::iter::once(
-                        nodes
-                            .kind(*alt)
-                            .as_pattern()
-                            .cloned()
-                            .expect("node should be pattern"),
-                    )
-                    .into_iter()
-                    .chain(query[1..].iter().cloned())
-                    .collect_vec();
+                    let new_query = std::iter::once(*alt)
+                        .into_iter()
+                        .chain(query[1..].iter().cloned())
+                        .collect_vec();
                     if is_useful(nodes, type_ctors, &new_matrix, &new_query) {
                         res = true;
                         break;
