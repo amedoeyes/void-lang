@@ -5,21 +5,30 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
+pub struct BuiltinNodes {
+    pub wildcard: Node,
+}
+
+#[derive(Debug, Clone)]
 pub struct NodeArena {
     kinds: Vec<NodeKind>,
     spans: Vec<Span>,
     types: Vec<Option<Type>>,
     schemes: Vec<Option<TypeScheme>>,
+    pub builtins: BuiltinNodes,
 }
 
 impl NodeArena {
     pub fn new() -> Self {
-        Self {
+        let mut nodes = Self {
             kinds: Vec::new(),
             spans: Vec::new(),
             types: Vec::new(),
             schemes: Vec::new(),
-        }
+            builtins: BuiltinNodes { wildcard: Node(0) },
+        };
+        nodes.builtins.wildcard = nodes.alloc(NodeKind::Pattern(super::pattern::Pattern::Wildcard));
+        nodes
     }
 
     pub fn alloc(&mut self, kind: NodeKind) -> Node {
