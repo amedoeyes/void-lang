@@ -113,6 +113,43 @@ pub fn is_useful(
     matrix: &[(Vec<Node>, Node)],
     query: &[Node],
 ) -> bool {
+    let matrix = matrix
+        .iter()
+        .filter(|(p, _)| {
+            p.len() == query.len() && p.iter().zip(query).all(|(&a, &b)| compatible(nodes, a, b))
+        })
+        .cloned()
+        .collect_vec();
+    let matrix = matrix
+        .iter()
+        .enumerate()
+        .filter(|(i, r_i)| {
+            !matrix.iter().enumerate().any(|(j, r_j)| {
+                *i != j
+                    && r_j
+                        .0
+                        .iter()
+                        .zip(r_i.0.iter())
+                        .all(|(&a, &b)| subsumes(nodes, a, b))
+                    && !r_i
+                        .0
+                        .iter()
+                        .zip(r_j.0.iter())
+                        .all(|(&a, &b)| subsumes(nodes, a, b))
+            })
+        })
+        .map(|(_, r)| r.clone())
+        .collect_vec();
+    let useful = is_useful_inner(nodes, type_ctors, &matrix, query);
+    useful
+}
+
+fn is_useful_inner(
+    nodes: &NodeArena,
+    type_ctors: &FxHashMap<String, FxHashMap<String, (usize, usize)>>,
+    matrix: &[(Vec<Node>, Node)],
+    query: &[Node],
+) -> bool {
     if matrix.is_empty() {
         true
     } else if matrix.iter().any(|(r, _)| r.is_empty()) || query.is_empty() {
@@ -134,7 +171,7 @@ pub fn is_useful(
                 if let (default, _) = default(nodes, matrix)
                     && !default.is_empty()
                 {
-                    is_useful(nodes, type_ctors, &default, &query[1..])
+                    is_useful_inner(nodes, type_ctors, &default, &query[1..])
                 } else {
                     let mut res = ctors.is_empty();
                     for (name, (_, arity)) in ctors {
@@ -143,7 +180,7 @@ pub fn is_useful(
                             .take(arity)
                             .chain(query[1..].iter().cloned())
                             .collect_vec();
-                        if is_useful(nodes, type_ctors, &new_matrix, &new_query) {
+                        if is_useful_inner(nodes, type_ctors, &new_matrix, &new_query) {
                             res = true;
                             break;
                         }
@@ -151,14 +188,15 @@ pub fn is_useful(
                     res
                 }
             }
-            Pattern::Constructor(name, _) => {
+            Pattern::Constructor(name, subpats) => {
                 let (_, arity) = ctors.get(name).copied().unwrap_or_default();
                 let new_matrix = specialize(nodes, matrix, &name, arity);
-                let new_query = std::iter::repeat(nodes.builtins.wildcard)
-                    .take(arity)
-                    .chain(query[1..].iter().cloned())
+                let new_query = subpats
+                    .iter()
+                    .copied()
+                    .chain(query[1..].iter().copied())
                     .collect_vec();
-                is_useful(nodes, type_ctors, &new_matrix, &new_query)
+                is_useful_inner(nodes, type_ctors, &new_matrix, &new_query)
             }
             Pattern::Or(alts) => {
                 let mut res = false;
@@ -168,7 +206,7 @@ pub fn is_useful(
                         .into_iter()
                         .chain(query[1..].iter().cloned())
                         .collect_vec();
-                    if is_useful(nodes, type_ctors, &new_matrix, &new_query) {
+                    if is_useful_inner(nodes, type_ctors, &new_matrix, &new_query) {
                         res = true;
                         break;
                     }
@@ -266,6 +304,57 @@ pub fn specialize(
                 }
             }
         })
+}
+
+fn compatible(nodes: &NodeArena, lhs: Node, rhs: Node) -> bool {
+    let lhs_pat = nodes
+        .kind(lhs)
+        .as_pattern()
+        .expect("node should be pattern");
+    let rhs_pat = nodes
+        .kind(rhs)
+        .as_pattern()
+        .expect("node should be pattern");
+    match (lhs_pat, rhs_pat) {
+        (Pattern::Wildcard, _) | (_, Pattern::Wildcard) => true,
+        (Pattern::Identifier(..), _) | (_, Pattern::Identifier(..)) => true,
+        (Pattern::Constructor(name1, subpats1), Pattern::Constructor(name2, subpats2)) => {
+            name1 == name2
+                && subpats1.len() == subpats2.len()
+                && subpats1
+                    .iter()
+                    .zip(subpats2)
+                    .all(|(&a, &b)| compatible(nodes, a, b))
+        }
+        (Pattern::Or(alts), _) => alts.iter().all(|&alt| compatible(nodes, alt, rhs)),
+        (_, Pattern::Or(alts)) => alts.iter().all(|&alt| compatible(nodes, lhs, alt)),
+    }
+}
+
+fn subsumes(nodes: &NodeArena, lhs: Node, rhs: Node) -> bool {
+    let lhs_pat = nodes
+        .kind(lhs)
+        .as_pattern()
+        .expect("node should be pattern");
+    let rhs_pat = nodes
+        .kind(rhs)
+        .as_pattern()
+        .expect("node should be pattern");
+    match (lhs_pat, rhs_pat) {
+        (Pattern::Wildcard, _) => true,
+        (Pattern::Identifier(..), _) => true,
+        (Pattern::Constructor(name1, subpats1), Pattern::Constructor(name2, subpats2)) => {
+            name1 == name2
+                && subpats1.len() == subpats2.len()
+                && subpats1
+                    .iter()
+                    .zip(subpats2)
+                    .all(|(&a, &b)| subsumes(nodes, a, b))
+        }
+        (Pattern::Or(alts), _) => alts.iter().any(|&alt| subsumes(nodes, alt, rhs)),
+        (_, Pattern::Or(alts)) => alts.iter().all(|&alt| subsumes(nodes, lhs, alt)),
+        _ => false,
+    }
 }
 
 fn expand_or_pattern(nodes: &NodeArena, pattern: Node) -> Vec<Node> {
