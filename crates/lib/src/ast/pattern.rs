@@ -75,6 +75,65 @@ impl Pattern {
         }
         res
     }
+
+    pub fn compatible(&self, nodes: &NodeArena, rhs: &Pattern) -> bool {
+        match (self, rhs) {
+            (Pattern::Wildcard, _) | (_, Pattern::Wildcard) => true,
+            (Pattern::Identifier(..), _) | (_, Pattern::Identifier(..)) => true,
+            (Pattern::Constructor(name1, subpats1), Pattern::Constructor(name2, subpats2)) => {
+                name1 == name2
+                    && subpats1.len() == subpats2.len()
+                    && subpats1
+                        .iter()
+                        .zip(subpats2)
+                        .map(|(&a, &b)| {
+                            (
+                                nodes.kind(a).as_pattern().expect("node should be pattern"),
+                                nodes.kind(b).as_pattern().expect("node should be pattern"),
+                            )
+                        })
+                        .all(|(a, b)| a.compatible(nodes, b))
+            }
+            (Pattern::Or(alts), b) => alts
+                .iter()
+                .map(|&a| nodes.kind(a).as_pattern().expect("node should be pattern"))
+                .any(|a| a.compatible(nodes, b)),
+            (a, Pattern::Or(alts)) => alts
+                .iter()
+                .map(|&b| nodes.kind(b).as_pattern().expect("node should be pattern"))
+                .any(|b| a.compatible(nodes, b)),
+        }
+    }
+
+    pub fn subsumes(&self, nodes: &NodeArena, rhs: &Pattern) -> bool {
+        match (self, rhs) {
+            (Pattern::Wildcard, _) => true,
+            (Pattern::Identifier(..), _) => true,
+            (Pattern::Constructor(name1, subpats1), Pattern::Constructor(name2, subpats2)) => {
+                name1 == name2
+                    && subpats1.len() == subpats2.len()
+                    && subpats1
+                        .iter()
+                        .zip(subpats2)
+                        .map(|(&a, &b)| {
+                            (
+                                nodes.kind(a).as_pattern().expect("node should be pattern"),
+                                nodes.kind(b).as_pattern().expect("node should be pattern"),
+                            )
+                        })
+                        .all(|(a, b)| a.subsumes(nodes, b))
+            }
+            (Pattern::Or(alts), b) => alts
+                .iter()
+                .map(|&a| nodes.kind(a).as_pattern().expect("node should be pattern"))
+                .any(|a| a.subsumes(nodes, b)),
+            (a, Pattern::Or(alts)) => alts
+                .iter()
+                .map(|&b| nodes.kind(b).as_pattern().expect("node should be pattern"))
+                .all(|b| a.subsumes(nodes, b)),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]

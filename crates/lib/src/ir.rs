@@ -1,6 +1,6 @@
 use std::fmt::{self, Display, Formatter};
 
-use fxhash::{FxHashMap, FxHashSet};
+use fxhash::FxHashMap;
 use itertools::Itertools;
 
 use crate::{
@@ -10,7 +10,7 @@ use crate::{
         node::{Node, NodeKind},
         pattern::Pattern,
     },
-    matching,
+    r#match::Match,
 };
 
 #[derive(Debug, Clone)]
@@ -303,16 +303,17 @@ impl<'a> IRGenerator<'a> {
                     out.push(Instruction::MkAp);
                 }
                 Expr::Match(scrutinee, arms) => {
-                    let insts = self.generate_match_matrix(
+                    let type_ctors = self.type_ctors.clone(); // for now
+                    let r#match = Match::new(
+                        self.nodes,
+                        &type_ctors,
                         *scrutinee,
-                        &arms
-                            .iter()
+                        arms.iter()
                             .copied()
                             .map(|(p, b)| (Vec::from([p]), b))
                             .collect_vec(),
-                        offsets.clone(),
-                        Vec::new(),
                     );
+                    let insts = self.generate_match(r#match, offsets.clone(), Vec::new());
                     out.extend(insts);
                 }
                 Expr::Block(nodes) => {
@@ -401,14 +402,13 @@ impl<'a> IRGenerator<'a> {
         }
     }
 
-    fn generate_match_matrix(
+    fn generate_match(
         &mut self,
-        scrutinee: Node,
-        matrix: &[(Vec<Node>, Node)],
+        r#match: Match,
         mut offsets: FxHashMap<String, usize>,
         mut frames: Vec<(usize, usize, usize)>,
     ) -> Vec<Instruction> {
-        if let Some((row, body)) = matrix.first()
+        if let Some((row, body)) = r#match.first()
             && row.is_empty()
         {
             let mut out = Vec::new();
@@ -425,7 +425,7 @@ impl<'a> IRGenerator<'a> {
             }
         } else {
             let mut insts = Vec::new();
-            self.generate_expr(scrutinee, &offsets, &mut insts);
+            self.generate_expr(r#match.scrutinee(), &offsets, &mut insts);
             out.extend(insts);
         }
 
@@ -439,43 +439,26 @@ impl<'a> IRGenerator<'a> {
             *offset += 1
         }
 
-        for id in matching::identifiers(self.nodes, matrix) {
+        for id in r#match.identifiers() {
             offsets.insert(id, 0);
         }
 
-        let default = matching::default(self.nodes, matrix);
+        let default = r#match.default();
         let default = (!default.is_empty()).then(|| {
-            self.generate_match_matrix(scrutinee, &default, offsets.clone(), frames.clone())
+            self.generate_match(default, offsets.clone(), frames.clone())
                 .into_iter()
                 .chain(std::iter::once(Instruction::Slide(1)))
                 .collect()
         });
 
-        let used_ctors = matrix
-            .iter()
-            .flat_map(|(r, _)| {
-                self.nodes
-                    .kind(r[0])
-                    .as_pattern()
-                    .expect("node should be pattern")
-                    .constructors(self.nodes)
-            })
-            .collect::<FxHashSet<_>>();
+        let used_ctors = r#match.used_constructors();
+        let ctors = r#match.constructors();
 
-        let arms = self
-            .nodes
-            .ty(matrix[0].0[0])
-            .expect("pattern must have type")
-            .as_adt()
-            .and_then(|(n, _)| self.type_ctors.get(n))
-            .cloned()
-            .unwrap_or_default()
+        let arms = ctors
             .into_iter()
             .filter(|(n, _)| used_ctors.contains(n.as_str()))
-            .collect::<FxHashMap<_, _>>()
-            .into_iter()
             .map(|(name, (tag, arity))| {
-                let new_matrix = matching::specialize(self.nodes, matrix, &name, arity);
+                let new_match = r#match.specialize(&name, arity);
                 let new_offsets = offsets
                     .iter()
                     .map(|(n, o)| (n.clone(), *o + arity))
@@ -489,12 +472,7 @@ impl<'a> IRGenerator<'a> {
                 (
                     tag,
                     std::iter::once(Instruction::Unpack(arity))
-                        .chain(self.generate_match_matrix(
-                            scrutinee,
-                            &new_matrix,
-                            new_offsets,
-                            new_frames,
-                        ))
+                        .chain(self.generate_match(new_match, new_offsets, new_frames))
                         .chain(std::iter::once(Instruction::Slide(arity + 1)))
                         .collect(),
                 )

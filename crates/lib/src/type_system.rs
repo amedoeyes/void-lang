@@ -14,7 +14,7 @@ use crate::{
         pattern::Pattern,
         type_expr::TypeExpr,
     },
-    matching,
+    r#match::Match,
     scoped::ScopedMap,
     span::Span,
 };
@@ -585,16 +585,17 @@ impl<'a> TypeSystem<'a> {
                 .and_then(|e| e.as_match().map(|(&s, a)| (n, s, a)))
         });
 
-        for (node, _, arms) in matches {
-            let missing = matching::missing(
+        for (node, scrutinee, arms) in matches {
+            let missing = Match::new(
                 self.nodes,
                 &self.type_ctors,
-                &arms
-                    .iter()
+                scrutinee,
+                arms.iter()
                     .copied()
                     .map(|(p, b)| (Vec::from([p]), b))
                     .collect_vec(),
-            );
+            )
+            .missing();
             if !missing.is_empty() {
                 return Err(Error::NonExhaustiveMatch(
                     missing.iter().map(|p| p.to_string()).collect(),
@@ -602,7 +603,7 @@ impl<'a> TypeSystem<'a> {
                 ));
             }
 
-            let redundant = matching::redundant(self.nodes, &self.type_ctors, arms);
+            let redundant = Match::redundant(self.nodes, &self.type_ctors, scrutinee, arms);
             if !redundant.is_empty() {
                 let (pattern, span) = &redundant[0];
                 return Err(Error::RedundantMatchArm(pattern.to_string(), *span));
