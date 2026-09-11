@@ -586,26 +586,23 @@ impl<'a> TypeSystem<'a> {
         });
 
         for (node, _, arms) in matches {
-            let matrix = arms
-                .iter()
-                .copied()
-                .map(|(p, b)| (Vec::from([p]), b))
-                .collect_vec();
-            let width = matrix.first().map(|(r, _)| r.len()).unwrap_or(0);
-            let missing = matching::missing(self.nodes, &self.type_ctors, &matrix, width);
-
+            let missing = matching::missing(
+                self.nodes,
+                &self.type_ctors,
+                &arms
+                    .iter()
+                    .copied()
+                    .map(|(p, b)| (Vec::from([p]), b))
+                    .collect_vec(),
+            );
             if !missing.is_empty() {
                 return Err(Error::NonExhaustiveMatch(
-                    missing
-                        .iter()
-                        .map(|r| r.iter().format(", ").to_string())
-                        .collect(),
+                    missing.iter().map(|p| p.to_string()).collect(),
                     self.nodes.span(node),
                 ));
             }
 
             let redundant = matching::redundant(self.nodes, &self.type_ctors, arms);
-
             if !redundant.is_empty() {
                 let (pattern, span) = &redundant[0];
                 return Err(Error::RedundantMatchArm(pattern.to_string(), *span));

@@ -439,12 +439,11 @@ impl<'a> IRGenerator<'a> {
             *offset += 1
         }
 
-        let (default, bindings) = matching::default(self.nodes, matrix);
-
-        for bind in bindings {
-            offsets.insert(bind, 0);
+        for id in matching::identifiers(self.nodes, matrix) {
+            offsets.insert(id, 0);
         }
 
+        let default = matching::default(self.nodes, matrix);
         let default = (!default.is_empty()).then(|| {
             self.generate_match_matrix(scrutinee, &default, offsets.clone(), frames.clone())
                 .into_iter()

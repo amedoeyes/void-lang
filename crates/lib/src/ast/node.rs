@@ -1,6 +1,6 @@
 use crate::ast::{expr::Expr, pattern::Pattern, type_expr::TypeExpr};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Node(pub usize);
 
 #[derive(Debug, Clone)]
