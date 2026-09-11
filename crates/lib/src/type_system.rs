@@ -14,7 +14,7 @@ use crate::{
         pattern::Pattern,
         type_expr::TypeExpr,
     },
-    r#match::Match,
+    r#match::{Arm, Match},
     scoped::ScopedMap,
     span::Span,
 };
@@ -592,7 +592,7 @@ impl<'a> TypeSystem<'a> {
                 scrutinee,
                 arms.iter()
                     .copied()
-                    .map(|(p, b)| (Vec::from([p]), b))
+                    .map(|(p, b)| Arm::new(Vec::from([p]), b))
                     .collect_vec(),
             )
             .missing();

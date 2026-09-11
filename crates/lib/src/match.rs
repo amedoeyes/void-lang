@@ -12,11 +12,23 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
+pub struct Arm {
+    pub patterns: Vec<Node>,
+    pub body: Node,
+}
+
+impl Arm {
+    pub fn new(patterns: Vec<Node>, body: Node) -> Self {
+        Self { patterns, body }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Match<'a> {
     nodes: &'a NodeArena,
     type_ctors: &'a FxHashMap<String, FxHashMap<String, (usize, usize)>>,
-    scrutinee: Node,
-    arms: Vec<(Vec<Node>, Node)>,
+    pub scrutinee: Node,
+    pub arms: Vec<Arm>,
 }
 
 impl<'a> Match<'a> {
@@ -24,7 +36,7 @@ impl<'a> Match<'a> {
         nodes: &'a NodeArena,
         type_ctors: &'a FxHashMap<String, FxHashMap<String, (usize, usize)>>,
         scrutinee: Node,
-        arms: Vec<(Vec<Node>, Node)>,
+        arms: Vec<Arm>,
     ) -> Self {
         Self {
             nodes,
@@ -39,11 +51,11 @@ impl<'a> Match<'a> {
     }
 
     fn missing_inner(&self, width: usize) -> Vec<Vec<PrettyPattern>> {
-        if self.is_empty() {
+        if self.arms.is_empty() {
             Vec::from([std::iter::repeat(PrettyPattern::Wildcard)
                 .take(width)
                 .collect()])
-        } else if self.iter().any(|(p, _)| p.is_empty()) {
+        } else if self.arms.iter().any(|arm| arm.patterns.is_empty()) {
             Vec::new()
         } else {
             let used_ctors = self.used_constructors();
@@ -98,9 +110,9 @@ impl<'a> Match<'a> {
                             redundant
                                 .push((PrettyPattern::from_pattern(nodes, pat), nodes.span(pat)));
                         }
-                        new_match.push((Vec::from([pat]), body));
+                        new_match.arms.push(Arm::new(Vec::from([pat]), body));
                     }
-                    prev_match.push((Vec::from([(pattern)]), body));
+                    prev_match.arms.push(Arm::new(Vec::from([(pattern)]), body));
                     (redundant, prev_match)
                 },
             )
@@ -114,10 +126,13 @@ impl<'a> Match<'a> {
     fn safeguard(&self, query: &[Node]) -> Self {
         let mut new_match = self.clone();
         new_match.arms = new_match
+            .arms
             .iter()
-            .filter(|(p, _)| {
-                p.len() == query.len()
-                    && p.iter()
+            .filter(|arm| {
+                arm.patterns.len() == query.len()
+                    && arm
+                        .patterns
+                        .iter()
                         .zip(query)
                         .map(|(&a, &b)| {
                             (
@@ -138,15 +153,16 @@ impl<'a> Match<'a> {
             .cloned()
             .collect_vec();
         new_match.arms = new_match
+            .arms
             .iter()
             .enumerate()
             .filter(|(i, r_i)| {
                 !new_match.arms.iter().enumerate().any(|(j, r_j)| {
                     *i != j
                         && r_j
-                            .0
+                            .patterns
                             .iter()
-                            .zip(r_i.0.iter())
+                            .zip(r_i.patterns.iter())
                             .map(|(&a, &b)| {
                                 (
                                     new_match
@@ -163,9 +179,9 @@ impl<'a> Match<'a> {
                             })
                             .all(|(a, b)| a.subsumes(new_match.nodes, b))
                         && !r_i
-                            .0
+                            .patterns
                             .iter()
-                            .zip(r_j.0.iter())
+                            .zip(r_j.patterns.iter())
                             .map(|(&a, &b)| {
                                 (
                                     new_match
@@ -189,9 +205,9 @@ impl<'a> Match<'a> {
     }
 
     fn is_useful_inner(&self, query: &[Node]) -> bool {
-        if self.is_empty() {
+        if self.arms.is_empty() {
             true
-        } else if self.iter().any(|(p, _)| p.is_empty()) || query.is_empty() {
+        } else if self.arms.iter().any(|arm| arm.patterns.is_empty()) || query.is_empty() {
             false
         } else {
             let used_ctors = self.used_constructors();
@@ -243,9 +259,9 @@ impl<'a> Match<'a> {
                         }
                         let new_row = std::iter::once(*alt)
                             .into_iter()
-                            .chain(self.arms[0].0[1..].iter().copied())
+                            .chain(self.arms[0].patterns[1..].iter().copied())
                             .collect_vec();
-                        new_match.push((new_row, self.arms[0].1))
+                        new_match.arms.push(Arm::new(new_row, self.arms[0].body))
                     }
                     res
                 }
@@ -261,8 +277,9 @@ impl<'a> Match<'a> {
     }
 
     pub fn used_constructors(&self) -> FxHashSet<&'a str> {
-        self.iter()
-            .filter_map(|(p, _)| p.first().copied())
+        self.arms
+            .iter()
+            .filter_map(|arm| arm.patterns.first().copied())
             .flat_map(|p| self.expand_pattern(p))
             .flat_map(|p| {
                 self.nodes
@@ -276,8 +293,9 @@ impl<'a> Match<'a> {
 
     pub fn identifiers(&self) -> FxHashSet<String> {
         self.expand()
+            .arms
             .into_iter()
-            .filter_map(|(p, _)| p.first().copied())
+            .filter_map(|arm| arm.patterns.first().copied())
             .filter_map(|p| {
                 self.nodes
                     .kind(p)
@@ -289,8 +307,9 @@ impl<'a> Match<'a> {
     }
 
     pub fn ty(&self) -> &Type {
-        self.first()
-            .and_then(|(p, _)| p.first().copied())
+        self.arms
+            .first()
+            .and_then(|arm| arm.patterns.first().copied())
             .and_then(|p| self.nodes.ty(p))
             .expect("node should have type")
     }
@@ -301,16 +320,21 @@ impl<'a> Match<'a> {
             self.type_ctors,
             self.scrutinee,
             self.expand()
+                .arms
                 .into_iter()
-                .filter_map(|(p, b)| p.split_first().map(|(f, r)| ((*f, r.to_vec()), b)))
-                .filter_map(|((f, r), b)| {
-                    self.nodes
-                        .kind(f)
-                        .as_pattern()
-                        .map(|p| ((p, r.to_vec()), b))
+                .filter_map(|arm| {
+                    arm.patterns
+                        .split_first()
+                        .map(|(first, rest)| ((*first, rest.to_vec()), arm.body))
                 })
-                .filter(|((f, _), _)| f.is_wildcard() || f.is_identifer())
-                .map(|((_, r), b)| (r, b))
+                .filter_map(|((first, rest), body)| {
+                    self.nodes
+                        .kind(first)
+                        .as_pattern()
+                        .map(|p| ((p, rest.to_vec()), body))
+                })
+                .filter(|((first, _), _)| first.is_wildcard() || first.is_identifer())
+                .map(|((_, rest), body)| Arm::new(rest, body))
                 .collect(),
         )
     }
@@ -321,17 +345,28 @@ impl<'a> Match<'a> {
             self.type_ctors,
             self.scrutinee,
             self.expand()
+                .arms
                 .into_iter()
-                .filter_map(|(p, b)| p.split_first().map(|(f, r)| ((*f, r.to_vec()), b)))
-                .filter_map(|((f, r), b)| self.nodes.kind(f).as_pattern().map(|p| (((f, p), r), b)))
+                .filter_map(|arm| {
+                    arm.patterns
+                        .split_first()
+                        .map(|(first, rest)| ((*first, rest.to_vec()), arm.body))
+                })
+                .filter_map(|((first, rest), body)| {
+                    self.nodes
+                        .kind(first)
+                        .as_pattern()
+                        .map(|p| (((first, p), rest), body))
+                })
                 .filter_map(|(((node, first), rest), body)| match first {
-                    Pattern::Wildcard | Pattern::Identifier(..) => Some((
+                    Pattern::Wildcard | Pattern::Identifier(..) => Some(Arm::new(
                         std::iter::repeat(node).take(arity).chain(rest).collect(),
                         body,
                     )),
-                    Pattern::Constructor(name, subpats) if name == ctor => {
-                        Some((subpats.iter().copied().chain(rest).collect(), body))
-                    }
+                    Pattern::Constructor(name, subpats) if name == ctor => Some(Arm::new(
+                        subpats.iter().copied().chain(rest).collect(),
+                        body,
+                    )),
                     _ => None,
                 })
                 .collect(),
@@ -343,13 +378,14 @@ impl<'a> Match<'a> {
             self.nodes,
             self.type_ctors,
             self.scrutinee,
-            self.iter()
-                .filter_map(|(p, b)| p.split_first().map(|p| (p, b)))
-                .flat_map(|((f, r), b)| {
-                    self.expand_pattern(*f)
+            self.arms
+                .iter()
+                .filter_map(|arm| arm.patterns.split_first().map(|p| (p, arm.body)))
+                .flat_map(|((first, rest), body)| {
+                    self.expand_pattern(*first)
                         .iter()
-                        .map(|&n| std::iter::once(n).chain(r.iter().copied()).collect_vec())
-                        .map(|p| (p, *b))
+                        .map(|&n| std::iter::once(n).chain(rest.iter().copied()).collect_vec())
+                        .map(|p| Arm::new(p, body))
                         .collect_vec()
                 })
                 .collect(),
@@ -365,29 +401,5 @@ impl<'a> Match<'a> {
             _ => res.push(pattern),
         }
         res
-    }
-
-    pub fn scrutinee(&self) -> Node {
-        self.scrutinee
-    }
-
-    pub fn iter(&self) -> impl Iterator<Item = &(Vec<Node>, Node)> {
-        self.arms.iter()
-    }
-
-    pub fn into_iter(self) -> impl Iterator<Item = (Vec<Node>, Node)> {
-        self.arms.into_iter()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.arms.is_empty()
-    }
-
-    pub fn push(&mut self, row: (Vec<Node>, Node)) {
-        self.arms.push(row)
-    }
-
-    pub fn first(&self) -> Option<&(Vec<Node>, Node)> {
-        self.arms.first()
     }
 }

@@ -10,7 +10,7 @@ use crate::{
         node::{Node, NodeKind},
         pattern::Pattern,
     },
-    r#match::Match,
+    r#match::{Arm, Match},
 };
 
 #[derive(Debug, Clone)]
@@ -310,7 +310,7 @@ impl<'a> IRGenerator<'a> {
                         *scrutinee,
                         arms.iter()
                             .copied()
-                            .map(|(p, b)| (Vec::from([p]), b))
+                            .map(|(p, b)| Arm::new(Vec::from([p]), b))
                             .collect_vec(),
                     );
                     let insts = self.generate_match(r#match, offsets.clone(), Vec::new());
@@ -408,8 +408,8 @@ impl<'a> IRGenerator<'a> {
         mut offsets: FxHashMap<String, usize>,
         mut frames: Vec<(usize, usize, usize)>,
     ) -> Vec<Instruction> {
-        if let Some((row, body)) = r#match.first()
-            && row.is_empty()
+        if let Some(Arm { patterns, body }) = r#match.arms.first()
+            && patterns.is_empty()
         {
             let mut out = Vec::new();
             self.generate_expr(*body, &offsets, &mut out);
@@ -425,7 +425,7 @@ impl<'a> IRGenerator<'a> {
             }
         } else {
             let mut insts = Vec::new();
-            self.generate_expr(r#match.scrutinee(), &offsets, &mut insts);
+            self.generate_expr(r#match.scrutinee, &offsets, &mut insts);
             out.extend(insts);
         }
 
@@ -444,7 +444,7 @@ impl<'a> IRGenerator<'a> {
         }
 
         let default = r#match.default();
-        let default = (!default.is_empty()).then(|| {
+        let default = (!default.arms.is_empty()).then(|| {
             self.generate_match(default, offsets.clone(), frames.clone())
                 .into_iter()
                 .chain(std::iter::once(Instruction::Slide(1)))
